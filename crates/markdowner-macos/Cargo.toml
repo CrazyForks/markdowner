@@ -1,0 +1,7 @@
+[package]
+name = "markdowner-macos"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+markdowner-core = { path = "../markdowner-core" }
