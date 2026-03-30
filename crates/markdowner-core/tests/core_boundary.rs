@@ -160,6 +160,39 @@ fn workspace_projects_preview_mode_as_a_styled_read_only_view() {
 }
 
 #[test]
+fn workspace_theme_changes_immediately_update_document_views_without_mutating_source() {
+    let mut workspace = WorkspaceState::default();
+    let path = PathBuf::from("/tmp/theme.md");
+    let source = "```rust\nfn main() {}\n```";
+    workspace.open_document_from_source(path, source);
+
+    let light_wysiwyg = workspace.active_wysiwyg_view().unwrap();
+    let light_code_background = light_wysiwyg[0]
+        .code_block_style()
+        .unwrap()
+        .background()
+        .to_string();
+
+    workspace.set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let dark_wysiwyg = workspace.active_wysiwyg_view().unwrap();
+
+    assert_eq!(workspace.active_document().unwrap().source(), source);
+    assert_eq!(
+        dark_wysiwyg[0].code_block_style().unwrap().background(),
+        "#21252b"
+    );
+    assert_ne!(
+        dark_wysiwyg[0].code_block_style().unwrap().background(),
+        light_code_background
+    );
+
+    workspace.set_mode(EditorMode::Preview);
+    let dark_preview = workspace.active_preview_document().unwrap();
+    assert_eq!(dark_preview.theme().palette().background(), "#14161a");
+    assert_eq!(workspace.active_document().unwrap().source(), source);
+}
+
+#[test]
 fn theme_application_highlights_known_code_fences_and_falls_back_to_plain_style() {
     let document = Document::new(vec![
         Block::CodeFence {
@@ -231,6 +264,8 @@ fn runtime_uses_platform_adapter_boundary_for_native_capabilities() {
             MenuItem::new("mode-wysiwyg", "WYSIWYG"),
             MenuItem::new("mode-source", "Source"),
             MenuItem::new("mode-preview", "Preview"),
+            MenuItem::new("theme-light", "Light Theme"),
+            MenuItem::new("theme-dark", "Dark Theme"),
         ])]
     );
     assert_eq!(
@@ -654,6 +689,23 @@ fn runtime_restores_last_editor_mode_across_relaunches() {
     second_runtime.restore_session().unwrap();
 
     assert_eq!(second_runtime.workspace().mode(), EditorMode::Preview);
+}
+
+#[test]
+fn runtime_restores_last_theme_across_relaunches() {
+    let temp = tempdir().unwrap();
+    let session_path = temp.path().join("session.json");
+
+    let mut first_runtime = EditorRuntime::default().with_session_store(session_path.clone());
+    first_runtime.set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+
+    let mut second_runtime = EditorRuntime::default().with_session_store(session_path);
+    second_runtime.restore_session().unwrap();
+
+    assert_eq!(
+        second_runtime.workspace().theme(),
+        &ThemeSelection::new(ThemeKind::BuiltInDark, None)
+    );
 }
 
 #[test]

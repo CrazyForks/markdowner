@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{Block, Document};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,16 +81,17 @@ impl StyledCodeBlock {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeKind {
     BuiltInLight,
     BuiltInDark,
     CustomCss,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemeSelection {
     kind: ThemeKind,
+    #[serde(default)]
     stylesheet: Option<String>,
 }
 

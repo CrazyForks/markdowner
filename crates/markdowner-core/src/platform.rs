@@ -163,6 +163,8 @@ impl EditorRuntime {
             MenuItem::new("mode-wysiwyg", "WYSIWYG"),
             MenuItem::new("mode-source", "Source"),
             MenuItem::new("mode-preview", "Preview"),
+            MenuItem::new("theme-light", "Light Theme"),
+            MenuItem::new("theme-dark", "Dark Theme"),
         ]));
     }
 
@@ -178,6 +180,7 @@ impl EditorRuntime {
         self.workspace
             .restore_recent_documents(session.recent_documents);
         self.workspace.set_mode(session.mode);
+        self.workspace.set_theme(session.theme);
         self.workspace.clear_error();
         Ok(())
     }
@@ -191,6 +194,7 @@ impl EditorRuntime {
             &session_store,
             self.workspace.recent_documents(),
             self.workspace.mode(),
+            self.workspace.theme(),
         ) {
             Ok(()) => {
                 self.workspace.clear_error();
@@ -343,6 +347,7 @@ impl EditorRuntime {
 
     pub fn set_theme(&mut self, theme: crate::ThemeSelection) {
         self.workspace.set_theme(theme);
+        let _ = self.persist_session();
     }
 
     pub fn open_workspace_via(

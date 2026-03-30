@@ -7,7 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{EditorMode, platform::RuntimeError};
+use crate::{EditorMode, ThemeSelection, platform::RuntimeError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 struct SerializedWorkspaceSession {
@@ -15,12 +15,15 @@ struct SerializedWorkspaceSession {
     recent_documents: Vec<String>,
     #[serde(default)]
     mode: EditorMode,
+    #[serde(default)]
+    theme: ThemeSelection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct WorkspaceSession {
     pub(crate) recent_documents: Vec<PathBuf>,
     pub(crate) mode: EditorMode,
+    pub(crate) theme: ThemeSelection,
 }
 
 pub(crate) fn list_markdown_files(root: &Path) -> Result<Vec<PathBuf>, RuntimeError> {
@@ -56,6 +59,7 @@ pub(crate) fn load_workspace_session(path: &Path) -> Result<WorkspaceSession, Ru
             .map(PathBuf::from)
             .collect(),
         mode: session.mode,
+        theme: session.theme,
     })
 }
 
@@ -63,6 +67,7 @@ pub(crate) fn persist_workspace_session(
     path: &Path,
     recent_documents: &[PathBuf],
     mode: EditorMode,
+    theme: &ThemeSelection,
 ) -> Result<(), RuntimeError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -79,6 +84,7 @@ pub(crate) fn persist_workspace_session(
             .map(|path| path.to_string_lossy().into_owned())
             .collect(),
         mode,
+        theme: theme.clone(),
     };
     let payload = serde_json::to_string_pretty(&session).map_err(|error| {
         RuntimeError::new(format!(

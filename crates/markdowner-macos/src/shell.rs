@@ -226,6 +226,8 @@ mod tests {
                 "mode-wysiwyg".to_string(),
                 "mode-source".to_string(),
                 "mode-preview".to_string(),
+                "theme-light".to_string(),
+                "theme-dark".to_string(),
             ]
         );
     }
@@ -248,6 +250,8 @@ mod tests {
                 "mode-wysiwyg".to_string(),
                 "mode-source".to_string(),
                 "mode-preview".to_string(),
+                "theme-light".to_string(),
+                "theme-dark".to_string(),
             ]
         );
     }
@@ -478,7 +482,15 @@ mod tests {
 
     #[test]
     fn automated_ui_smoke_validates_toggling_modes_and_applying_themes() {
-        let mut shell = MacShell::new(WorkspaceState::default());
+        let temp = tempdir().unwrap();
+        let document_path = temp.path().join("theme-smoke.md");
+        fs::write(&document_path, "```rust\nfn main() {}\n```").unwrap();
+
+        let adapter =
+            MacPlatformAdapter::new().with_next_file_selection(Some(document_path.clone()));
+        let runtime = EditorRuntime::default();
+        let mut shell = MacShell::with_adapter(runtime, adapter);
+        shell.request_document_open().unwrap();
 
         shell.set_mode(EditorMode::Source);
         assert_eq!(shell.workspace().mode(), EditorMode::Source);
@@ -488,17 +500,31 @@ mod tests {
 
         shell.set_mode(EditorMode::Wysiwyg);
         shell.set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
-        let built_in = apply_theme(&Document::default(), shell.workspace().theme());
+        let built_in = apply_theme(
+            shell.workspace().active_document().unwrap().document(),
+            shell.workspace().theme(),
+        );
         assert_eq!(built_in.theme().palette().background(), "#14161a");
+        assert_eq!(
+            shell.workspace().active_document().unwrap().source(),
+            "```rust\nfn main() {}\n```"
+        );
 
         shell.set_theme(ThemeSelection::new(
             ThemeKind::CustomCss,
             Some("body { color: tomato; }".to_string()),
         ));
-        let imported = apply_theme(&Document::default(), shell.workspace().theme());
+        let imported = apply_theme(
+            shell.workspace().active_document().unwrap().document(),
+            shell.workspace().theme(),
+        );
         assert_eq!(
             imported.theme().stylesheet(),
             Some("body { color: tomato; }")
+        );
+        assert_eq!(
+            shell.workspace().active_document().unwrap().source(),
+            "```rust\nfn main() {}\n```"
         );
     }
 
@@ -516,6 +542,25 @@ mod tests {
         second_shell.restore_session().unwrap();
 
         assert_eq!(second_shell.workspace().mode(), EditorMode::Preview);
+    }
+
+    #[test]
+    fn automated_ui_smoke_restores_last_used_theme_after_relaunch() {
+        let temp = tempdir().unwrap();
+        let session_path = temp.path().join("session.json");
+
+        let mut first_shell =
+            MacShell::new(WorkspaceState::default()).with_session_store_path(session_path.clone());
+        first_shell.set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+
+        let mut second_shell =
+            MacShell::new(WorkspaceState::default()).with_session_store_path(session_path);
+        second_shell.restore_session().unwrap();
+
+        assert_eq!(
+            second_shell.workspace().theme(),
+            &ThemeSelection::new(ThemeKind::BuiltInDark, None)
+        );
     }
 
     #[test]
