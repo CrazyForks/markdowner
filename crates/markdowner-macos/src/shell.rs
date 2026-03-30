@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use markdowner_core::{
-    Document, EditorMode, EditorRuntime, FileDialogOptions, MenuDescriptor, PlatformAdapter,
-    RuntimeError, ThemeSelection, WindowDescriptor, WorkspaceState,
+    Document, EditorMode, EditorRuntime, FileDialogOptions, InlineRevealSelection, MenuDescriptor,
+    PlatformAdapter, RuntimeError, ThemeSelection, WindowDescriptor, WorkspaceState,
 };
 
 use crate::appkit_bridge::AppKitBridge;
@@ -120,6 +120,26 @@ impl MacShell {
         self.runtime.replace_active_document_source(source)
     }
 
+    pub fn activate_inline_reveal(
+        &mut self,
+        selection: InlineRevealSelection,
+    ) -> Result<(), RuntimeError> {
+        self.runtime.activate_inline_reveal(selection)
+    }
+
+    pub fn deactivate_inline_reveal(&mut self) -> Result<(), RuntimeError> {
+        self.runtime.deactivate_inline_reveal()
+    }
+
+    pub fn edit_active_inline_reveal_source(
+        &mut self,
+        source: impl Into<String>,
+        cursor_offset: usize,
+    ) -> Result<(), RuntimeError> {
+        self.runtime
+            .edit_active_inline_reveal_source(source, cursor_offset)
+    }
+
     pub fn set_mode(&mut self, mode: EditorMode) {
         self.runtime.set_mode(mode);
     }
@@ -138,8 +158,8 @@ mod tests {
     use std::fs;
 
     use markdowner_core::{
-        Block, Document, EditorMode, Inline, ThemeKind, ThemeSelection, WorkspaceState,
-        apply_theme, parse_markdown,
+        Block, Document, EditorMode, Inline, InlineRevealRange, InlineRevealSelection, ThemeKind,
+        ThemeSelection, WorkspaceState, WysiwygBlockPresentation, apply_theme, parse_markdown,
     };
     use tempfile::tempdir;
 
@@ -404,6 +424,60 @@ mod tests {
         assert_eq!(
             imported.theme().stylesheet(),
             Some("body { color: tomato; }")
+        );
+    }
+
+    #[test]
+    fn automated_ui_smoke_validates_inline_reveal_editing_in_wysiwyg() {
+        let temp = tempdir().unwrap();
+        let document_path = temp.path().join("inline-reveal.md");
+        fs::write(
+            &document_path,
+            "# Title\n\nParagraph with **bold** and ~~strike~~",
+        )
+        .unwrap();
+
+        let adapter =
+            MacPlatformAdapter::new().with_next_file_selection(Some(document_path.clone()));
+        let runtime = EditorRuntime::default();
+        let mut shell = MacShell::with_adapter(runtime, adapter);
+        shell.request_document_open().unwrap();
+
+        let selection = InlineRevealSelection::new(1, Some(InlineRevealRange::new(15, 23)), 19);
+        shell.activate_inline_reveal(selection.clone()).unwrap();
+
+        let revealed = shell.workspace().active_wysiwyg_view().unwrap();
+        assert!(matches!(
+            revealed[1].presentation(),
+            WysiwygBlockPresentation::Editing {
+                source,
+                selection: active_selection,
+            } if source == "Paragraph with **bold** and ~~strike~~"
+                && active_selection == &selection
+        ));
+
+        shell
+            .edit_active_inline_reveal_source("Paragraph with **bolder** and ~~strike~~", 21)
+            .unwrap();
+        shell.deactivate_inline_reveal().unwrap();
+
+        let hidden = shell.workspace().active_wysiwyg_view().unwrap();
+        assert!(matches!(
+            hidden[1].presentation(),
+            WysiwygBlockPresentation::RawFallback(source)
+                if source == "Paragraph with **bolder** and ~~strike~~"
+        ));
+        assert_eq!(
+            shell.workspace().active_document().unwrap().source(),
+            "# Title\n\nParagraph with **bolder** and ~~strike~~"
+        );
+        assert_eq!(
+            shell.workspace().last_inline_reveal_selection(),
+            Some(&InlineRevealSelection::new(
+                1,
+                Some(InlineRevealRange::new(15, 23)),
+                21,
+            ))
         );
     }
 }

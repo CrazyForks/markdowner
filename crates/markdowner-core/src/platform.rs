@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    Document, WorkspaceState,
+    Document, InlineRevealSelection, WorkspaceState,
     storage::{
         list_markdown_files, load_recent_documents, persist_recent_documents, read_document_source,
         write_document_source,
@@ -254,6 +254,46 @@ impl EditorRuntime {
         } else {
             self.fail(RuntimeError::new(
                 "Could not edit document source because no document is open",
+            ))
+        }
+    }
+
+    pub fn activate_inline_reveal(
+        &mut self,
+        selection: InlineRevealSelection,
+    ) -> Result<(), RuntimeError> {
+        if self.workspace.activate_inline_reveal(selection) {
+            Ok(())
+        } else {
+            self.fail(RuntimeError::new(
+                "Could not activate inline reveal because the target block is unavailable",
+            ))
+        }
+    }
+
+    pub fn deactivate_inline_reveal(&mut self) -> Result<(), RuntimeError> {
+        if self.workspace.deactivate_inline_reveal() {
+            Ok(())
+        } else {
+            self.fail(RuntimeError::new(
+                "Could not deactivate inline reveal because no reveal is active",
+            ))
+        }
+    }
+
+    pub fn edit_active_inline_reveal_source(
+        &mut self,
+        source: impl Into<String>,
+        cursor_offset: usize,
+    ) -> Result<(), RuntimeError> {
+        if self
+            .workspace
+            .edit_active_inline_reveal_source(source, cursor_offset)
+        {
+            Ok(())
+        } else {
+            self.fail(RuntimeError::new(
+                "Could not edit inline reveal because no reveal is active",
             ))
         }
     }

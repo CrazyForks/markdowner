@@ -1,9 +1,10 @@
 use std::{fs, path::PathBuf};
 
 use markdowner_core::{
-    Block, Document, EditorMode, EditorRuntime, FileDialogOptions, Inline, MenuDescriptor,
-    MenuItem, PlatformAdapter, ThemeKind, ThemeSelection, WindowDescriptor, WorkspaceState,
-    apply_theme, parse_markdown, serialize_markdown,
+    Block, Document, EditorMode, EditorRuntime, FileDialogOptions, Inline, InlineRevealRange,
+    InlineRevealSelection, MenuDescriptor, MenuItem, PlatformAdapter, ThemeKind, ThemeSelection,
+    WindowDescriptor, WorkspaceState, WysiwygBlockPresentation, apply_theme, parse_markdown,
+    serialize_markdown,
 };
 use tempfile::tempdir;
 
@@ -247,6 +248,108 @@ fn runtime_reparses_source_edits_for_rendered_modes() {
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         source
+    );
+}
+
+#[test]
+fn runtime_projects_inline_reveal_only_around_the_active_edit_area() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("inline-reveal.md");
+    fs::write(
+        &document_path,
+        "# Title\n\nParagraph with **bold** and `code`",
+    )
+    .unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime.open_document(&document_path).unwrap();
+
+    let rendered = runtime.workspace().active_wysiwyg_view().unwrap();
+    assert!(matches!(
+        rendered[0].presentation(),
+        WysiwygBlockPresentation::Rendered(Block::Heading { .. })
+    ));
+    assert!(matches!(
+        rendered[1].presentation(),
+        WysiwygBlockPresentation::Rendered(Block::Paragraph(_))
+    ));
+
+    let selection = InlineRevealSelection::new(1, Some(InlineRevealRange::new(15, 23)), 19);
+    runtime.activate_inline_reveal(selection.clone()).unwrap();
+
+    let revealed = runtime.workspace().active_wysiwyg_view().unwrap();
+    assert!(matches!(
+        revealed[0].presentation(),
+        WysiwygBlockPresentation::Rendered(Block::Heading { .. })
+    ));
+    assert!(matches!(
+        revealed[1].presentation(),
+        WysiwygBlockPresentation::Editing {
+            source,
+            selection: active_selection,
+        } if source == "Paragraph with **bold** and `code`" && active_selection == &selection
+    ));
+
+    runtime.deactivate_inline_reveal().unwrap();
+
+    let hidden = runtime.workspace().active_wysiwyg_view().unwrap();
+    assert!(matches!(
+        hidden[1].presentation(),
+        WysiwygBlockPresentation::Rendered(Block::Paragraph(_))
+    ));
+    assert_eq!(
+        runtime.workspace().last_inline_reveal_selection(),
+        Some(&selection)
+    );
+}
+
+#[test]
+fn runtime_preserves_cursor_and_raw_fallback_during_inline_reveal_edits() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("inline-fallback.md");
+    fs::write(&document_path, "Paragraph with **bold** and ~~strike~~").unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime.open_document(&document_path).unwrap();
+
+    runtime
+        .activate_inline_reveal(InlineRevealSelection::new(
+            0,
+            Some(InlineRevealRange::new(15, 23)),
+            19,
+        ))
+        .unwrap();
+    runtime
+        .edit_active_inline_reveal_source("Paragraph with **bolder** and ~~strike~~", 21)
+        .unwrap();
+
+    let editing = runtime.workspace().active_wysiwyg_view().unwrap();
+    assert!(matches!(
+        editing[0].presentation(),
+        WysiwygBlockPresentation::Editing { source, selection }
+            if source == "Paragraph with **bolder** and ~~strike~~"
+                && selection.cursor_offset() == 21
+    ));
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "Paragraph with **bolder** and ~~strike~~"
+    );
+
+    runtime.deactivate_inline_reveal().unwrap();
+
+    let fallback = runtime.workspace().active_wysiwyg_view().unwrap();
+    assert!(matches!(
+        fallback[0].presentation(),
+        WysiwygBlockPresentation::RawFallback(source)
+            if source == "Paragraph with **bolder** and ~~strike~~"
+    ));
+    assert_eq!(
+        runtime
+            .workspace()
+            .last_inline_reveal_selection()
+            .unwrap()
+            .cursor_offset(),
+        21
     );
 }
 

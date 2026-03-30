@@ -14,4 +14,7 @@ pub use platform::{
 pub use theme::{
     AppliedTheme, StyledDocument, ThemeKind, ThemePalette, ThemeSelection, apply_theme,
 };
-pub use workspace::{EditorMode, OpenDocument, WorkspaceState};
+pub use workspace::{
+    EditorMode, InlineRevealRange, InlineRevealSelection, OpenDocument, WorkspaceState,
+    WysiwygBlockPresentation, WysiwygBlockView,
+};

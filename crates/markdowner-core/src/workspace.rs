@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use crate::{Document, ThemeSelection, parse_markdown, serialize_markdown};
+use crate::{
+    Block, Document, ThemeSelection,
+    markdown::{serialize_block, split_markdown_blocks},
+    parse_markdown, serialize_markdown,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EditorMode {
@@ -16,6 +20,8 @@ pub struct OpenDocument {
     document: Document,
     source: String,
     dirty: bool,
+    inline_reveal_selection: Option<InlineRevealSelection>,
+    last_inline_reveal_selection: Option<InlineRevealSelection>,
 }
 
 impl OpenDocument {
@@ -26,17 +32,21 @@ impl OpenDocument {
             document,
             source,
             dirty: false,
+            inline_reveal_selection: None,
+            last_inline_reveal_selection: None,
         }
     }
 
     pub fn from_source(path: PathBuf, source: impl Into<String>) -> Self {
-        let source = source.into();
+        let source = normalize_source(source.into());
         let document = parse_markdown(&source);
         Self {
             path,
             document,
             source,
             dirty: false,
+            inline_reveal_selection: None,
+            last_inline_reveal_selection: None,
         }
     }
 
@@ -56,17 +66,121 @@ impl OpenDocument {
         self.dirty
     }
 
+    pub fn active_wysiwyg_view(&self) -> Vec<WysiwygBlockView> {
+        let source_blocks = split_markdown_blocks(&self.source);
+        let rendered_blocks = self.document.blocks();
+        let len = source_blocks.len().max(rendered_blocks.len());
+
+        (0..len)
+            .map(|block_index| {
+                let presentation = if self
+                    .inline_reveal_selection
+                    .as_ref()
+                    .is_some_and(|selection| selection.block_index() == block_index)
+                {
+                    WysiwygBlockPresentation::Editing {
+                        source: source_blocks
+                            .get(block_index)
+                            .cloned()
+                            .or_else(|| rendered_blocks.get(block_index).map(serialize_block))
+                            .unwrap_or_default(),
+                        selection: self
+                            .inline_reveal_selection
+                            .clone()
+                            .expect("checked by is_some_and"),
+                    }
+                } else if let Some(source_block) = source_blocks.get(block_index) {
+                    if let Some(rendered_block) = rendered_blocks.get(block_index) {
+                        if requires_raw_fallback(source_block, rendered_block) {
+                            WysiwygBlockPresentation::RawFallback(source_block.clone())
+                        } else {
+                            WysiwygBlockPresentation::Rendered(rendered_block.clone())
+                        }
+                    } else {
+                        WysiwygBlockPresentation::RawFallback(source_block.clone())
+                    }
+                } else {
+                    WysiwygBlockPresentation::Rendered(
+                        rendered_blocks
+                            .get(block_index)
+                            .expect("len derived from rendered blocks")
+                            .clone(),
+                    )
+                };
+
+                WysiwygBlockView::new(block_index, presentation)
+            })
+            .collect()
+    }
+
+    pub fn inline_reveal_selection(&self) -> Option<&InlineRevealSelection> {
+        self.inline_reveal_selection.as_ref()
+    }
+
+    pub fn last_inline_reveal_selection(&self) -> Option<&InlineRevealSelection> {
+        self.last_inline_reveal_selection.as_ref()
+    }
+
     fn replace_document(&mut self, document: Document) {
         self.source = serialize_markdown(&document);
         self.document = document;
         self.dirty = true;
+        self.inline_reveal_selection = None;
+        self.last_inline_reveal_selection = None;
     }
 
     fn replace_source(&mut self, source: impl Into<String>) {
-        let source = source.into();
+        let source = normalize_source(source.into());
         self.document = parse_markdown(&source);
         self.source = source;
         self.dirty = true;
+        self.inline_reveal_selection = None;
+        self.last_inline_reveal_selection = None;
+    }
+
+    fn activate_inline_reveal(&mut self, selection: InlineRevealSelection) -> bool {
+        let source_blocks = split_markdown_blocks(&self.source);
+        let Some(source_block) = source_blocks.get(selection.block_index()) else {
+            return false;
+        };
+
+        let selection = selection.clamp_to_block(source_block.len());
+        self.last_inline_reveal_selection = Some(selection.clone());
+        self.inline_reveal_selection = Some(selection);
+        true
+    }
+
+    fn deactivate_inline_reveal(&mut self) -> bool {
+        let Some(selection) = self.inline_reveal_selection.take() else {
+            return false;
+        };
+
+        self.last_inline_reveal_selection = Some(selection);
+        true
+    }
+
+    fn edit_active_inline_reveal_source(
+        &mut self,
+        source: impl Into<String>,
+        cursor_offset: usize,
+    ) -> bool {
+        let Some(selection) = self.inline_reveal_selection.clone() else {
+            return false;
+        };
+        let mut source_blocks = split_markdown_blocks(&self.source);
+        let Some(existing_block) = source_blocks.get_mut(selection.block_index()) else {
+            return false;
+        };
+
+        let replacement = normalize_source(source.into());
+        *existing_block = replacement.clone();
+        let replacement_len = replacement.len();
+        let replacement_selection = selection.with_cursor_offset(cursor_offset, replacement_len);
+
+        self.replace_source(source_blocks.join("\n\n"));
+        self.inline_reveal_selection = Some(replacement_selection.clone());
+        self.last_inline_reveal_selection = Some(replacement_selection);
+        true
     }
 
     fn mark_saved(&mut self) {
@@ -153,6 +267,18 @@ impl WorkspaceState {
             .find(|document| document.path() == active_document.as_path())
     }
 
+    pub fn active_wysiwyg_view(&self) -> Option<Vec<WysiwygBlockView>> {
+        Some(self.active_document()?.active_wysiwyg_view())
+    }
+
+    pub fn active_inline_reveal_selection(&self) -> Option<&InlineRevealSelection> {
+        self.active_document()?.inline_reveal_selection()
+    }
+
+    pub fn last_inline_reveal_selection(&self) -> Option<&InlineRevealSelection> {
+        self.active_document()?.last_inline_reveal_selection()
+    }
+
     pub fn set_mode(&mut self, mode: EditorMode) {
         self.mode = mode;
     }
@@ -208,6 +334,49 @@ impl WorkspaceState {
         true
     }
 
+    pub fn activate_inline_reveal(&mut self, selection: InlineRevealSelection) -> bool {
+        let Some(active_document) = self.active_document_mut() else {
+            return false;
+        };
+
+        if !active_document.activate_inline_reveal(selection) {
+            return false;
+        }
+
+        self.clear_error();
+        true
+    }
+
+    pub fn deactivate_inline_reveal(&mut self) -> bool {
+        let Some(active_document) = self.active_document_mut() else {
+            return false;
+        };
+
+        if !active_document.deactivate_inline_reveal() {
+            return false;
+        }
+
+        self.clear_error();
+        true
+    }
+
+    pub fn edit_active_inline_reveal_source(
+        &mut self,
+        source: impl Into<String>,
+        cursor_offset: usize,
+    ) -> bool {
+        let Some(active_document) = self.active_document_mut() else {
+            return false;
+        };
+
+        if !active_document.edit_active_inline_reveal_source(source, cursor_offset) {
+            return false;
+        }
+
+        self.clear_error();
+        true
+    }
+
     pub fn mark_active_document_saved(&mut self) -> bool {
         let Some(active_document) = self.active_document_mut() else {
             return false;
@@ -252,4 +421,153 @@ impl WorkspaceState {
 
         self.active_document = Some(active_path);
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineRevealRange {
+    start: usize,
+    end: usize,
+}
+
+impl InlineRevealRange {
+    pub fn new(start: usize, end: usize) -> Self {
+        Self {
+            start,
+            end: end.max(start),
+        }
+    }
+
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    pub fn end(&self) -> usize {
+        self.end
+    }
+
+    fn clamp(&self, len: usize) -> Self {
+        let start = self.start.min(len);
+        let end = self.end.min(len).max(start);
+        Self { start, end }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineRevealSelection {
+    block_index: usize,
+    range: Option<InlineRevealRange>,
+    cursor_offset: usize,
+}
+
+impl InlineRevealSelection {
+    pub fn new(block_index: usize, range: Option<InlineRevealRange>, cursor_offset: usize) -> Self {
+        Self {
+            block_index,
+            range,
+            cursor_offset,
+        }
+    }
+
+    pub fn block_index(&self) -> usize {
+        self.block_index
+    }
+
+    pub fn range(&self) -> Option<&InlineRevealRange> {
+        self.range.as_ref()
+    }
+
+    pub fn cursor_offset(&self) -> usize {
+        self.cursor_offset
+    }
+
+    fn clamp_to_block(&self, block_len: usize) -> Self {
+        Self {
+            block_index: self.block_index,
+            range: self.range.as_ref().map(|range| range.clamp(block_len)),
+            cursor_offset: self.cursor_offset.min(block_len),
+        }
+    }
+
+    fn with_cursor_offset(&self, cursor_offset: usize, block_len: usize) -> Self {
+        Self {
+            block_index: self.block_index,
+            range: self.range.as_ref().map(|range| range.clamp(block_len)),
+            cursor_offset: cursor_offset.min(block_len),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WysiwygBlockPresentation {
+    Rendered(Block),
+    Editing {
+        source: String,
+        selection: InlineRevealSelection,
+    },
+    RawFallback(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WysiwygBlockView {
+    block_index: usize,
+    presentation: WysiwygBlockPresentation,
+}
+
+impl WysiwygBlockView {
+    fn new(block_index: usize, presentation: WysiwygBlockPresentation) -> Self {
+        Self {
+            block_index,
+            presentation,
+        }
+    }
+
+    pub fn block_index(&self) -> usize {
+        self.block_index
+    }
+
+    pub fn presentation(&self) -> &WysiwygBlockPresentation {
+        &self.presentation
+    }
+}
+
+fn normalize_source(source: String) -> String {
+    source.replace("\r\n", "\n")
+}
+
+fn requires_raw_fallback(source_block: &str, rendered_block: &Block) -> bool {
+    contains_unsupported_markdown(source_block) || serialize_block(rendered_block) != source_block
+}
+
+fn contains_unsupported_markdown(source_block: &str) -> bool {
+    source_block.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.contains("~~")
+            || trimmed.contains("![")
+            || trimmed.contains("[^")
+            || trimmed.starts_with("---")
+            || trimmed.starts_with("***")
+            || trimmed.starts_with('|')
+            || trimmed.ends_with('|')
+            || trimmed.starts_with('<')
+            || is_ordered_list_item(trimmed)
+            || has_indented_list_prefix(line)
+    })
+}
+
+fn is_ordered_list_item(line: &str) -> bool {
+    let digits = line
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    digits > 0
+        && line
+            .as_bytes()
+            .get(digits..digits + 2)
+            .is_some_and(|suffix| suffix == b". ")
+}
+
+fn has_indented_list_prefix(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.len() != line.len()
+        && (trimmed.starts_with("- ") || trimmed.starts_with("> ") || is_ordered_list_item(trimmed))
 }

@@ -1,5 +1,79 @@
 use crate::{Block, Document, Inline};
 
+pub(crate) fn split_markdown_blocks(source: &str) -> Vec<String> {
+    let normalized = source.replace("\r\n", "\n");
+    let mut blocks = Vec::new();
+    let mut paragraph_lines = Vec::new();
+    let mut code_fence_opening: Option<String> = None;
+    let mut code_lines = Vec::new();
+
+    let flush_paragraph = |paragraph_lines: &mut Vec<String>, blocks: &mut Vec<String>| {
+        if paragraph_lines.is_empty() {
+            return;
+        }
+
+        blocks.push(paragraph_lines.join("\n"));
+        paragraph_lines.clear();
+    };
+
+    for line in normalized.lines() {
+        if let Some(opening) = code_fence_opening.as_ref() {
+            if line.starts_with("```") {
+                let mut block = opening.clone();
+                if !code_lines.is_empty() {
+                    block.push('\n');
+                    block.push_str(&code_lines.join("\n"));
+                }
+                block.push('\n');
+                block.push_str(line);
+                blocks.push(block);
+                code_fence_opening = None;
+                code_lines.clear();
+            } else {
+                code_lines.push(line.to_string());
+            }
+            continue;
+        }
+
+        if line.trim().is_empty() {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            continue;
+        }
+
+        if line.starts_with("```") {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            code_fence_opening = Some(line.to_string());
+            continue;
+        }
+
+        if line.starts_with("#")
+            || line.starts_with("> ")
+            || line.starts_with("- [x] ")
+            || line.starts_with("- [ ] ")
+            || line.starts_with("- ")
+        {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            blocks.push(line.to_string());
+            continue;
+        }
+
+        paragraph_lines.push(line.to_string());
+    }
+
+    if let Some(opening) = code_fence_opening {
+        let mut block = opening;
+        if !code_lines.is_empty() {
+            block.push('\n');
+            block.push_str(&code_lines.join("\n"));
+        }
+        blocks.push(block);
+    } else {
+        flush_paragraph(&mut paragraph_lines, &mut blocks);
+    }
+
+    blocks
+}
+
 pub fn parse_markdown(source: &str) -> Document {
     let normalized = source.replace("\r\n", "\n");
     let mut blocks = Vec::new();
@@ -104,31 +178,35 @@ pub fn serialize_markdown(document: &Document) -> String {
     document
         .blocks()
         .iter()
-        .map(|block| match block {
-            Block::Heading { level, text } => {
-                format!(
-                    "{} {}",
-                    "#".repeat((*level).into()),
-                    serialize_inlines(text)
-                )
-            }
-            Block::Paragraph(text) => serialize_inlines(text),
-            Block::Quote(text) => format!("> {}", serialize_inlines(text)),
-            Block::BulletItem(text) => format!("- {}", serialize_inlines(text)),
-            Block::ChecklistItem { checked, text } => {
-                format!(
-                    "- [{}] {}",
-                    if *checked { "x" } else { " " },
-                    serialize_inlines(text)
-                )
-            }
-            Block::CodeFence { language, code } => match language {
-                Some(language) => format!("```{language}\n{code}\n```"),
-                None => format!("```\n{code}\n```"),
-            },
-        })
+        .map(serialize_block)
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+pub(crate) fn serialize_block(block: &Block) -> String {
+    match block {
+        Block::Heading { level, text } => {
+            format!(
+                "{} {}",
+                "#".repeat((*level).into()),
+                serialize_inlines(text)
+            )
+        }
+        Block::Paragraph(text) => serialize_inlines(text),
+        Block::Quote(text) => format!("> {}", serialize_inlines(text)),
+        Block::BulletItem(text) => format!("- {}", serialize_inlines(text)),
+        Block::ChecklistItem { checked, text } => {
+            format!(
+                "- [{}] {}",
+                if *checked { "x" } else { " " },
+                serialize_inlines(text)
+            )
+        }
+        Block::CodeFence { language, code } => match language {
+            Some(language) => format!("```{language}\n{code}\n```"),
+            None => format!("```\n{code}\n```"),
+        },
+    }
 }
 
 fn parse_heading(line: &str) -> Option<(u8, &str)> {
