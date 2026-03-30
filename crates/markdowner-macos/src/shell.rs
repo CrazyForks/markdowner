@@ -174,8 +174,8 @@ mod tests {
     use std::fs;
 
     use markdowner_core::{
-        Block, Document, EditorMode, Inline, InlineRevealRange, InlineRevealSelection,
-        TableAlignment, TableRow, ThemeKind, ThemeSelection, WorkspaceState,
+        Block, CodeBlockStyleKind, CodeTokenKind, Document, EditorMode, Inline, InlineRevealRange,
+        InlineRevealSelection, TableAlignment, TableRow, ThemeKind, ThemeSelection, WorkspaceState,
         WysiwygBlockPresentation, apply_theme, parse_markdown,
     };
     use tempfile::tempdir;
@@ -432,7 +432,7 @@ mod tests {
         let mut shell = MacShell::with_adapter(runtime, adapter);
         shell.request_document_open().unwrap();
 
-        let source = "# Source **Heading**\n\n![Preview](assets/preview.png)\n\n| Name | Value |\n| --- | --- |\n| Docs | Ready |\n\n- [ ] Bullet with [link](https://example.com)\n\n> `quoted`";
+        let source = "# Source **Heading**\n\n![Preview](assets/preview.png)\n\n| Name | Value |\n| --- | --- |\n| Docs | Ready |\n\n```rust\nfn main() {\n    println!(\"smoke\");\n}\n```\n\n- [ ] Bullet with [link](https://example.com)\n\n> `quoted`";
         shell.set_mode(EditorMode::Source);
         shell.replace_active_document_source(source).unwrap();
 
@@ -454,6 +454,22 @@ mod tests {
             rendered[2].presentation(),
             WysiwygBlockPresentation::Rendered(Block::Table { .. })
         ));
+        assert!(matches!(
+            rendered[3].presentation(),
+            WysiwygBlockPresentation::Rendered(Block::CodeFence { .. })
+        ));
+        let preview_style = preview.code_block_style(3).unwrap();
+        let wysiwyg_style = rendered[3].code_block_style().unwrap();
+        assert_eq!(preview_style, wysiwyg_style);
+        assert_eq!(
+            preview_style.style_kind(),
+            CodeBlockStyleKind::SyntaxHighlighted
+        );
+        assert!(
+            preview_style.lines()[0]
+                .iter()
+                .any(|token| token.kind() == CodeTokenKind::Keyword && token.text() == "fn")
+        );
         assert_eq!(
             shell.workspace().active_document().unwrap().source(),
             source

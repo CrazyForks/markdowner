@@ -12,7 +12,8 @@ pub use platform::{
     WindowDescriptor,
 };
 pub use theme::{
-    AppliedTheme, StyledDocument, ThemeKind, ThemePalette, ThemeSelection, apply_theme,
+    AppliedTheme, CodeBlockStyleKind, CodeToken, CodeTokenKind, StyledCodeBlock, StyledDocument,
+    ThemeKind, ThemePalette, ThemeSelection, apply_theme,
 };
 pub use workspace::{
     EditorMode, InlineRevealRange, InlineRevealSelection, OpenDocument, WorkspaceState,

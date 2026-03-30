@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Block, Document, Inline, StyledDocument, ThemeSelection, apply_theme,
+    Block, Document, Inline, StyledCodeBlock, StyledDocument, ThemeSelection, apply_theme,
     markdown::{serialize_block, split_markdown_blocks},
     parse_markdown, serialize_markdown,
 };
@@ -68,9 +68,10 @@ impl OpenDocument {
         self.dirty
     }
 
-    pub fn active_wysiwyg_view(&self) -> Vec<WysiwygBlockView> {
+    pub fn active_wysiwyg_view(&self, theme: &ThemeSelection) -> Vec<WysiwygBlockView> {
         let source_blocks = split_markdown_blocks(&self.source);
         let rendered_blocks = self.document.blocks();
+        let styled_document = apply_theme(&self.document, theme);
         let len = source_blocks.len().max(rendered_blocks.len());
 
         (0..len)
@@ -110,7 +111,16 @@ impl OpenDocument {
                     )
                 };
 
-                WysiwygBlockView::new(block_index, presentation)
+                let code_block_style = if matches!(
+                    &presentation,
+                    WysiwygBlockPresentation::Rendered(Block::CodeFence { .. })
+                ) {
+                    styled_document.code_block_style(block_index).cloned()
+                } else {
+                    None
+                };
+
+                WysiwygBlockView::new(block_index, presentation, code_block_style)
             })
             .collect()
     }
@@ -270,7 +280,7 @@ impl WorkspaceState {
     }
 
     pub fn active_wysiwyg_view(&self) -> Option<Vec<WysiwygBlockView>> {
-        Some(self.active_document()?.active_wysiwyg_view())
+        Some(self.active_document()?.active_wysiwyg_view(self.theme()))
     }
 
     pub fn active_preview_document(&self) -> Option<StyledDocument> {
@@ -568,13 +578,19 @@ pub enum WysiwygBlockPresentation {
 pub struct WysiwygBlockView {
     block_index: usize,
     presentation: WysiwygBlockPresentation,
+    code_block_style: Option<StyledCodeBlock>,
 }
 
 impl WysiwygBlockView {
-    fn new(block_index: usize, presentation: WysiwygBlockPresentation) -> Self {
+    fn new(
+        block_index: usize,
+        presentation: WysiwygBlockPresentation,
+        code_block_style: Option<StyledCodeBlock>,
+    ) -> Self {
         Self {
             block_index,
             presentation,
+            code_block_style,
         }
     }
 
@@ -584,6 +600,10 @@ impl WysiwygBlockView {
 
     pub fn presentation(&self) -> &WysiwygBlockPresentation {
         &self.presentation
+    }
+
+    pub fn code_block_style(&self) -> Option<&StyledCodeBlock> {
+        self.code_block_style.as_ref()
     }
 }
 

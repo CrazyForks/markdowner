@@ -1,10 +1,10 @@
 use std::{fs, path::PathBuf};
 
 use markdowner_core::{
-    Block, Document, EditorMode, EditorRuntime, FileDialogOptions, Inline, InlineRevealRange,
-    InlineRevealSelection, MenuDescriptor, MenuItem, PlatformAdapter, TableAlignment, TableRow,
-    ThemeKind, ThemeSelection, WindowDescriptor, WorkspaceState, WysiwygBlockPresentation,
-    apply_theme, parse_markdown, serialize_markdown,
+    Block, CodeBlockStyleKind, CodeTokenKind, Document, EditorMode, EditorRuntime,
+    FileDialogOptions, Inline, InlineRevealRange, InlineRevealSelection, MenuDescriptor, MenuItem,
+    PlatformAdapter, TableAlignment, TableRow, ThemeKind, ThemeSelection, WindowDescriptor,
+    WorkspaceState, WysiwygBlockPresentation, apply_theme, parse_markdown, serialize_markdown,
 };
 use tempfile::tempdir;
 
@@ -157,6 +157,48 @@ fn workspace_projects_preview_mode_as_a_styled_read_only_view() {
         Some("body { color: tomato; }")
     );
     assert_eq!(workspace.active_document().unwrap().source(), source);
+}
+
+#[test]
+fn theme_application_highlights_known_code_fences_and_falls_back_to_plain_style() {
+    let document = Document::new(vec![
+        Block::CodeFence {
+            language: Some("rust".to_string()),
+            code: "fn main() {\n    println!(\"hi\");\n}".to_string(),
+        },
+        Block::CodeFence {
+            language: None,
+            code: "plain text".to_string(),
+        },
+        Block::CodeFence {
+            language: Some("unknownlang".to_string()),
+            code: "mystery()".to_string(),
+        },
+    ]);
+
+    let styled = apply_theme(&document, &ThemeSelection::default());
+    let rust = styled.code_block_style(0).unwrap();
+    let plain = styled.code_block_style(1).unwrap();
+    let unknown = styled.code_block_style(2).unwrap();
+
+    assert_eq!(rust.style_kind(), CodeBlockStyleKind::SyntaxHighlighted);
+    assert!(
+        rust.lines()[0]
+            .iter()
+            .any(|token| token.kind() == CodeTokenKind::Keyword && token.text() == "fn")
+    );
+    assert_eq!(plain.style_kind(), CodeBlockStyleKind::Plain);
+    assert!(
+        plain.lines()[0]
+            .iter()
+            .all(|token| token.kind() == CodeTokenKind::Plain)
+    );
+    assert_eq!(unknown.style_kind(), CodeBlockStyleKind::Plain);
+    assert!(
+        unknown.lines()[0]
+            .iter()
+            .all(|token| token.kind() == CodeTokenKind::Plain)
+    );
 }
 
 #[test]
@@ -394,6 +436,88 @@ fn workspace_projects_simple_images_and_tables_but_falls_back_for_complex_tables
         fallback[0].presentation(),
         WysiwygBlockPresentation::RawFallback(source) if source == fallback_source
     ));
+}
+
+#[test]
+fn workspace_uses_the_same_code_block_styling_in_preview_and_wysiwyg() {
+    let mut workspace = WorkspaceState::default();
+    let path = PathBuf::from("/tmp/code-block.md");
+    let source = "```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n\n```unknownlang\nmystery()\n```\n\n```\nplain text\n```";
+    workspace.open_document_from_source(path, source);
+
+    let wysiwyg = workspace.active_wysiwyg_view().unwrap();
+
+    workspace.set_mode(EditorMode::Preview);
+    let preview = workspace.active_preview_document().unwrap();
+    let rust_wysiwyg = wysiwyg[0].code_block_style().unwrap().clone();
+    let unknown_wysiwyg = wysiwyg[1].code_block_style().unwrap().clone();
+    let plain_wysiwyg = wysiwyg[2].code_block_style().unwrap().clone();
+    let rust_preview = preview.code_block_style(0).unwrap().clone();
+    let unknown_preview = preview.code_block_style(1).unwrap().clone();
+    let plain_preview = preview.code_block_style(2).unwrap().clone();
+
+    assert_eq!(rust_wysiwyg, rust_preview);
+    assert_eq!(unknown_wysiwyg, unknown_preview);
+    assert_eq!(plain_wysiwyg, plain_preview);
+    assert_eq!(
+        rust_preview.style_kind(),
+        CodeBlockStyleKind::SyntaxHighlighted
+    );
+    assert_eq!(unknown_preview.style_kind(), CodeBlockStyleKind::Plain);
+    assert_eq!(plain_preview.style_kind(), CodeBlockStyleKind::Plain);
+}
+
+#[test]
+fn runtime_preserves_code_fence_language_tags_across_save_and_reload() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("code-fence.md");
+    fs::write(&document_path, "start").unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime.open_document(&document_path).unwrap();
+    runtime
+        .replace_active_document(Document::new(vec![
+            Block::CodeFence {
+                language: Some("rust".to_string()),
+                code: "fn main() {}".to_string(),
+            },
+            Block::CodeFence {
+                language: Some("unknownlang".to_string()),
+                code: "mystery()".to_string(),
+            },
+            Block::CodeFence {
+                language: None,
+                code: "plain text".to_string(),
+            },
+        ]))
+        .unwrap();
+    runtime.save_active_document().unwrap();
+
+    let persisted = fs::read_to_string(&document_path).unwrap();
+    assert_eq!(
+        persisted,
+        "```rust\nfn main() {}\n```\n\n```unknownlang\nmystery()\n```\n\n```\nplain text\n```"
+    );
+
+    let mut reopened = EditorRuntime::default();
+    reopened.open_document(&document_path).unwrap();
+    assert_eq!(
+        reopened.workspace().active_document().unwrap().document(),
+        &Document::new(vec![
+            Block::CodeFence {
+                language: Some("rust".to_string()),
+                code: "fn main() {}".to_string(),
+            },
+            Block::CodeFence {
+                language: Some("unknownlang".to_string()),
+                code: "mystery()".to_string(),
+            },
+            Block::CodeFence {
+                language: None,
+                code: "plain text".to_string(),
+            },
+        ])
+    );
 }
 
 #[test]
