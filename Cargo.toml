@@ -2,6 +2,7 @@
 members = [
     "crates/markdowner-core",
     "crates/markdowner-macos",
+    "src-tauri",
 ]
 resolver = "2"
 

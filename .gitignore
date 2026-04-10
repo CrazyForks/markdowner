@@ -1,6 +1,9 @@
 .dolt/
 *.db
 target/
+src-tauri/target/
+node_modules/
+dist/
+.vite/
 tasks/
 .ralph-tui/
-

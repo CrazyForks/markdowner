@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default desktop capabilities for Markdowner.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

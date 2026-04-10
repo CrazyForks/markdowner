@@ -398,15 +398,19 @@ impl EditorRuntime {
         let Some(path) = adapter.open_folder("Open Workspace") else {
             return Ok(None);
         };
-        let documents = match list_markdown_files(&path) {
+        self.open_workspace(&path).map(Some)
+    }
+
+    pub fn open_workspace(&mut self, path: &Path) -> Result<PathBuf, RuntimeError> {
+        let documents = match list_markdown_files(path) {
             Ok(documents) => documents,
             Err(error) => return self.fail(error),
         };
 
         self.workspace
-            .set_workspace_documents(path.clone(), documents);
+            .set_workspace_documents(path.to_path_buf(), documents);
         self.workspace.clear_error();
-        Ok(Some(path))
+        Ok(path.to_path_buf())
     }
 
     pub fn open_workspace_document(&mut self, path: &Path) -> Result<PathBuf, RuntimeError> {

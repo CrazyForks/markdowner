@@ -352,6 +352,29 @@ fn runtime_loads_markdown_contents_and_saves_active_document() {
 }
 
 #[test]
+fn runtime_opens_workspace_from_explicit_path_without_platform_adapter() {
+    let temp = tempdir().unwrap();
+    let workspace_path = temp.path().join("workspace");
+    let nested_path = workspace_path.join("nested");
+    fs::create_dir_all(&nested_path).unwrap();
+    let root_document = workspace_path.join("notes.md");
+    let nested_document = nested_path.join("draft.md");
+    fs::write(&root_document, "# Root").unwrap();
+    fs::write(&nested_document, "# Nested").unwrap();
+
+    let mut runtime = EditorRuntime::default();
+
+    let opened = runtime.open_workspace(&workspace_path).unwrap();
+
+    assert_eq!(opened, workspace_path);
+    assert_eq!(runtime.workspace().root_dir(), Some(workspace_path.as_path()));
+    assert_eq!(
+        runtime.workspace().workspace_documents(),
+        &[nested_document, root_document]
+    );
+}
+
+#[test]
 fn runtime_round_trips_rich_text_edits_after_save_and_reopen() {
     let temp = tempdir().unwrap();
     let document_path = temp.path().join("rich.md");
