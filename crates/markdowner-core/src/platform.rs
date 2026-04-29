@@ -253,16 +253,20 @@ impl EditorRuntime {
     }
 
     pub fn import_theme_from_path(&mut self, path: &Path) -> Result<PathBuf, RuntimeError> {
+        let previous_theme = self.workspace.theme().clone();
         let stylesheet = match read_stylesheet_source(path) {
             Ok(stylesheet) => stylesheet,
-            Err(error) => return self.recover_default_theme(error),
+            Err(error) => return self.recover_theme(previous_theme, error),
         };
 
         if let Err(message) = validate_stylesheet(&stylesheet) {
-            return self.recover_default_theme(RuntimeError::new(format!(
-                "Could not import CSS theme '{}': {message}",
-                path.display()
-            )));
+            return self.recover_theme(
+                previous_theme,
+                RuntimeError::new(format!(
+                    "Could not import CSS theme '{}': {message}",
+                    path.display()
+                )),
+            );
         }
 
         self.workspace.set_theme(crate::ThemeSelection::imported(
@@ -501,8 +505,12 @@ impl EditorRuntime {
         Ok(path.to_path_buf())
     }
 
-    fn recover_default_theme<T>(&mut self, error: RuntimeError) -> Result<T, RuntimeError> {
-        self.workspace.set_theme(crate::ThemeSelection::default());
+    fn recover_theme<T>(
+        &mut self,
+        theme: crate::ThemeSelection,
+        error: RuntimeError,
+    ) -> Result<T, RuntimeError> {
+        self.workspace.set_theme(theme);
         let _ = self.persist_session();
         self.fail(error)
     }

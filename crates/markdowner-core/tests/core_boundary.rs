@@ -929,7 +929,7 @@ fn runtime_imports_custom_css_theme_from_disk_and_restores_it_after_relaunch() {
 }
 
 #[test]
-fn runtime_recovers_to_default_theme_when_imported_css_is_invalid() {
+fn runtime_preserves_existing_theme_when_imported_css_is_invalid() {
     let temp = tempdir().unwrap();
     let document_path = temp.path().join("theme.md");
     let css_path = temp.path().join("broken.css");
@@ -937,15 +937,14 @@ fn runtime_recovers_to_default_theme_when_imported_css_is_invalid() {
     fs::write(&css_path, "body { color: tomato;").unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("broken.css"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
@@ -956,6 +955,35 @@ fn runtime_recovers_to_default_theme_when_imported_css_is_invalid() {
             .last_error()
             .unwrap()
             .contains("broken.css")
+    );
+}
+
+#[test]
+fn runtime_preserves_existing_custom_theme_when_imported_css_is_invalid() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("theme.md");
+    let imported_path = temp.path().join("current.css");
+    let invalid_path = temp.path().join("broken.css");
+    fs::write(&document_path, "# Theme").unwrap();
+    fs::write(
+        &imported_path,
+        ".markdowner-content { color: rebeccapurple; }",
+    )
+    .unwrap();
+    fs::write(&invalid_path, "body { color: tomato;").unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime.open_document(&document_path).unwrap();
+    runtime.import_theme_from_path(&imported_path).unwrap();
+    let previous_theme = runtime.workspace().theme().clone();
+
+    let error = runtime.import_theme_from_path(&invalid_path).unwrap_err();
+
+    assert!(error.to_string().contains("broken.css"));
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Theme"
     );
 }
 
@@ -973,16 +1001,15 @@ fn runtime_rejects_oversized_custom_css_theme_imports() {
     fs::write(&css_path, oversized_css).unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("oversized.css"));
     assert!(error.to_string().contains("256 KB limit"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
@@ -1002,16 +1029,15 @@ fn runtime_rejects_custom_css_theme_imports_with_import_rules() {
     .unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("imported.css"));
     assert!(error.to_string().contains("@import"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
@@ -1031,16 +1057,15 @@ fn runtime_rejects_custom_css_theme_imports_with_remote_urls() {
     .unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("remote-url.css"));
     assert!(error.to_string().contains("remote url()"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
@@ -1060,16 +1085,15 @@ fn runtime_rejects_custom_css_theme_imports_with_fixed_positioning() {
     .unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("fixed-position.css"));
     assert!(error.to_string().contains("position: fixed"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
@@ -1089,16 +1113,15 @@ fn runtime_rejects_custom_css_theme_imports_with_sticky_positioning() {
     .unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("sticky-position.css"));
     assert!(error.to_string().contains("position: sticky"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
@@ -1114,16 +1137,15 @@ fn runtime_rejects_custom_css_theme_imports_with_high_z_index() {
     fs::write(&css_path, ".markdowner-content .overlay { z-index: 1001; }").unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("high-z-index.css"));
     assert!(error.to_string().contains("z-index: 1001"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
@@ -1143,16 +1165,15 @@ fn runtime_rejects_custom_css_theme_imports_with_behavior_property() {
     .unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("behavior.css"));
     assert!(error.to_string().contains("behavior"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
@@ -1172,16 +1193,15 @@ fn runtime_rejects_custom_css_theme_imports_with_expression_functions() {
     .unwrap();
 
     let mut runtime = EditorRuntime::default();
-    runtime
-        .workspace_mut()
-        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    let previous_theme = ThemeSelection::new(ThemeKind::BuiltInDark, None);
+    runtime.workspace_mut().set_theme(previous_theme.clone());
     runtime.open_document(&document_path).unwrap();
 
     let error = runtime.import_theme_from_path(&css_path).unwrap_err();
 
     assert!(error.to_string().contains("expression.css"));
     assert!(error.to_string().contains("expression()"));
-    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(runtime.workspace().theme(), &previous_theme);
     assert_eq!(
         runtime.workspace().active_document().unwrap().source(),
         "# Theme"
