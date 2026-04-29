@@ -257,6 +257,14 @@ pub(crate) fn validate_stylesheet(stylesheet: &str) -> Result<(), String> {
         return Err("CSS theme cannot use remote url() references".to_string());
     }
 
+    if contains_disallowed_behavior_property(&normalized) {
+        return Err("CSS theme cannot use behavior properties".to_string());
+    }
+
+    if contains_expression_function(&normalized) {
+        return Err("CSS theme cannot use expression()".to_string());
+    }
+
     if let Some(position_value) = contains_disallowed_position_value(&normalized) {
         return Err(format!("CSS theme cannot use position: {position_value}"));
     }
@@ -384,6 +392,72 @@ fn contains_disallowed_position_value(stylesheet: &str) -> Option<&'static str> 
     }
 
     None
+}
+
+fn contains_disallowed_behavior_property(stylesheet: &str) -> bool {
+    let bytes = stylesheet.as_bytes();
+    let mut index = 0usize;
+
+    while index + 8 <= bytes.len() {
+        if &bytes[index..index + 8] != b"behavior" {
+            index += 1;
+            continue;
+        }
+
+        if index > 0 {
+            let previous = bytes[index - 1];
+            if previous.is_ascii_alphanumeric() || previous == b'-' || previous == b'_' {
+                index += 1;
+                continue;
+            }
+        }
+
+        let mut cursor = index + 8;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if cursor < bytes.len() && bytes[cursor] == b':' {
+            return true;
+        }
+
+        index += 1;
+    }
+
+    false
+}
+
+fn contains_expression_function(stylesheet: &str) -> bool {
+    let bytes = stylesheet.as_bytes();
+    let mut index = 0usize;
+
+    while index + 10 <= bytes.len() {
+        if &bytes[index..index + 10] != b"expression" {
+            index += 1;
+            continue;
+        }
+
+        if index > 0 {
+            let previous = bytes[index - 1];
+            if previous.is_ascii_alphanumeric() || previous == b'-' || previous == b'_' {
+                index += 1;
+                continue;
+            }
+        }
+
+        let mut cursor = index + 10;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if cursor < bytes.len() && bytes[cursor] == b'(' {
+            return true;
+        }
+
+        index += 1;
+    }
+
+    false
 }
 
 fn contains_disallowed_z_index_value(stylesheet: &str) -> Option<i32> {
