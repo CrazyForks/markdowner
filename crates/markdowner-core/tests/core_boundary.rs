@@ -990,6 +990,64 @@ fn runtime_rejects_oversized_custom_css_theme_imports() {
 }
 
 #[test]
+fn runtime_rejects_custom_css_theme_imports_with_import_rules() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("theme.md");
+    let css_path = temp.path().join("imported.css");
+    fs::write(&document_path, "# Theme").unwrap();
+    fs::write(
+        &css_path,
+        "@import url(\"https://example.com/theme.css\");\nbody { color: tomato; }",
+    )
+    .unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime
+        .workspace_mut()
+        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    runtime.open_document(&document_path).unwrap();
+
+    let error = runtime.import_theme_from_path(&css_path).unwrap_err();
+
+    assert!(error.to_string().contains("imported.css"));
+    assert!(error.to_string().contains("@import"));
+    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Theme"
+    );
+}
+
+#[test]
+fn runtime_rejects_custom_css_theme_imports_with_remote_urls() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("theme.md");
+    let css_path = temp.path().join("remote-url.css");
+    fs::write(&document_path, "# Theme").unwrap();
+    fs::write(
+        &css_path,
+        "body { background-image: url(\"HTTPS://example.com/background.png\"); }",
+    )
+    .unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime
+        .workspace_mut()
+        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    runtime.open_document(&document_path).unwrap();
+
+    let error = runtime.import_theme_from_path(&css_path).unwrap_err();
+
+    assert!(error.to_string().contains("remote-url.css"));
+    assert!(error.to_string().contains("remote url()"));
+    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Theme"
+    );
+}
+
+#[test]
 fn runtime_reports_error_when_recent_document_is_missing() {
     let temp = tempdir().unwrap();
     let missing_path = temp.path().join("missing.md");

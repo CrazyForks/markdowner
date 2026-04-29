@@ -247,6 +247,15 @@ pub(crate) fn validate_stylesheet(stylesheet: &str) -> Result<(), String> {
         return Err("CSS theme must contain at least one rule block".to_string());
     }
 
+    let normalized = trimmed.to_ascii_lowercase();
+    if normalized.contains("@import") {
+        return Err("CSS theme cannot use @import rules".to_string());
+    }
+
+    if contains_remote_url_reference(&normalized) {
+        return Err("CSS theme cannot use remote url() references".to_string());
+    }
+
     let mut depth = 0usize;
     for character in trimmed.chars() {
         match character {
@@ -266,6 +275,51 @@ pub(crate) fn validate_stylesheet(stylesheet: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn contains_remote_url_reference(stylesheet: &str) -> bool {
+    let bytes = stylesheet.as_bytes();
+    let mut index = 0usize;
+
+    while index + 3 <= bytes.len() {
+        if &bytes[index..index + 3] != b"url" {
+            index += 1;
+            continue;
+        }
+
+        let mut cursor = index + 3;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if cursor >= bytes.len() || bytes[cursor] != b'(' {
+            index += 1;
+            continue;
+        }
+
+        cursor += 1;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        let value_start = cursor;
+        while cursor < bytes.len() && bytes[cursor] != b')' {
+            cursor += 1;
+        }
+
+        if cursor > value_start {
+            let value = stylesheet[value_start..cursor]
+                .trim()
+                .trim_matches(['"', '\'']);
+            if value.starts_with("http://") || value.starts_with("https://") {
+                return true;
+            }
+        }
+
+        index = cursor.saturating_add(1);
+    }
+
+    false
 }
 
 pub(crate) fn style_code_block(block: &Block, palette: &ThemePalette) -> Option<StyledCodeBlock> {
