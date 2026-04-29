@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Block, Document};
 
+const MAX_THEME_STYLESHEET_BYTES: usize = 256 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeBlockStyleKind {
     Plain,
@@ -235,6 +237,10 @@ pub(crate) fn validate_stylesheet(stylesheet: &str) -> Result<(), String> {
     let trimmed = stylesheet.trim();
     if trimmed.is_empty() {
         return Err("CSS theme is empty".to_string());
+    }
+
+    if stylesheet.len() > MAX_THEME_STYLESHEET_BYTES {
+        return Err("CSS theme exceeds the 256 KB limit".to_string());
     }
 
     if !trimmed.contains('{') || !trimmed.contains('}') {

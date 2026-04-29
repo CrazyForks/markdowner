@@ -960,6 +960,36 @@ fn runtime_recovers_to_default_theme_when_imported_css_is_invalid() {
 }
 
 #[test]
+fn runtime_rejects_oversized_custom_css_theme_imports() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("theme.md");
+    let css_path = temp.path().join("oversized.css");
+    fs::write(&document_path, "# Theme").unwrap();
+
+    let oversized_css = format!(
+        "body {{ color: #223344; }}\n/*{}*/",
+        "a".repeat((256 * 1024) + 1)
+    );
+    fs::write(&css_path, oversized_css).unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime
+        .workspace_mut()
+        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    runtime.open_document(&document_path).unwrap();
+
+    let error = runtime.import_theme_from_path(&css_path).unwrap_err();
+
+    assert!(error.to_string().contains("oversized.css"));
+    assert!(error.to_string().contains("256 KB limit"));
+    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Theme"
+    );
+}
+
+#[test]
 fn runtime_reports_error_when_recent_document_is_missing() {
     let temp = tempdir().unwrap();
     let missing_path = temp.path().join("missing.md");
