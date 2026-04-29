@@ -389,7 +389,7 @@ fn runtime_save_preserves_read_only_file_failures_without_clobbering_existing_by
         fs::read_to_string(&document_path).unwrap(),
         "# Locked\n\nOriginal"
     );
-    assert!(!runtime.workspace().active_document().unwrap().is_dirty());
+    assert!(runtime.workspace().active_document().unwrap().is_dirty());
 }
 
 #[test]
