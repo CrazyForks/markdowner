@@ -1106,6 +1106,31 @@ fn runtime_rejects_custom_css_theme_imports_with_sticky_positioning() {
 }
 
 #[test]
+fn runtime_rejects_custom_css_theme_imports_with_high_z_index() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("theme.md");
+    let css_path = temp.path().join("high-z-index.css");
+    fs::write(&document_path, "# Theme").unwrap();
+    fs::write(&css_path, ".markdowner-content .overlay { z-index: 1001; }").unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime
+        .workspace_mut()
+        .set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
+    runtime.open_document(&document_path).unwrap();
+
+    let error = runtime.import_theme_from_path(&css_path).unwrap_err();
+
+    assert!(error.to_string().contains("high-z-index.css"));
+    assert!(error.to_string().contains("z-index: 1001"));
+    assert_eq!(runtime.workspace().theme(), &ThemeSelection::default());
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Theme"
+    );
+}
+
+#[test]
 fn runtime_reports_error_when_recent_document_is_missing() {
     let temp = tempdir().unwrap();
     let missing_path = temp.path().join("missing.md");

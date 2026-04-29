@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Block, Document};
 
 const MAX_THEME_STYLESHEET_BYTES: usize = 256 * 1024;
+const MAX_THEME_Z_INDEX: i32 = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeBlockStyleKind {
@@ -260,6 +261,10 @@ pub(crate) fn validate_stylesheet(stylesheet: &str) -> Result<(), String> {
         return Err(format!("CSS theme cannot use position: {position_value}"));
     }
 
+    if let Some(z_index_value) = contains_disallowed_z_index_value(&normalized) {
+        return Err(format!("CSS theme cannot use z-index: {z_index_value}"));
+    }
+
     let mut depth = 0usize;
     for character in trimmed.chars() {
         match character {
@@ -372,6 +377,59 @@ fn contains_disallowed_position_value(stylesheet: &str) -> Option<&'static str> 
 
             if value.starts_with("sticky") {
                 return Some("sticky");
+            }
+        }
+
+        index = cursor.saturating_add(1);
+    }
+
+    None
+}
+
+fn contains_disallowed_z_index_value(stylesheet: &str) -> Option<i32> {
+    let bytes = stylesheet.as_bytes();
+    let mut index = 0usize;
+
+    while index + 7 <= bytes.len() {
+        if &bytes[index..index + 7] != b"z-index" {
+            index += 1;
+            continue;
+        }
+
+        if index > 0 {
+            let previous = bytes[index - 1];
+            if previous.is_ascii_alphanumeric() || previous == b'-' || previous == b'_' {
+                index += 1;
+                continue;
+            }
+        }
+
+        let mut cursor = index + 7;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if cursor >= bytes.len() || bytes[cursor] != b':' {
+            index += 1;
+            continue;
+        }
+
+        cursor += 1;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        let value_start = cursor;
+        while cursor < bytes.len() && !matches!(bytes[cursor], b';' | b'}' | b'!') {
+            cursor += 1;
+        }
+
+        if cursor > value_start {
+            let value = stylesheet[value_start..cursor].trim();
+            if let Ok(z_index) = value.parse::<i32>() {
+                if z_index > MAX_THEME_Z_INDEX {
+                    return Some(z_index);
+                }
             }
         }
 
