@@ -12,6 +12,7 @@ import type { AppSnapshot } from './lib/desktop';
 
 const bootstrapMock = vi.fn();
 const importThemeMock = vi.fn();
+const newDocumentMock = vi.fn();
 const openDocumentMock = vi.fn();
 const openWorkspaceMock = vi.fn();
 const openWorkspaceDocumentMock = vi.fn();
@@ -25,6 +26,7 @@ const saveDialogMock = vi.fn();
 vi.mock('./lib/desktop', () => ({
   bootstrap: bootstrapMock,
   importTheme: importThemeMock,
+  newDocument: newDocumentMock,
   openDocument: openDocumentMock,
   openWorkspace: openWorkspaceMock,
   openWorkspaceDocument: openWorkspaceDocumentMock,
@@ -53,6 +55,7 @@ const baseSnapshot = (overrides: Partial<AppSnapshot> = {}): AppSnapshot => ({
   rootDir: null,
   workspaceDocuments: [],
   recentDocuments: [],
+  activeDocumentName: null,
   activeDocumentPath: null,
   activeDocumentSource: null,
   activeDocumentDirty: false,
@@ -74,6 +77,7 @@ describe('App recent documents', () => {
   beforeEach(() => {
     bootstrapMock.mockReset();
     importThemeMock.mockReset();
+    newDocumentMock.mockReset();
     openDocumentMock.mockReset();
     openWorkspaceMock.mockReset();
     openWorkspaceDocumentMock.mockReset();
@@ -92,6 +96,7 @@ describe('App recent documents', () => {
 
     openDocumentMock.mockResolvedValue(
       baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
       }),
@@ -99,6 +104,7 @@ describe('App recent documents', () => {
 
     replaceActiveDocumentSourceMock.mockImplementation(async (source: string) =>
       baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: source,
         activeDocumentDirty: true,
@@ -126,6 +132,7 @@ describe('App recent documents', () => {
   it('renders Windows-style paths with file basenames and workspace-relative labels', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
+        activeDocumentName: 'draft.md',
         rootDir: 'C:\\Users\\chann\\workspace',
         workspaceDocuments: ['C:\\Users\\chann\\workspace\\guides\\draft.md'],
         recentDocuments: ['C:\\Users\\chann\\workspace\\guides\\draft.md'],
@@ -139,12 +146,13 @@ describe('App recent documents', () => {
     render(<App />);
 
     expect(await screen.findAllByText('draft.md')).toHaveLength(3);
-    expect(screen.getAllByText('guides/draft.md')).toHaveLength(2);
+    expect(screen.getAllByText('guides/draft.md')).toHaveLength(3);
   });
 
   it('saves the active document to a new path from the shell', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
         recentDocuments: ['/tmp/project/meeting-notes.md'],
@@ -183,6 +191,56 @@ describe('App recent documents', () => {
       });
       expect(saveActiveDocumentAsMock).toHaveBeenCalledWith(
         '/tmp/project/archive/meeting-notes-copy.md',
+      );
+    });
+  });
+
+  it('creates an untitled document and saves it through Save As', async () => {
+    newDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'Untitled.md',
+        activeDocumentPath: null,
+        activeDocumentSource: '',
+        activeDocumentDirty: true,
+      }),
+    );
+    saveDialogMock.mockResolvedValue('/tmp/project/notes/untitled.md');
+    saveActiveDocumentAsMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'untitled.md',
+        activeDocumentPath: '/tmp/project/notes/untitled.md',
+        activeDocumentSource: '',
+        recentDocuments: ['/tmp/project/notes/untitled.md'],
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const newDocumentButton = await screen.findByRole('button', {
+      name: /new document/i,
+    });
+    fireEvent.click(newDocumentButton);
+
+    await screen.findByText('Untitled.md');
+
+    const saveButton = await screen.findByRole('button', { name: /^save$/i });
+    await waitFor(() => {
+      expect(saveButton).not.toHaveAttribute('disabled');
+    });
+
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(newDocumentMock).toHaveBeenCalled();
+      expect(saveDialogMock).toHaveBeenCalledWith({
+        defaultPath: 'Untitled.md',
+        filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }],
+      });
+      expect(saveActiveDocumentMock).not.toHaveBeenCalled();
+      expect(saveActiveDocumentAsMock).toHaveBeenCalledWith(
+        '/tmp/project/notes/untitled.md',
       );
     });
   });

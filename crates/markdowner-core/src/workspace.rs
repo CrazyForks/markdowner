@@ -20,6 +20,7 @@ pub enum EditorMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenDocument {
     path: PathBuf,
+    backing_path: Option<PathBuf>,
     document: Document,
     source: String,
     dirty: bool,
@@ -31,6 +32,7 @@ impl OpenDocument {
     pub fn new(path: PathBuf, document: Document) -> Self {
         let source = serialize_markdown(&document);
         Self {
+            backing_path: Some(path.clone()),
             path,
             document,
             source,
@@ -44,6 +46,7 @@ impl OpenDocument {
         let source = normalize_source(source.into());
         let document = parse_markdown(&source);
         Self {
+            backing_path: Some(path.clone()),
             path,
             document,
             source,
@@ -53,8 +56,32 @@ impl OpenDocument {
         }
     }
 
+    pub fn new_untitled(path: PathBuf) -> Self {
+        Self {
+            path,
+            backing_path: None,
+            document: Document::default(),
+            source: String::new(),
+            dirty: true,
+            inline_reveal_selection: None,
+            last_inline_reveal_selection: None,
+        }
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn backing_path(&self) -> Option<&Path> {
+        self.backing_path.as_deref()
+    }
+
+    pub fn display_name(&self) -> String {
+        self.backing_path
+            .as_deref()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Untitled.md".to_string())
     }
 
     pub fn document(&self) -> &Document {
@@ -201,6 +228,7 @@ impl OpenDocument {
     }
 
     fn save_as(&mut self, path: PathBuf) {
+        self.backing_path = Some(path.clone());
         self.path = path;
         self.dirty = false;
     }
@@ -274,7 +302,7 @@ impl WorkspaceState {
     }
 
     pub fn active_document_path(&self) -> Option<&Path> {
-        self.active_document.as_deref()
+        self.active_document().and_then(OpenDocument::backing_path)
     }
 
     pub fn active_document(&self) -> Option<&OpenDocument> {
@@ -459,6 +487,12 @@ impl WorkspaceState {
         true
     }
 
+    pub fn new_document(&mut self) {
+        let internal_path = self.next_untitled_document_path();
+        self.upsert_open_document(OpenDocument::new_untitled(internal_path));
+        self.clear_error();
+    }
+
     pub fn save_active_document_as(&mut self, path: PathBuf) -> bool {
         let Some(active_path) = self.active_document.clone() else {
             return false;
@@ -539,6 +573,23 @@ impl WorkspaceState {
         }
 
         self.active_document = Some(active_path);
+    }
+
+    fn next_untitled_document_path(&self) -> PathBuf {
+        let mut index = 1usize;
+
+        loop {
+            let candidate = PathBuf::from(format!("__markdowner_untitled_{index}__.md"));
+            if self
+                .open_documents
+                .iter()
+                .all(|document| document.path() != candidate.as_path())
+            {
+                return candidate;
+            }
+
+            index += 1;
+        }
     }
 }
 

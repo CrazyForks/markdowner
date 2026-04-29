@@ -396,6 +396,37 @@ fn runtime_save_as_writes_to_a_new_path_and_retargets_the_active_document() {
 }
 
 #[test]
+fn runtime_new_document_stays_in_memory_until_saved_as() {
+    let temp = tempdir().unwrap();
+    let saved_path = temp.path().join("drafts").join("untitled.md");
+
+    let mut runtime = EditorRuntime::default();
+    runtime.new_document().unwrap();
+
+    let active_document = runtime.workspace().active_document().unwrap();
+
+    assert_eq!(runtime.workspace().active_document_path(), None);
+    assert_eq!(active_document.display_name(), "Untitled.md");
+    assert_eq!(active_document.source(), "");
+    assert!(active_document.is_dirty());
+    assert!(runtime.workspace().recent_documents().is_empty());
+
+    runtime
+        .replace_active_document_source("# Fresh draft\n\nStarted here")
+        .unwrap();
+    runtime.save_active_document_as(&saved_path).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&saved_path).unwrap(),
+        "# Fresh draft\n\nStarted here"
+    );
+    assert_eq!(
+        runtime.workspace().active_document_path(),
+        Some(saved_path.as_path())
+    );
+}
+
+#[test]
 fn runtime_opens_workspace_from_explicit_path_without_platform_adapter() {
     let temp = tempdir().unwrap();
     let workspace_path = temp.path().join("workspace");

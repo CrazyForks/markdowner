@@ -229,6 +229,11 @@ impl EditorRuntime {
         self.open_document_with_message(path, "Could not open document")
     }
 
+    pub fn new_document(&mut self) -> Result<(), RuntimeError> {
+        self.workspace.new_document();
+        Ok(())
+    }
+
     pub fn import_theme_via(
         &mut self,
         adapter: &mut impl PlatformAdapter,
@@ -278,7 +283,11 @@ impl EditorRuntime {
                 "Could not save document because no document is open",
             ));
         };
-        let path = active_document.path().to_path_buf();
+        let Some(path) = active_document.backing_path().map(Path::to_path_buf) else {
+            return self.fail(RuntimeError::new(
+                "Could not save document because it has no file path yet",
+            ));
+        };
         let source = active_document.source().to_string();
 
         if let Err(error) = write_document_source(&path, &source) {

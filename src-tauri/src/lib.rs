@@ -13,6 +13,7 @@ pub struct AppSnapshot {
     pub root_dir: Option<String>,
     pub workspace_documents: Vec<String>,
     pub recent_documents: Vec<String>,
+    pub active_document_name: Option<String>,
     pub active_document_path: Option<String>,
     pub active_document_source: Option<String>,
     pub active_document_dirty: bool,
@@ -60,14 +61,25 @@ impl DesktopBackend {
                 .iter()
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect(),
-            active_document_path: active_document
-                .map(|document| document.path().to_string_lossy().into_owned()),
+            active_document_name: active_document.map(|document| document.display_name()),
+            active_document_path: active_document.and_then(|document| {
+                document
+                    .backing_path()
+                    .map(|path| path.to_string_lossy().into_owned())
+            }),
             active_document_source: active_document.map(|document| document.source().to_string()),
             active_document_dirty: active_document.is_some_and(|document| document.is_dirty()),
             mode: workspace.mode(),
             theme: workspace.theme().clone(),
             last_error: workspace.last_error().map(ToOwned::to_owned),
         }
+    }
+
+    pub fn new_document(&mut self) -> Result<AppSnapshot, String> {
+        self.runtime
+            .new_document()
+            .map_err(|error| error.to_string())?;
+        Ok(self.snapshot())
     }
 
     pub fn open_document(&mut self, path: &Path) -> Result<AppSnapshot, String> {
@@ -167,6 +179,11 @@ fn bootstrap(state: State<'_, DesktopAppState>) -> Result<AppSnapshot, String> {
 }
 
 #[tauri::command]
+fn new_document(state: State<'_, DesktopAppState>) -> Result<AppSnapshot, String> {
+    with_backend(state, DesktopBackend::new_document)
+}
+
+#[tauri::command]
 fn open_document(path: String, state: State<'_, DesktopAppState>) -> Result<AppSnapshot, String> {
     with_backend(state, |backend| backend.open_document(Path::new(&path)))
 }
@@ -245,6 +262,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap,
+            new_document,
             open_document,
             open_workspace,
             open_workspace_document,
@@ -370,5 +388,21 @@ mod tests {
             fs::read_to_string(&original_path).unwrap(),
             "# Notes\n\nOriginal"
         );
+    }
+
+    #[test]
+    fn backend_new_document_snapshot_exposes_an_untitled_draft_without_a_path() {
+        let mut backend = DesktopBackend::new(None);
+
+        let snapshot = backend.new_document().unwrap();
+
+        assert_eq!(snapshot.active_document_path, None);
+        assert_eq!(
+            snapshot.active_document_name.as_deref(),
+            Some("Untitled.md")
+        );
+        assert_eq!(snapshot.active_document_source.as_deref(), Some(""));
+        assert!(snapshot.active_document_dirty);
+        assert!(snapshot.recent_documents.is_empty());
     }
 }

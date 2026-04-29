@@ -13,6 +13,7 @@ export interface AppSnapshot {
   rootDir: string | null;
   workspaceDocuments: string[];
   recentDocuments: string[];
+  activeDocumentName: string | null;
   activeDocumentPath: string | null;
   activeDocumentSource: string | null;
   activeDocumentDirty: boolean;
@@ -23,6 +24,10 @@ export interface AppSnapshot {
 
 export async function bootstrap() {
   return invoke<AppSnapshot>('bootstrap');
+}
+
+export async function newDocument() {
+  return invoke<AppSnapshot>('new_document');
 }
 
 export async function openDocument(path: string) {

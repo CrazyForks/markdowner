@@ -22,6 +22,7 @@ import {
   type ThemeKind,
   bootstrap,
   importTheme,
+  newDocument,
   openDocument,
   openWorkspace,
   openWorkspaceDocument,
@@ -36,6 +37,7 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
   rootDir: null,
   workspaceDocuments: [],
   recentDocuments: [],
+  activeDocumentName: null,
   activeDocumentPath: null,
   activeDocumentSource: null,
   activeDocumentDirty: false,
@@ -101,8 +103,9 @@ export default function App() {
   const [busy, setBusy] = useState(false);
 
   const currentMode = snapshot.mode;
-  const activeDocumentOpen = Boolean(snapshot.activeDocumentPath);
+  const activeDocumentOpen = snapshot.activeDocumentSource !== null;
   const errorMessage = snapshot.lastError;
+  const activeDocumentName = snapshot.activeDocumentName ?? 'No document open';
 
   const applySnapshot = (next: AppSnapshot, preserveDraft = false) => {
     startTransition(() => {
@@ -139,7 +142,7 @@ export default function App() {
   }, [snapshot]);
 
   useEffect(() => {
-    if (!snapshot.activeDocumentPath) {
+    if (snapshot.activeDocumentSource === null) {
       return;
     }
     if (localDraft === (snapshot.activeDocumentSource ?? '')) {
@@ -201,7 +204,9 @@ export default function App() {
     }
   }, [editor, localDraft]);
 
-  const previewSource = localDraft || '*Open a Markdown document to preview it.*';
+  const previewSource = activeDocumentOpen
+    ? localDraft
+    : '*Open a Markdown document to preview it.*';
 
   const withBusy = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -210,6 +215,13 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleNewDocument = async () => {
+    await withBusy(async () => {
+      const next = await newDocument();
+      applySnapshot(next);
+    });
   };
 
   const handleOpenDocument = async () => {
@@ -224,6 +236,11 @@ export default function App() {
     }
 
     await withBusy(async () => {
+      if (activeDocumentOpen) {
+        const synced = await replaceActiveDocumentSource(localDraft);
+        applySnapshot(synced, true);
+      }
+
       const next = await openDocument(selected);
       applySnapshot(next);
     });
@@ -246,7 +263,11 @@ export default function App() {
   };
 
   const handleSave = async () => {
+    if (!activeDocumentOpen) {
+      return;
+    }
     if (!snapshot.activeDocumentPath) {
+      await handleSaveAs();
       return;
     }
 
@@ -276,12 +297,12 @@ export default function App() {
   };
 
   const handleSaveAs = async () => {
-    if (!snapshot.activeDocumentPath) {
+    if (!activeDocumentOpen) {
       return;
     }
 
     const selected = await saveDialog({
-      defaultPath: snapshot.activeDocumentPath,
+      defaultPath: snapshot.activeDocumentPath ?? snapshot.activeDocumentName ?? 'Untitled.md',
       filters: [{ name: 'Markdown', extensions: MARKDOWN_FILE_EXTENSIONS }],
     });
 
@@ -299,7 +320,7 @@ export default function App() {
 
   const handleSetMode = async (nextMode: EditorMode) => {
     await withBusy(async () => {
-      if (snapshot.activeDocumentPath) {
+      if (activeDocumentOpen) {
         const synced = await replaceActiveDocumentSource(localDraft);
         applySnapshot(synced, true);
       }
@@ -318,7 +339,7 @@ export default function App() {
 
   const handleOpenWorkspaceDocument = async (path: string) => {
     await withBusy(async () => {
-      if (snapshot.activeDocumentPath) {
+      if (activeDocumentOpen) {
         const synced = await replaceActiveDocumentSource(localDraft);
         applySnapshot(synced, true);
       }
@@ -330,7 +351,7 @@ export default function App() {
 
   const handleOpenRecentDocument = async (path: string) => {
     await withBusy(async () => {
-      if (snapshot.activeDocumentPath) {
+      if (activeDocumentOpen) {
         const synced = await replaceActiveDocumentSource(localDraft);
         applySnapshot(synced, true);
       }
@@ -354,6 +375,9 @@ export default function App() {
 
         <div className="sidebar-group">
           <div className="sidebar-group-header">Workspace</div>
+          <button className="primary-button" onClick={handleNewDocument} disabled={busy}>
+            New Document
+          </button>
           <button className="secondary-button" onClick={handleOpenWorkspace} disabled={busy}>
             Open Folder…
           </button>
@@ -467,13 +491,13 @@ export default function App() {
 
         <section className="document-header">
           <div>
-            <div className="document-title">
-              {snapshot.activeDocumentPath
-                ? displayFileName(snapshot.activeDocumentPath)
-                : 'No document open'}
-            </div>
+            <div className="document-title">{activeDocumentName}</div>
             <div className="document-meta">
-              {snapshot.rootDir ?? 'Open a workspace or a Markdown file to begin.'}
+              {snapshot.activeDocumentPath
+                ? displayWorkspacePath(snapshot.activeDocumentPath, snapshot.rootDir)
+                : activeDocumentOpen
+                  ? 'Save As to choose where this draft lives.'
+                  : 'Open a workspace or a Markdown file to begin.'}
             </div>
           </div>
           <div className="document-status">
