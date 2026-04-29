@@ -41,6 +41,10 @@ fn markdown_fixtures_cover_seed_v0_policies() {
 #[test]
 fn markdown_fixtures_include_v0_code_fence_image_and_unsupported_seed_coverage() {
     let fixtures = load_fixture_catalog();
+    let heading_fixtures = fixtures
+        .iter()
+        .filter(|fixture| fixture.category == "headings-and-paragraphs")
+        .count();
     let code_fence_fixtures = fixtures
         .iter()
         .filter(|fixture| fixture.category == "code-fences")
@@ -58,6 +62,11 @@ fn markdown_fixtures_include_v0_code_fence_image_and_unsupported_seed_coverage()
         .filter(|fixture| fixture.category == "unsupported")
         .count();
 
+    assert!(
+        heading_fixtures >= 4,
+        "expected at least four v0.2 headings-and-paragraphs fixtures, found {}",
+        heading_fixtures
+    );
     assert!(
         code_fence_fixtures >= 4,
         "expected at least four v0.2 code-fence fixtures, found {}",

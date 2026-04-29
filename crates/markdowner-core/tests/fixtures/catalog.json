@@ -11,6 +11,39 @@
     "notes": "Baseline heading and paragraph round trip."
   },
   {
+    "id": "MD-FIX-HDG-002",
+    "category": "headings-and-paragraphs",
+    "source": "headings/levels-three-through-six.md",
+    "expected": "headings/levels-three-through-six.expected.md",
+    "policy": "byte-for-byte",
+    "features": ["heading", "h3", "h4", "h5", "h6"],
+    "unsupported_behavior": "none",
+    "release_gate": ["v0.2"],
+    "notes": "Deeper heading levels should stay source-stable across no-op saves."
+  },
+  {
+    "id": "MD-FIX-HDG-003",
+    "category": "headings-and-paragraphs",
+    "source": "headings/multiline-paragraph.md",
+    "expected": "headings/multiline-paragraph.expected.md",
+    "policy": "byte-for-byte",
+    "features": ["heading", "multiline-paragraph"],
+    "unsupported_behavior": "none",
+    "release_gate": ["v0.2"],
+    "notes": "Paragraph lines joined without a blank separator should remain rendered and byte-stable."
+  },
+  {
+    "id": "MD-FIX-HDG-004",
+    "category": "headings-and-paragraphs",
+    "source": "headings/blank-line-groups.md",
+    "expected": "headings/blank-line-groups.expected.md",
+    "policy": "byte-for-byte",
+    "features": ["heading", "paragraph", "blank-lines"],
+    "unsupported_behavior": "none",
+    "release_gate": ["v0.2"],
+    "notes": "Blank-line-separated sections should preserve spacing without forcing raw fallback."
+  },
+  {
     "id": "MD-FIX-INL-001",
     "category": "inline-formatting",
     "source": "inline/emphasis-links-code.md",
