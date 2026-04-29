@@ -197,6 +197,12 @@ impl DesktopBackend {
         Ok(self.snapshot())
     }
 
+    pub fn has_active_document_external_changes(&mut self) -> Result<bool, String> {
+        self.runtime
+            .active_document_has_external_modifications()
+            .map_err(|error| error.to_string())
+    }
+
     pub fn set_mode(&mut self, mode: EditorMode) -> AppSnapshot {
         self.runtime.set_mode(mode);
         self.snapshot()
@@ -343,6 +349,11 @@ fn save_active_document_as(
 }
 
 #[tauri::command]
+fn has_active_document_external_changes(state: State<'_, DesktopAppState>) -> Result<bool, String> {
+    with_backend(state, DesktopBackend::has_active_document_external_changes)
+}
+
+#[tauri::command]
 fn set_mode(mode: EditorMode, state: State<'_, DesktopAppState>) -> Result<AppSnapshot, String> {
     with_backend(state, |backend| Ok(backend.set_mode(mode)))
 }
@@ -390,6 +401,7 @@ pub fn run() {
             replace_active_document_source,
             save_active_document,
             save_active_document_as,
+            has_active_document_external_changes,
             set_mode,
             set_theme,
             import_theme,

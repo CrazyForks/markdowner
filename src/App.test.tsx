@@ -12,6 +12,7 @@ import type { AppSnapshot } from './lib/desktop';
 
 const bootstrapMock = vi.fn();
 const importThemeMock = vi.fn();
+const hasActiveDocumentExternalChangesMock = vi.fn();
 const newDocumentMock = vi.fn();
 const openDocumentMock = vi.fn();
 const openWorkspaceMock = vi.fn();
@@ -37,6 +38,7 @@ let menuCommandHandler:
 vi.mock('./lib/desktop', () => ({
   bootstrap: bootstrapMock,
   importTheme: importThemeMock,
+  hasActiveDocumentExternalChanges: hasActiveDocumentExternalChangesMock,
   newDocument: newDocumentMock,
   openDocument: openDocumentMock,
   openWorkspace: openWorkspaceMock,
@@ -127,12 +129,14 @@ describe('App recent documents', () => {
     destroyWindowMock.mockReset();
     onCloseRequestedMock.mockReset();
     listenMock.mockReset();
+    hasActiveDocumentExternalChangesMock.mockReset();
     closeRequestedHandler = undefined;
     menuCommandHandler = undefined;
     onCloseRequestedMock.mockImplementation(async (handler) => {
       closeRequestedHandler = handler;
       return vi.fn();
     });
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(false);
     listenMock.mockImplementation(async (eventName, handler) => {
       if (eventName === 'markdowner://menu-command') {
         menuCommandHandler = handler;
@@ -449,6 +453,111 @@ describe('App recent documents', () => {
     });
   });
 
+  it('blocks save when the active document changed on disk', async () => {
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+    saveActiveDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const saveButton = await screen.findByRole('button', { name: /^save$/i });
+    await screen.findByText('meeting-notes.md');
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(hasActiveDocumentExternalChangesMock).toHaveBeenCalled();
+      expect(saveActiveDocumentMock).not.toHaveBeenCalled();
+      expect(
+        screen.getByText(
+          /Could not save 'meeting-notes\.md' because it changed on disk\./i,
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('lets the user reload from disk when external changes are detected', async () => {
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes\n\nUpdated from disk',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const saveButton = await screen.findByRole('button', { name: /^save$/i });
+    await screen.findByText('meeting-notes.md');
+    fireEvent.click(saveButton);
+
+    const reloadButton = await screen.findByRole('button', { name: /reload from disk/i });
+    fireEvent.click(reloadButton);
+
+    await waitFor(() => {
+      expect(openDocumentMock).toHaveBeenCalledWith('/tmp/project/meeting-notes.md');
+      expect(
+        screen.queryByText(
+          /Could not save 'meeting-notes\.md' because it changed on disk\./i,
+        ),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('lets the user keep local edits when external changes are detected', async () => {
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const saveButton = await screen.findByRole('button', { name: /^save$/i });
+    await screen.findByText('meeting-notes.md');
+    fireEvent.click(saveButton);
+
+    const keepButton = await screen.findByRole('button', { name: /keep local/i });
+    fireEvent.click(keepButton);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(
+          /Could not save 'meeting-notes\.md' because it changed on disk\./i,
+        ),
+      ).not.toBeInTheDocument();
+    });
+    expect(openDocumentMock).not.toHaveBeenCalled();
+  });
+
   it('syncs the unsaved draft before creating a new document', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
@@ -739,6 +848,57 @@ describe('App recent documents', () => {
       expect(saveActiveDocumentMock).toHaveBeenCalled();
       expect(destroyWindowMock).toHaveBeenCalled();
     });
+  });
+
+  it('keeps the window open when the active document changed externally and user chose save', async () => {
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        activeDocumentDirty: true,
+      }),
+    );
+    messageMock.mockResolvedValue('Save');
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(onCloseRequestedMock).toHaveBeenCalled();
+      expect(closeRequestedHandler).toBeTypeOf('function');
+    });
+
+    const preventDefault = vi.fn();
+    await closeRequestedHandler?.({ preventDefault });
+
+    await waitFor(() => {
+      expect(preventDefault).toHaveBeenCalled();
+      expect(messageMock).toHaveBeenCalledWith(
+        "Save changes to 'meeting-notes.md' before closing?",
+        {
+          buttons: {
+            yes: 'Save',
+            no: "Don't Save",
+            cancel: 'Cancel',
+          },
+          kind: 'warning',
+          title: 'Markdowner',
+        },
+      );
+      expect(hasActiveDocumentExternalChangesMock).toHaveBeenCalled();
+    });
+
+    expect(destroyWindowMock).not.toHaveBeenCalled();
+    expect(saveActiveDocumentMock).not.toHaveBeenCalled();
+    expect(saveActiveDocumentAsMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        /Could not save 'meeting-notes\.md' because it changed on disk\./i,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('keeps the dirty window open when close confirmation is cancelled', async () => {

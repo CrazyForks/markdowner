@@ -294,6 +294,13 @@ impl EditorRuntime {
         };
         let source = active_document.source().to_string();
 
+        if self.active_document_has_external_modifications()? {
+            return self.fail(RuntimeError::new(format!(
+                "Could not save document '{}' because it has changed on disk",
+                path.display()
+            )));
+        }
+
         if let Err(error) = write_document_source(&path, &source) {
             return self.fail(error);
         }
@@ -314,6 +321,16 @@ impl EditorRuntime {
             ));
         };
         let source = active_document.source().to_string();
+        let backing_path = active_document.backing_path().map(Path::to_path_buf);
+
+        if let Some(backing_path) = backing_path {
+            if self.active_document_has_external_modifications()? {
+                return self.fail(RuntimeError::new(format!(
+                    "Could not save document '{}' because it has changed on disk",
+                    backing_path.display()
+                )));
+            }
+        }
 
         if let Err(error) = write_document_source(path, &source) {
             return self.fail(error);
@@ -503,6 +520,38 @@ impl EditorRuntime {
 
         self.workspace.clear_error();
         Ok(path.to_path_buf())
+    }
+
+    pub fn active_document_has_external_modifications(&mut self) -> Result<bool, RuntimeError> {
+        let Some(active_document) = self.workspace.active_document() else {
+            self.workspace.clear_error();
+            return Ok(false);
+        };
+
+        let Some(path) = active_document.backing_path().map(Path::to_path_buf) else {
+            self.workspace.clear_error();
+            return Ok(false);
+        };
+        let Some(synced_source) = active_document.synced_source().map(str::to_string) else {
+            self.workspace.clear_error();
+            return Ok(false);
+        };
+
+        let current_source = match read_document_source(&path) {
+            Ok(current_source) => current_source,
+            Err(error) => {
+                self.workspace.set_last_error(error.to_string());
+                return Err(error);
+            }
+        };
+        let stale = current_source != synced_source;
+        if !stale {
+            self.workspace.clear_error();
+        } else {
+            self.workspace
+                .set_last_error("Active document changed on disk".to_string());
+        }
+        Ok(stale)
     }
 
     fn recover_theme<T>(

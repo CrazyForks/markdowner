@@ -22,6 +22,7 @@ pub struct OpenDocument {
     path: PathBuf,
     backing_path: Option<PathBuf>,
     document: Document,
+    synced_source: Option<String>,
     source: String,
     dirty: bool,
     inline_reveal_selection: Option<InlineRevealSelection>,
@@ -35,6 +36,7 @@ impl OpenDocument {
             backing_path: Some(path.clone()),
             path,
             document,
+            synced_source: Some(source.clone()),
             source,
             dirty: false,
             inline_reveal_selection: None,
@@ -49,6 +51,7 @@ impl OpenDocument {
             backing_path: Some(path.clone()),
             path,
             document,
+            synced_source: Some(source.clone()),
             source,
             dirty: false,
             inline_reveal_selection: None,
@@ -61,6 +64,7 @@ impl OpenDocument {
             path,
             backing_path: None,
             document: Document::default(),
+            synced_source: None,
             source: String::new(),
             dirty: true,
             inline_reveal_selection: None,
@@ -74,6 +78,10 @@ impl OpenDocument {
 
     pub fn backing_path(&self) -> Option<&Path> {
         self.backing_path.as_deref()
+    }
+
+    pub fn synced_source(&self) -> Option<&str> {
+        self.synced_source.as_deref()
     }
 
     pub fn display_name(&self) -> String {
@@ -225,12 +233,14 @@ impl OpenDocument {
 
     fn mark_saved(&mut self) {
         self.dirty = false;
+        self.synced_source = Some(self.source.clone());
     }
 
     fn save_as(&mut self, path: PathBuf) {
         self.backing_path = Some(path.clone());
         self.path = path;
         self.dirty = false;
+        self.synced_source = Some(self.source.clone());
     }
 }
 

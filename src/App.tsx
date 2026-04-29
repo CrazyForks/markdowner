@@ -27,6 +27,7 @@ import {
   type EditorMode,
   type ThemeKind,
   bootstrap,
+  hasActiveDocumentExternalChanges,
   importTheme,
   newDocument,
   openDocument,
@@ -243,6 +244,8 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>(EMPTY_SNAPSHOT);
   const [localDraft, setLocalDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [externalChangeMessage, setExternalChangeMessage] = useState<string | null>(null);
+  const [showExternalChangeActions, setShowExternalChangeActions] = useState(false);
   const [collapsedFolderKeys, setCollapsedFolderKeys] = useState<string[]>([]);
   const [workspaceFilter, setWorkspaceFilter] = useState('');
 
@@ -262,6 +265,8 @@ export default function App() {
   const applySnapshot = (next: AppSnapshot, preserveDraft = false) => {
     startTransition(() => {
       setSnapshot(next);
+      setExternalChangeMessage(null);
+      setShowExternalChangeActions(false);
       if (!preserveDraft) {
         setLocalDraft(next.activeDocumentSource ?? '');
       }
@@ -383,6 +388,36 @@ export default function App() {
     }
   };
 
+  const hasExternalChanges = async () => {
+    if (!activeDocumentOpen || !snapshot.activeDocumentPath) {
+      setExternalChangeMessage(null);
+      setShowExternalChangeActions(false);
+      return false;
+    }
+
+    try {
+      const changed = await hasActiveDocumentExternalChanges();
+      if (!changed) {
+        setExternalChangeMessage(null);
+        setShowExternalChangeActions(false);
+        return false;
+      }
+
+      setExternalChangeMessage(
+        `Could not save '${snapshot.activeDocumentName ?? 'Untitled.md'}' because it changed on disk.`,
+      );
+      setShowExternalChangeActions(true);
+      return true;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setExternalChangeMessage(
+        `Could not verify external changes for '${snapshot.activeDocumentName ?? 'Untitled.md'}': ${reason}`,
+      );
+      setShowExternalChangeActions(false);
+      return true;
+    }
+  };
+
   const syncActiveDraft = async () => {
     if (!activeDocumentOpen) {
       return;
@@ -446,6 +481,9 @@ export default function App() {
 
     await withBusy(async () => {
       await syncActiveDraft();
+      if (await hasExternalChanges()) {
+        return;
+      }
       const next = await saveActiveDocument();
       applySnapshot(next, true);
     });
@@ -473,9 +511,28 @@ export default function App() {
     }
 
     await syncActiveDraft();
+    if (await hasExternalChanges()) {
+      return false;
+    }
     const next = await saveActiveDocument();
     applySnapshot(next, true);
     return true;
+  };
+
+  const handleReloadActiveDocument = async () => {
+    if (!activeDocumentOpen || !snapshot.activeDocumentPath) {
+      return;
+    }
+
+    await withBusy(async () => {
+      const next = await openDocument(snapshot.activeDocumentPath ?? '');
+      applySnapshot(next);
+    });
+  };
+
+  const handleKeepLocalChanges = () => {
+    setExternalChangeMessage(null);
+    setShowExternalChangeActions(false);
   };
 
   const handleImportTheme = async () => {
@@ -937,6 +994,31 @@ export default function App() {
         </section>
 
         {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
+        {externalChangeMessage ? (
+          <div className="error-banner">
+            <div>{externalChangeMessage}</div>
+            {showExternalChangeActions ? (
+              <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => void handleReloadActiveDocument()}
+                >
+                  Reload from disk
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={handleKeepLocalChanges}
+                >
+                  Keep local
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <section className="editor-frame">
           {!activeDocumentOpen ? (

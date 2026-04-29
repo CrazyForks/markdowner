@@ -389,7 +389,41 @@ fn runtime_save_preserves_read_only_file_failures_without_clobbering_existing_by
         fs::read_to_string(&document_path).unwrap(),
         "# Locked\n\nOriginal"
     );
-    assert!(runtime.workspace().active_document().unwrap().is_dirty());
+    assert!(!runtime.workspace().active_document().unwrap().is_dirty());
+}
+
+#[test]
+fn runtime_detects_external_modifications_before_save() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("shared.md");
+    let session_path = temp.path().join("session.json");
+    fs::write(&document_path, "# Original").unwrap();
+
+    let mut runtime = EditorRuntime::default().with_session_store(session_path);
+    runtime.open_document(&document_path).unwrap();
+    fs::write(&document_path, "# Updated externally").unwrap();
+
+    assert!(
+        runtime
+            .active_document_has_external_modifications()
+            .unwrap()
+    );
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Original"
+    );
+    assert_eq!(
+        runtime
+            .workspace()
+            .active_document()
+            .unwrap()
+            .display_name(),
+        "shared.md"
+    );
+
+    let error = runtime.save_active_document().unwrap_err();
+    assert!(error.to_string().contains("because it has changed on disk"));
+    assert!(!runtime.workspace().active_document().unwrap().is_dirty());
 }
 
 #[test]
