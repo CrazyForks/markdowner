@@ -10,6 +10,7 @@ use tempfile::tempdir;
 #[derive(Debug, Deserialize)]
 struct FixtureSpec {
     id: String,
+    category: String,
     source: String,
     expected: String,
     policy: FixturePolicy,
@@ -35,6 +36,30 @@ fn markdown_fixtures_cover_seed_v0_policies() {
     for fixture in fixtures {
         run_fixture(&fixture);
     }
+}
+
+#[test]
+fn markdown_fixtures_include_v0_image_and_unsupported_seed_coverage() {
+    let fixtures = load_fixture_catalog();
+    let image_fixtures = fixtures
+        .iter()
+        .filter(|fixture| fixture.category == "images")
+        .count();
+    let unsupported_fixtures = fixtures
+        .iter()
+        .filter(|fixture| fixture.category == "unsupported")
+        .count();
+
+    assert!(
+        image_fixtures >= 3,
+        "expected at least three v0.2 image fixtures, found {}",
+        image_fixtures
+    );
+    assert!(
+        unsupported_fixtures >= 4,
+        "expected at least four v0.2 unsupported/raw-preserved fixtures, found {}",
+        unsupported_fixtures
+    );
 }
 
 fn load_fixture_catalog() -> Vec<FixtureSpec> {

@@ -55,6 +55,39 @@
     "notes": "Language-tagged and plain fences should round-trip."
   },
   {
+    "id": "MD-FIX-IMG-001",
+    "category": "images",
+    "source": "images/relative-path.md",
+    "expected": "images/relative-path.expected.md",
+    "policy": "byte-for-byte",
+    "features": ["image", "relative-path"],
+    "unsupported_behavior": "none",
+    "release_gate": ["v0.2"],
+    "notes": "Single-line relative image blocks should round-trip without fallback."
+  },
+  {
+    "id": "MD-FIX-IMG-002",
+    "category": "images",
+    "source": "images/title-and-spaces.md",
+    "expected": "images/title-and-spaces.expected.md",
+    "policy": "byte-for-byte",
+    "features": ["image", "title", "space-in-path"],
+    "unsupported_behavior": "none",
+    "release_gate": ["v0.2"],
+    "notes": "Image paths with spaces and quoted titles should be preserved."
+  },
+  {
+    "id": "MD-FIX-IMG-003",
+    "category": "images",
+    "source": "images/relative-parent-path.md",
+    "expected": "images/relative-parent-path.expected.md",
+    "policy": "byte-for-byte",
+    "features": ["image", "relative-parent-path", "alt-text"],
+    "unsupported_behavior": "none",
+    "release_gate": ["v0.2"],
+    "notes": "Parent-relative image paths remain stable across no-op saves."
+  },
+  {
     "id": "MD-FIX-RAW-001",
     "category": "unsupported",
     "source": "unsupported/strikethrough.md",
@@ -75,5 +108,27 @@
     "unsupported_behavior": "raw-fallback",
     "release_gate": ["v0.2"],
     "notes": "HTML blocks are preserved without semantic parsing."
+  },
+  {
+    "id": "MD-FIX-RAW-003",
+    "category": "unsupported",
+    "source": "unsupported/footnote.md",
+    "expected": "unsupported/footnote.expected.md",
+    "policy": "raw-preserved",
+    "features": ["footnote"],
+    "unsupported_behavior": "raw-fallback",
+    "release_gate": ["v0.2"],
+    "notes": "Footnote references and definitions remain source-preserved."
+  },
+  {
+    "id": "MD-FIX-RAW-004",
+    "category": "unsupported",
+    "source": "unsupported/ordered-list.md",
+    "expected": "unsupported/ordered-list.expected.md",
+    "policy": "raw-preserved",
+    "features": ["ordered-list"],
+    "unsupported_behavior": "raw-fallback",
+    "release_gate": ["v0.2"],
+    "notes": "Ordered list syntax stays intact until native support lands."
   }
 ]
