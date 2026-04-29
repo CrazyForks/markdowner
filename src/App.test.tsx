@@ -802,6 +802,31 @@ describe('App recent documents', () => {
     });
   });
 
+  it('closes the window from the native close menu command when document is clean', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Source',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(menuCommandHandler).toBeTypeOf('function');
+    });
+
+    await menuCommandHandler?.({ payload: 'close-window' });
+
+    await waitFor(() => {
+      expect(destroyWindowMock).toHaveBeenCalled();
+    });
+  });
+
   it('switches modes from the native menu event', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

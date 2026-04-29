@@ -65,6 +65,7 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
 const MARKDOWN_FILE_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd'];
 const WINDOW_TITLE = 'Markdowner';
 const MENU_COMMAND_EVENT = 'markdowner://menu-command';
+const MENU_COMMAND_CLOSE_WINDOW = 'close-window';
 
 function usesCommandModifier(event: KeyboardEvent) {
   return event.metaKey || event.ctrlKey;
@@ -656,6 +657,9 @@ export default function App() {
       case 'save-active-document-as':
         await handleSaveAs();
         return;
+      case MENU_COMMAND_CLOSE_WINDOW:
+        await handleWindowCloseCommand();
+        return;
       case 'mode-wysiwyg':
         await handleSetMode('Wysiwyg');
         return;
@@ -841,6 +845,21 @@ export default function App() {
       }
     },
   );
+
+  const handleWindowCloseCommand = async () => {
+    const currentWindow = getCurrentWindow();
+    let prevented = false;
+
+    await handleWindowCloseRequest({
+      preventDefault: () => {
+        prevented = true;
+      },
+    });
+
+    if (!prevented) {
+      await currentWindow.destroy();
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;

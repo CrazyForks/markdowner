@@ -18,6 +18,7 @@ const MENU_COMMAND_OPEN_DOCUMENT: &str = "open-document";
 const MENU_COMMAND_OPEN_WORKSPACE: &str = "open-workspace";
 const MENU_COMMAND_SAVE_ACTIVE_DOCUMENT: &str = "save-active-document";
 const MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS: &str = "save-active-document-as";
+const MENU_COMMAND_CLOSE_WINDOW: &str = "close-window";
 const MENU_COMMAND_SET_MODE_WYSIWYG: &str = "mode-wysiwyg";
 const MENU_COMMAND_SET_MODE_SOURCE: &str = "mode-source";
 const MENU_COMMAND_SET_MODE_PREVIEW: &str = "mode-preview";
@@ -56,6 +57,11 @@ const FILE_MENU_COMMANDS: &[MenuCommandDescriptor] = &[
         id: MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS,
         label: "Save As…",
         accelerator: "CmdOrCtrl+Shift+S",
+    },
+    MenuCommandDescriptor {
+        id: MENU_COMMAND_CLOSE_WINDOW,
+        label: "Close",
+        accelerator: "CmdOrCtrl+W",
     },
 ];
 
@@ -273,6 +279,7 @@ fn menu_command_from_id(id: &str) -> Option<&'static str> {
         MENU_COMMAND_OPEN_WORKSPACE => Some(MENU_COMMAND_OPEN_WORKSPACE),
         MENU_COMMAND_SAVE_ACTIVE_DOCUMENT => Some(MENU_COMMAND_SAVE_ACTIVE_DOCUMENT),
         MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS => Some(MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS),
+        MENU_COMMAND_CLOSE_WINDOW => Some(MENU_COMMAND_CLOSE_WINDOW),
         MENU_COMMAND_SET_MODE_WYSIWYG => Some(MENU_COMMAND_SET_MODE_WYSIWYG),
         MENU_COMMAND_SET_MODE_SOURCE => Some(MENU_COMMAND_SET_MODE_SOURCE),
         MENU_COMMAND_SET_MODE_PREVIEW => Some(MENU_COMMAND_SET_MODE_PREVIEW),
@@ -430,8 +437,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        DesktopBackend, FILE_MENU_COMMANDS, MENU_COMMAND_NEW_DOCUMENT, MENU_COMMAND_OPEN_DOCUMENT,
-        MENU_COMMAND_OPEN_WORKSPACE, MENU_COMMAND_SAVE_ACTIVE_DOCUMENT,
+        DesktopBackend, FILE_MENU_COMMANDS, MENU_COMMAND_CLOSE_WINDOW, MENU_COMMAND_NEW_DOCUMENT,
+        MENU_COMMAND_OPEN_DOCUMENT, MENU_COMMAND_OPEN_WORKSPACE, MENU_COMMAND_SAVE_ACTIVE_DOCUMENT,
         MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS, MENU_COMMAND_SET_MODE_PREVIEW, MENU_FILE_TITLE,
         MENU_VIEW_TITLE, VIEW_MENU_COMMANDS, menu_command_from_id,
     };
@@ -571,6 +578,7 @@ mod tests {
                 MENU_COMMAND_OPEN_WORKSPACE,
                 MENU_COMMAND_SAVE_ACTIVE_DOCUMENT,
                 MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS,
+                MENU_COMMAND_CLOSE_WINDOW,
             ]
         );
         assert_eq!(
@@ -609,6 +617,10 @@ mod tests {
         assert_eq!(
             menu_command_from_id(MENU_COMMAND_SET_MODE_PREVIEW),
             Some(MENU_COMMAND_SET_MODE_PREVIEW)
+        );
+        assert_eq!(
+            menu_command_from_id(MENU_COMMAND_CLOSE_WINDOW),
+            Some(MENU_COMMAND_CLOSE_WINDOW)
         );
         assert_eq!(menu_command_from_id("unknown-command"), None);
     }
