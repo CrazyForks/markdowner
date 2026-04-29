@@ -1,5 +1,10 @@
 use std::{fs, path::PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use markdowner_core::{
     Block, CodeBlockStyleKind, CodeTokenKind, Document, EditorMode, EditorRuntime,
     FileDialogOptions, Inline, InlineRevealRange, InlineRevealSelection, MenuDescriptor, MenuItem,
@@ -323,6 +328,8 @@ fn runtime_loads_markdown_contents_and_saves_active_document() {
     let document_path = temp.path().join("daily.md");
     let session_path = temp.path().join("session.json");
     fs::write(&document_path, "# Daily\n\nLoaded from disk").unwrap();
+    #[cfg(unix)]
+    let original_inode = fs::metadata(&document_path).unwrap().ino();
 
     let mut runtime = EditorRuntime::default().with_session_store(session_path);
     let mut adapter = RecordingAdapter::new(Some(document_path.clone()), None);
@@ -354,6 +361,35 @@ fn runtime_loads_markdown_contents_and_saves_active_document() {
         fs::read_to_string(&document_path).unwrap(),
         "# Updated\n\nSaved back to disk"
     );
+    #[cfg(unix)]
+    assert_ne!(fs::metadata(&document_path).unwrap().ino(), original_inode);
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_save_preserves_read_only_file_failures_without_clobbering_existing_bytes() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("locked.md");
+    let session_path = temp.path().join("session.json");
+    fs::write(&document_path, "# Locked\n\nOriginal").unwrap();
+    let mut permissions = fs::metadata(&document_path).unwrap().permissions();
+    permissions.set_mode(0o444);
+    fs::set_permissions(&document_path, permissions).unwrap();
+
+    let mut runtime = EditorRuntime::default().with_session_store(session_path);
+    runtime.open_document(&document_path).unwrap();
+    runtime
+        .replace_active_document_source("# Locked\n\nEdited")
+        .unwrap();
+
+    let error = runtime.save_active_document().unwrap_err();
+
+    assert!(error.to_string().contains("Could not write markdown file"));
+    assert_eq!(
+        fs::read_to_string(&document_path).unwrap(),
+        "# Locked\n\nOriginal"
+    );
+    assert!(runtime.workspace().active_document().unwrap().is_dirty());
 }
 
 #[test]
