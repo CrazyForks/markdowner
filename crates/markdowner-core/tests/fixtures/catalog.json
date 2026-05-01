@@ -401,5 +401,16 @@
     "unsupported_behavior": "raw-fallback",
     "release_gate": ["v1.0"],
     "notes": "Auto-link syntax should remain source-preserved until native support lands."
+  },
+  {
+    "id": "MD-FIX-RAW-008",
+    "category": "unsupported",
+    "source": "unsupported/mdx-like.md",
+    "expected": "unsupported/mdx-like.expected.md",
+    "policy": "raw-preserved",
+    "features": ["mdx", "jsx", "import", "export"],
+    "unsupported_behavior": "raw-fallback",
+    "release_gate": ["v1.0"],
+    "notes": "MDX-style imports, exports, and JSX blocks stay source-preserved until MDX is supported."
   }
 ]
