@@ -18,6 +18,7 @@ import { Markdown } from '@tiptap/markdown';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import CodeMirror from '@uiw/react-codemirror';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { startTransition, useEffect, useEffectEvent, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -114,6 +115,10 @@ function usesCommandModifier(event: KeyboardEvent) {
 }
 
 const SIDEBAR_STATE_KEY = 'markdowner.sidebarOpen';
+const SIDEBAR_WIDTH_KEY = 'markdowner.sidebarWidth';
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 320;
+const SIDEBAR_DEFAULT_WIDTH = 280;
 
 function readSidebarState(): boolean {
   try {
@@ -128,6 +133,30 @@ function readSidebarState(): boolean {
 function writeSidebarState(isOpen: boolean) {
   try {
     window.localStorage.setItem(SIDEBAR_STATE_KEY, String(isOpen));
+  } catch {
+    // localStorage unavailable; ignore
+  }
+}
+
+function clampSidebarWidth(width: number): number {
+  if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
+
+function readSidebarWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (raw === null) return SIDEBAR_DEFAULT_WIDTH;
+    const parsed = Number.parseInt(raw, 10);
+    return clampSidebarWidth(parsed);
+  } catch {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+}
+
+function writeSidebarWidth(width: number) {
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clampSidebarWidth(width)));
   } catch {
     // localStorage unavailable; ignore
   }
@@ -339,6 +368,8 @@ export default function App() {
   const [collapsedFolderKeys, setCollapsedFolderKeys] = useState<string[]>([]);
   const [workspaceFilter, setWorkspaceFilter] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(readSidebarState());
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readSidebarWidth());
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [debouncedLocalDraft, setDebouncedLocalDraft] = useState(localDraft);
   const [cursorPosition, setCursorPosition] = useState<{ line: number; column: number }>({
@@ -360,6 +391,46 @@ export default function App() {
       return next;
     });
   });
+
+  const handleSidebarResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isSidebarOpen) return;
+    event.preventDefault();
+    setIsResizingSidebar(true);
+  };
+
+  useEffect(() => {
+    if (!isResizingSidebar) return;
+
+    const handleMove = (event: PointerEvent) => {
+      const next = clampSidebarWidth(event.clientX - 48); // subtract ActivityBar width
+      setSidebarWidth(next);
+    };
+
+    const handleUp = () => {
+      setIsResizingSidebar(false);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [isResizingSidebar]);
+
+  useEffect(() => {
+    if (isResizingSidebar) return;
+    writeSidebarWidth(sidebarWidth);
+  }, [isResizingSidebar, sidebarWidth]);
 
   const currentMode = snapshot.mode;
   const activeDocumentOpen = snapshot.activeDocumentSource !== null;
@@ -1133,13 +1204,18 @@ export default function App() {
       />
       <div
         className={cn(
-          'flex-1 grid transition-[grid-template-columns] duration-300 ease-in-out',
-          isSidebarOpen ? 'grid-cols-[48px_280px_minmax(0,1fr)]' : 'grid-cols-[48px_0px_minmax(0,1fr)]',
+          'flex-1 grid',
+          !isResizingSidebar && 'transition-[grid-template-columns] duration-300 ease-in-out',
         )}
+        style={{
+          gridTemplateColumns: isSidebarOpen
+            ? `48px ${sidebarWidth}px 4px minmax(0, 1fr)`
+            : '48px 0px 0px minmax(0, 1fr)',
+        }}
       >
-        <ActivityBar onOpenSettings={() => setIsSettingsOpen(true)} 
-          onToggleSidebar={handleToggleSidebar} 
-          isSidebarOpen={isSidebarOpen} 
+        <ActivityBar onOpenSettings={() => setIsSettingsOpen(true)}
+          onToggleSidebar={handleToggleSidebar}
+          isSidebarOpen={isSidebarOpen}
         />
         <SideBar
           isOpen={isSidebarOpen}
@@ -1159,6 +1235,28 @@ export default function App() {
           displayFileName={displayFileName}
           displayWorkspacePath={displayWorkspacePath}
         />
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuenow={sidebarWidth}
+          aria-valuemin={SIDEBAR_MIN_WIDTH}
+          aria-valuemax={SIDEBAR_MAX_WIDTH}
+          onPointerDown={handleSidebarResizeStart}
+          className={cn(
+            'group relative h-full select-none',
+            isSidebarOpen ? 'cursor-col-resize' : 'pointer-events-none',
+          )}
+          style={{ touchAction: 'none' }}
+        >
+          <div
+            className={cn(
+              'absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border transition-colors',
+              isResizingSidebar && 'bg-primary',
+              isSidebarOpen && 'group-hover:bg-primary/60',
+            )}
+          />
+        </div>
 
       <EditorArea
         busy={busy}

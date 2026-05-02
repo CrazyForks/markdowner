@@ -852,6 +852,25 @@ describe('App recent documents', () => {
     expect(screen.getAllByText('Split View').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('restores the persisted sidebar width on startup and clamps it to 220-320px', async () => {
+    window.localStorage.setItem('markdowner.sidebarOpen', 'true');
+    window.localStorage.setItem('markdowner.sidebarWidth', '999');
+
+    try {
+      const { default: App } = await import('./App');
+
+      render(<App />);
+
+      const separator = await screen.findByRole('separator', { name: /resize sidebar/i });
+      expect(separator).toHaveAttribute('aria-valuemin', '220');
+      expect(separator).toHaveAttribute('aria-valuemax', '320');
+      expect(separator).toHaveAttribute('aria-valuenow', '320');
+    } finally {
+      window.localStorage.removeItem('markdowner.sidebarOpen');
+      window.localStorage.removeItem('markdowner.sidebarWidth');
+    }
+  });
+
   it('opens the Settings dialog with the Cmd+, keyboard shortcut', async () => {
     invokeMock.mockResolvedValue({
       autoSave: false,
