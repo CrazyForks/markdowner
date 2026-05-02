@@ -316,6 +316,10 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(readSidebarState());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [debouncedLocalDraft, setDebouncedLocalDraft] = useState(localDraft);
+  const [cursorPosition, setCursorPosition] = useState<{ line: number; column: number }>({
+    line: 1,
+    column: 1,
+  });
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1146,6 +1150,13 @@ export default function App() {
             height="100%"
             extensions={[markdown()]}
             onChange={(value) => setLocalDraft(value)}
+            onStatistics={(stats) => {
+              const head = stats.selectionAsSingle.head;
+              setCursorPosition({
+                line: stats.line.number,
+                column: head - stats.line.from + 1,
+              });
+            }}
             theme={snapshot.theme.kind === 'BuiltInDark' ? 'dark' : 'light'}
           />
         }
@@ -1173,6 +1184,8 @@ export default function App() {
             ? displayWorkspacePath(snapshot.activeDocumentPath, snapshot.rootDir)
             : null
         }
+        cursorLine={currentMode === 'Wysiwyg' ? null : cursorPosition.line}
+        cursorColumn={currentMode === 'Wysiwyg' ? null : cursorPosition.column}
       />
     </div>
   );

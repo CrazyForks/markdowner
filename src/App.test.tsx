@@ -320,6 +320,38 @@ describe('App recent documents', () => {
     expect(screen.getAllByText('guides/draft.md')).toHaveLength(3);
   });
 
+  it('shows the cursor Ln/Col in the status bar for source-pane modes only', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    expect(await screen.findByText(/^Ln 1, Col 1$/)).toBeInTheDocument();
+
+    setModeMock.mockResolvedValueOnce(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    fireEvent.keyDown(window, { key: '2', metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/^Ln \d+, Col \d+$/)).not.toBeInTheDocument();
+    });
+  });
+
   it('reflects the active document dirty state in the window title', async () => {
     document.title = 'Markdowner';
     bootstrapMock.mockResolvedValue(
