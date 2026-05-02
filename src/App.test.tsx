@@ -1126,6 +1126,59 @@ describe('App recent documents', () => {
     expect(screen.queryByRole('dialog', { name: /command palette/i })).toBeNull();
   });
 
+  it('toggles Word Wrap from the Command Palette and persists it through save_settings', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText(/source editor/i);
+    await waitFor(() => {
+      expect(sourceEditor.getAttribute('data-line-wrap')).toBe('true');
+    });
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(dialog).getByRole('textbox', { name: /command palette search/i });
+
+    fireEvent.change(input, { target: { value: 'wrap' } });
+
+    const wrapOption = await within(dialog).findByRole('option', {
+      name: /disable word wrap/i,
+    });
+    fireEvent.click(wrapOption);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: expect.objectContaining({ editorLineWrap: false }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(sourceEditor.getAttribute('data-line-wrap')).toBe('false');
+    });
+  });
+
   it('opens the Settings dialog with the Cmd+, keyboard shortcut', async () => {
     invokeMock.mockResolvedValue({
       autoSave: false,

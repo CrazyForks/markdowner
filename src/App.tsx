@@ -1297,6 +1297,13 @@ export default function App() {
       shortcut: '⌘P',
       run: () => setIsQuickOpenOpen(true),
     },
+    {
+      id: 'view.toggleWordWrap',
+      category: 'View',
+      label: settings.editorLineWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
+      run: () =>
+        handleSettingsChange({ ...settings, editorLineWrap: !settings.editorLineWrap }),
+    },
     ...EDITOR_MODE_OPTIONS.map((option) => ({
       id: `view.mode.${option.mode}`,
       category: 'View',
