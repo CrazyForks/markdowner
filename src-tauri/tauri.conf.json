@@ -9,6 +9,19 @@
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
+  "plugins": {
+    "cli": {
+      "description": "Markdowner CLI",
+      "args": [
+        {
+          "name": "path",
+          "index": 1,
+          "takesValue": true,
+          "description": "Path to a file or directory to open"
+        }
+      ]
+    }
+  },
   "app": {
     "windows": [
       {

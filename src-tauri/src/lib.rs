@@ -10,6 +10,8 @@ use tauri::{
     menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
 };
 
+use tauri_plugin_cli::CliExt;
+
 const MENU_COMMAND_EVENT: &str = "markdowner://menu-command";
 const MENU_FILE_ID: &str = "file";
 const MENU_VIEW_ID: &str = "view";
@@ -391,6 +393,25 @@ fn import_theme(path: String, state: State<'_, DesktopAppState>) -> Result<AppSn
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_cli::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+                if argv.len() > 1 {
+                    let path_str = &argv[1];
+                    let path = Path::new(path_str);
+                    let state = app.state::<DesktopAppState>();
+                    if let Ok(mut backend) = state.0.lock() {
+                        if path.is_file() {
+                            let _ = backend.open_document(path);
+                        } else if path.is_dir() {
+                            let _ = backend.open_workspace(path);
+                        }
+                        let _ = window.emit("markdowner://update-snapshot", backend.snapshot());
+                    }
+                }
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .on_menu_event(|app, event| {
             if let Some(command) = menu_command_from_id(event.id().as_ref()) {
@@ -403,6 +424,20 @@ pub fn run() {
 
             if let Ok(backend) = state.0.get_mut() {
                 let _ = backend.restore_session();
+
+                // Open CLI arguments if provided
+                if let Ok(matches) = app.cli().matches() {
+                    if let Some(arg_data) = matches.args.get("path") {
+                        if let Some(val) = arg_data.value.as_str() {
+                            let path = Path::new(val);
+                            if path.is_file() {
+                                let _ = backend.open_document(path);
+                            } else if path.is_dir() {
+                                let _ = backend.open_workspace(path);
+                            }
+                        }
+                    }
+                }
             }
 
             let menu = build_app_menu(app.handle())?;

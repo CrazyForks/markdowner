@@ -1,0 +1,29 @@
+--- src-tauri/src/lib.rs
++++ src-tauri/src/lib.rs
+@@ -351,2 +351,27 @@
+ pub fn run() {
+     tauri::Builder::default()
++        .plugin(tauri_plugin_cli::init())
++        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
++            // When another instance is launched, this closure is called
++            if let Some(window) = app.get_window("main") {
++                let _ = window.set_focus();
++                // If argv has a path, open it
++                if argv.len() > 1 {
++                    let path = Path::new(&argv[1]);
++                    let state = app.state::<DesktopAppState>();
++                    if let Ok(mut backend) = state.0.lock() {
++                        if path.is_file() {
++                            let _ = backend.open_document(path);
++                        } else if path.is_dir() {
++                            let _ = backend.open_workspace(path);
++                        }
++                    }
++                    let state = app.state::<DesktopAppState>();
++                    if let Ok(backend) = state.0.lock() {
++                        let _ = window.emit("markdowner://update-snapshot", backend.snapshot());
++                    }
++                }
++            }
++        }))
+         .plugin(tauri_plugin_dialog::init())
