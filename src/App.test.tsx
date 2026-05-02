@@ -1882,6 +1882,34 @@ describe('App recent documents', () => {
     expect(within(dialog).getByLabelText(/font family/i)).toHaveValue('');
   });
 
+  it('exposes a descriptive tooltip on the Settings dialog Reset to Defaults button', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+        };
+      }
+      return undefined;
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const resetButton = within(dialog).getByRole('button', { name: /reset to defaults/i });
+
+    expect(resetButton).toHaveAttribute(
+      'title',
+      'Reset all editor preferences to factory defaults',
+    );
+  });
+
   it('opens a Markdown document from the native menu event', async () => {
     openDialogMock.mockResolvedValue('/tmp/project/from-menu.md');
     openDocumentMock.mockResolvedValue(

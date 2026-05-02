@@ -111,6 +111,7 @@ export function SettingsDialog({
           <Button
             variant="outline"
             onClick={() => onSettingsChange({ ...DEFAULT_SETTINGS })}
+            title="Reset all editor preferences to factory defaults"
           >
             Reset to Defaults
           </Button>
