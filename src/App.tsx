@@ -1304,6 +1304,12 @@ export default function App() {
       run: () =>
         handleSettingsChange({ ...settings, editorLineWrap: !settings.editorLineWrap }),
     },
+    {
+      id: 'preferences.toggleAutoSave',
+      category: 'Preferences',
+      label: settings.autoSave ? 'Disable Auto Save' : 'Enable Auto Save',
+      run: () => handleSettingsChange({ ...settings, autoSave: !settings.autoSave }),
+    },
     ...EDITOR_MODE_OPTIONS.map((option) => ({
       id: `view.mode.${option.mode}`,
       category: 'View',
