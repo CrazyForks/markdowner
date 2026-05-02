@@ -3,12 +3,13 @@ import { Files, Search, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export interface ActivityBarProps {
+  onOpenSettings?: () => void;
   className?: string;
   onToggleSidebar?: () => void;
   isSidebarOpen?: boolean;
 }
 
-export function ActivityBar({ className, onToggleSidebar, isSidebarOpen }: ActivityBarProps) {
+export function ActivityBar({ className, onToggleSidebar, isSidebarOpen, onOpenSettings }: ActivityBarProps) {
   return (
     <div className={cn("flex flex-col items-center py-2 bg-muted/50 border-r border-border h-full", className)}>
       <div className="flex flex-col gap-2 w-full px-2">
@@ -26,7 +27,7 @@ export function ActivityBar({ className, onToggleSidebar, isSidebarOpen }: Activ
         </Button>
       </div>
       <div className="mt-auto flex flex-col gap-2 w-full px-2 mb-2">
-        <Button variant="ghost" size="icon" className="w-8 h-8 rounded-md text-muted-foreground hover:text-foreground" title="Settings (Cmd+,)">
+        <Button variant="ghost" size="icon" className="w-8 h-8 rounded-md text-muted-foreground hover:text-foreground" title="Settings (Cmd+,)" onClick={onOpenSettings}>
           <Settings className="w-5 h-5" />
         </Button>
       </div>

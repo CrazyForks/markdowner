@@ -36,6 +36,7 @@ import { EditorArea } from '@/shell/EditorArea';
 import { Header } from '@/shell/Header';
 import { SideBar } from '@/shell/SideBar';
 import { StatusBar } from '@/shell/StatusBar';
+import { SettingsDialog } from '@/shell/SettingsDialog';
 
 import {
   type AppSnapshot,
@@ -313,6 +314,7 @@ export default function App() {
   const [collapsedFolderKeys, setCollapsedFolderKeys] = useState<string[]>([]);
   const [workspaceFilter, setWorkspaceFilter] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(readSidebarState());
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const handleToggleSidebar = useEffectEvent(() => {
     setIsSidebarOpen((current) => {
@@ -845,6 +847,12 @@ export default function App() {
       }
 
       if (matchesShortcut(event, 'b')) {
+      if (matchesShortcut(event, ',')) {
+        event.preventDefault();
+        setIsSettingsOpen((prev) => !prev);
+        return;
+      }
+
         event.preventDefault();
         handleToggleSidebar();
         return;
@@ -1086,7 +1094,7 @@ export default function App() {
           isSidebarOpen ? 'grid-cols-[48px_280px_minmax(0,1fr)]' : 'grid-cols-[48px_0px_minmax(0,1fr)]',
         )}
       >
-        <ActivityBar 
+        <ActivityBar onOpenSettings={() => setIsSettingsOpen(true)} 
           onToggleSidebar={handleToggleSidebar} 
           isSidebarOpen={isSidebarOpen} 
         />
@@ -1145,6 +1153,8 @@ export default function App() {
         }
       />
       </div>
+      <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+
       <StatusBar
         mode={currentMode}
         theme={snapshot.theme.kind}

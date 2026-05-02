@@ -19,3 +19,4 @@ pub use workspace::{
     EditorMode, InlineRevealRange, InlineRevealSelection, OpenDocument, WorkspaceState,
     WysiwygBlockPresentation, WysiwygBlockView,
 };
+pub mod settings;
