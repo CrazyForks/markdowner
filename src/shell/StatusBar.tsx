@@ -31,7 +31,7 @@ export function StatusBar({
     <footer className="flex items-center justify-between px-3 py-1 border-t border-border bg-muted/50 text-xs text-muted-foreground h-6">
       <div className="flex items-center gap-4 min-w-0">
         {showDirtyStatus ? (
-          <span>{isDirty ? 'Unsaved Changes' : 'Saved'}</span>
+          <span title="Save status">{isDirty ? 'Unsaved Changes' : 'Saved'}</span>
         ) : null}
         {activeDocumentLabel ? (
           <span className="truncate" title={activeDocumentLabel}>
@@ -45,13 +45,13 @@ export function StatusBar({
             {wordCount} {wordCount === 1 ? 'word' : 'words'} · {characterCount} {characterCount === 1 ? 'char' : 'chars'}
           </span>
         ) : null}
-        <span>{mode}</span>
+        <span title="Active editor mode">{mode}</span>
         {showCursorPosition ? (
           <span title="Cursor position">
             Ln {cursorLine}, Col {cursorColumn}
           </span>
         ) : null}
-        <span>{theme}</span>
+        <span title="Active theme">{theme}</span>
         {workspaceName ? (
           <span title={`Workspace: ${workspaceName}`}>{workspaceName}</span>
         ) : null}

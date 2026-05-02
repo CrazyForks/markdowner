@@ -483,6 +483,36 @@ describe('App recent documents', () => {
     expect(within(statusBar as HTMLElement).queryByText(/BuiltInDark/i)).not.toBeInTheDocument();
   });
 
+  it('exposes descriptive tooltips on the StatusBar mode, theme, and save-status spans', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        mode: 'Editor',
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        activeDocumentDirty: false,
+        theme: {
+          kind: 'BuiltInDark',
+          stylesheet: null,
+          stylesheetPath: null,
+        },
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    const { container } = render(<App />);
+
+    await screen.findByText(/^Saved$/);
+    const statusBar = container.querySelector('footer');
+    expect(statusBar).not.toBeNull();
+    const scope = within(statusBar as HTMLElement);
+
+    expect(scope.getByText(/^Saved$/)).toHaveAttribute('title', 'Save status');
+    expect(scope.getByText(/^Editor$/)).toHaveAttribute('title', 'Active editor mode');
+    expect(scope.getByText(/^Dark$/)).toHaveAttribute('title', 'Active theme');
+  });
+
   it('reflects the active document dirty state in the window title', async () => {
     document.title = 'Markdowner';
     bootstrapMock.mockResolvedValue(
