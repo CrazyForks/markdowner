@@ -338,6 +338,16 @@ function formatEditorMode(mode: EditorMode): string {
   return EDITOR_MODE_LABELS[mode] ?? mode;
 }
 
+const THEME_KIND_LABELS: Record<ThemeKind, string> = {
+  BuiltInLight: 'Light',
+  BuiltInDark: 'Dark',
+  CustomCss: 'Custom',
+};
+
+function formatThemeLabel(kind: ThemeKind): string {
+  return THEME_KIND_LABELS[kind] ?? kind;
+}
+
 function applyThemeSelection(themeKind: ThemeKind) {
   document.documentElement.dataset.theme = themeKind;
 }
@@ -1593,7 +1603,7 @@ export default function App() {
 
       <StatusBar
         mode={formatEditorMode(currentMode)}
-        theme={snapshot.theme.kind}
+        theme={formatThemeLabel(snapshot.theme.kind)}
         isDirty={activeDocumentOpen ? snapshot.activeDocumentDirty : null}
         workspaceName={snapshot.rootDir ? displayFileName(snapshot.rootDir) : null}
         activeDocumentLabel={

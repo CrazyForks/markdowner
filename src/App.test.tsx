@@ -459,6 +459,28 @@ describe('App recent documents', () => {
     expect(await screen.findByText(/^Saved$/)).toBeInTheDocument();
   });
 
+  it('renders friendly theme labels in the status bar instead of the raw enum', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        theme: {
+          kind: 'BuiltInDark',
+          stylesheet: null,
+          stylesheetPath: null,
+        },
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    const { container } = render(<App />);
+
+    await screen.findByText(/Start your next document/);
+    const statusBar = container.querySelector('footer');
+    expect(statusBar).not.toBeNull();
+    expect(within(statusBar as HTMLElement).getByText(/^Dark$/)).toBeInTheDocument();
+    expect(within(statusBar as HTMLElement).queryByText(/BuiltInDark/i)).not.toBeInTheDocument();
+  });
+
   it('reflects the active document dirty state in the window title', async () => {
     document.title = 'Markdowner';
     bootstrapMock.mockResolvedValue(
