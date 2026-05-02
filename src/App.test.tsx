@@ -341,7 +341,7 @@ describe('App recent documents', () => {
         activeDocumentName: 'theme-preview.md',
         activeDocumentPath: '/tmp/project/theme-preview.md',
         activeDocumentSource: '# Scoped preview',
-        mode: 'Preview',
+        mode: 'SplitView',
         theme: {
           kind: 'CustomCss',
           stylesheet: 'body, h1 { color: tomato; }',
@@ -605,7 +605,7 @@ describe('App recent documents', () => {
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
-        mode: 'Source',
+        mode: 'Editor',
       }),
     );
     newDocumentMock.mockResolvedValue(
@@ -647,7 +647,7 @@ describe('App recent documents', () => {
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
-        mode: 'Source',
+        mode: 'Editor',
       }),
     );
     openDialogMock.mockResolvedValue('/tmp/project');
@@ -662,7 +662,7 @@ describe('App recent documents', () => {
             ? '# Meeting notes\n\nUnsaved edit'
             : '# Meeting notes',
         activeDocumentDirty: true,
-        mode: 'Source',
+        mode: 'Editor',
       }),
     );
 
@@ -755,7 +755,7 @@ describe('App recent documents', () => {
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
-        mode: 'Source',
+        mode: 'Editor',
       }),
     );
 
@@ -768,7 +768,7 @@ describe('App recent documents', () => {
     fireEvent.keyDown(window, { key: '2', metaKey: true });
 
     await waitFor(() => {
-      expect(setModeMock).toHaveBeenCalledWith('Source');
+      expect(setModeMock).toHaveBeenCalledWith('Editor');
     });
   });
 
@@ -808,7 +808,7 @@ describe('App recent documents', () => {
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
-        mode: 'Source',
+        mode: 'Editor',
       }),
     );
 
@@ -840,7 +840,7 @@ describe('App recent documents', () => {
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
-        mode: 'Preview',
+        mode: 'SplitView',
       }),
     );
 
@@ -852,10 +852,10 @@ describe('App recent documents', () => {
       expect(menuCommandHandler).toBeTypeOf('function');
     });
 
-    await menuCommandHandler?.({ payload: 'mode-preview' });
+    await menuCommandHandler?.({ payload: 'mode-splitview' });
 
     await waitFor(() => {
-      expect(setModeMock).toHaveBeenCalledWith('Preview');
+      expect(setModeMock).toHaveBeenCalledWith('SplitView');
     });
   });
 
@@ -866,7 +866,7 @@ describe('App recent documents', () => {
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
         activeDocumentDirty: true,
-        mode: 'Source',
+        mode: 'Editor',
       }),
     );
     messageMock.mockResolvedValue('Save');
@@ -875,7 +875,7 @@ describe('App recent documents', () => {
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes\n\nUnsaved edit',
-        mode: 'Source',
+        mode: 'Editor',
       }),
     );
 

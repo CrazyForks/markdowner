@@ -20,8 +20,8 @@ const MENU_COMMAND_SAVE_ACTIVE_DOCUMENT: &str = "save-active-document";
 const MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS: &str = "save-active-document-as";
 const MENU_COMMAND_CLOSE_WINDOW: &str = "close-window";
 const MENU_COMMAND_SET_MODE_WYSIWYG: &str = "mode-wysiwyg";
-const MENU_COMMAND_SET_MODE_SOURCE: &str = "mode-source";
-const MENU_COMMAND_SET_MODE_PREVIEW: &str = "mode-preview";
+const MENU_COMMAND_SET_MODE_SOURCE: &str = "mode-editor";
+const MENU_COMMAND_SET_MODE_PREVIEW: &str = "mode-splitview";
 const MENU_FILE_TITLE: &str = "File";
 const MENU_VIEW_TITLE: &str = "View";
 
@@ -451,7 +451,7 @@ mod tests {
 
         let mut backend = DesktopBackend::new(None);
         backend.open_document(&document_path).unwrap();
-        backend.set_mode(markdowner_core::EditorMode::Preview);
+        backend.set_mode(markdowner_core::EditorMode::SplitView);
         backend.set_theme_kind(ThemeKind::BuiltInDark);
 
         let snapshot = backend.snapshot();
@@ -464,7 +464,7 @@ mod tests {
             snapshot.active_document_source.as_deref(),
             Some("# Hello\n\nworld")
         );
-        assert_eq!(snapshot.mode, markdowner_core::EditorMode::Preview);
+        assert_eq!(snapshot.mode, markdowner_core::EditorMode::SplitView);
         assert_eq!(snapshot.theme.kind(), ThemeKind::BuiltInDark);
     }
 

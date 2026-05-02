@@ -320,7 +320,7 @@
     "unsupported_behavior": "none",
     "release_gate": ["v0.2"],
     "session": {
-      "restored_mode": "Preview",
+      "restored_mode": "SplitView",
       "restored_theme_kind": "BuiltInDark"
     },
     "notes": "Persisted editor mode and built-in theme selection should come back after a fresh runtime restore."

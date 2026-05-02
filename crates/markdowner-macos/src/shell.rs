@@ -228,8 +228,8 @@ mod tests {
                 "open-document".to_string(),
                 "open-workspace".to_string(),
                 "mode-wysiwyg".to_string(),
-                "mode-source".to_string(),
-                "mode-preview".to_string(),
+                "mode-editor".to_string(),
+                "mode-splitview".to_string(),
                 "theme-light".to_string(),
                 "theme-dark".to_string(),
                 "theme-import-css".to_string(),
@@ -253,8 +253,8 @@ mod tests {
                 "open-document".to_string(),
                 "open-workspace".to_string(),
                 "mode-wysiwyg".to_string(),
-                "mode-source".to_string(),
-                "mode-preview".to_string(),
+                "mode-editor".to_string(),
+                "mode-splitview".to_string(),
                 "theme-light".to_string(),
                 "theme-dark".to_string(),
                 "theme-import-css".to_string(),
@@ -443,10 +443,10 @@ mod tests {
         shell.request_document_open().unwrap();
 
         let source = "# Source **Heading**\n\n![Preview](assets/preview.png)\n\n| Name | Value |\n| --- | --- |\n| Docs | Ready |\n\n```rust\nfn main() {\n    println!(\"smoke\");\n}\n```\n\n- [ ] Bullet with [link](https://example.com)\n\n> `quoted`";
-        shell.set_mode(EditorMode::Source);
+        shell.set_mode(EditorMode::Editor);
         shell.replace_active_document_source(source).unwrap();
 
-        shell.set_mode(EditorMode::Preview);
+        shell.set_mode(EditorMode::SplitView);
         let preview = shell.workspace().active_preview_document().unwrap();
         assert_eq!(
             shell.workspace().active_document().unwrap().document(),
@@ -505,11 +505,11 @@ mod tests {
         let mut shell = MacShell::with_adapter(runtime, adapter);
         shell.request_document_open().unwrap();
 
-        shell.set_mode(EditorMode::Source);
-        assert_eq!(shell.workspace().mode(), EditorMode::Source);
+        shell.set_mode(EditorMode::Editor);
+        assert_eq!(shell.workspace().mode(), EditorMode::Editor);
 
-        shell.set_mode(EditorMode::Preview);
-        assert_eq!(shell.workspace().mode(), EditorMode::Preview);
+        shell.set_mode(EditorMode::SplitView);
+        assert_eq!(shell.workspace().mode(), EditorMode::SplitView);
 
         shell.set_mode(EditorMode::Wysiwyg);
         shell.set_theme(ThemeSelection::new(ThemeKind::BuiltInDark, None));
@@ -553,13 +553,13 @@ mod tests {
 
         let mut first_shell =
             MacShell::new(WorkspaceState::default()).with_session_store_path(session_path.clone());
-        first_shell.set_mode(EditorMode::Preview);
+        first_shell.set_mode(EditorMode::SplitView);
 
         let mut second_shell =
             MacShell::new(WorkspaceState::default()).with_session_store_path(session_path);
         second_shell.restore_session().unwrap();
 
-        assert_eq!(second_shell.workspace().mode(), EditorMode::Preview);
+        assert_eq!(second_shell.workspace().mode(), EditorMode::SplitView);
     }
 
     #[test]

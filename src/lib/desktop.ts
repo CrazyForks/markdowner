@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-export type EditorMode = 'Wysiwyg' | 'Source' | 'Preview';
+export type EditorMode = 'Wysiwyg' | 'Editor' | 'SplitView';
 export type ThemeKind = 'BuiltInLight' | 'BuiltInDark' | 'CustomCss';
 
 export interface ThemeSelection {

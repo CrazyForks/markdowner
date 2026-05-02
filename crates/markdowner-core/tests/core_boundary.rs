@@ -147,12 +147,12 @@ fn workspace_state_tracks_documents_without_ui_runtime() {
     )])]);
 
     workspace.open_document(path.clone(), document.clone());
-    workspace.set_mode(EditorMode::Preview);
+    workspace.set_mode(EditorMode::SplitView);
 
     assert_eq!(workspace.active_document_path(), Some(path.as_path()));
     assert_eq!(workspace.open_documents()[0].document(), &document);
     assert_eq!(workspace.recent_documents(), &[path]);
-    assert_eq!(workspace.mode(), EditorMode::Preview);
+    assert_eq!(workspace.mode(), EditorMode::SplitView);
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn workspace_projects_preview_mode_as_a_styled_read_only_view() {
 
     assert!(workspace.active_preview_document().is_none());
 
-    workspace.set_mode(EditorMode::Preview);
+    workspace.set_mode(EditorMode::SplitView);
     let preview = workspace.active_preview_document().unwrap();
 
     assert_eq!(preview.document(), &parse_markdown(source));
@@ -206,7 +206,7 @@ fn workspace_theme_changes_immediately_update_document_views_without_mutating_so
         light_code_background
     );
 
-    workspace.set_mode(EditorMode::Preview);
+    workspace.set_mode(EditorMode::SplitView);
     let dark_preview = workspace.active_preview_document().unwrap();
     assert_eq!(dark_preview.theme().palette().background(), "#14161a");
     assert_eq!(workspace.active_document().unwrap().source(), source);
@@ -221,7 +221,7 @@ fn workspace_preview_uses_imported_css_typography_spacing_and_color_styles() {
         "/tmp/custom.css",
         "body { font-family: 'IBM Plex Sans'; line-height: 1.8; color: #223344; }",
     ));
-    workspace.set_mode(EditorMode::Preview);
+    workspace.set_mode(EditorMode::SplitView);
 
     let preview = workspace.active_preview_document().unwrap();
 
@@ -301,8 +301,8 @@ fn runtime_uses_platform_adapter_boundary_for_native_capabilities() {
             MenuItem::new("open-document", "Open…"),
             MenuItem::new("open-workspace", "Open Folder…"),
             MenuItem::new("mode-wysiwyg", "WYSIWYG"),
-            MenuItem::new("mode-source", "Source"),
-            MenuItem::new("mode-preview", "Preview"),
+            MenuItem::new("mode-editor", "Editor"),
+            MenuItem::new("mode-splitview", "Split-view"),
             MenuItem::new("theme-light", "Light Theme"),
             MenuItem::new("theme-dark", "Dark Theme"),
             MenuItem::new("theme-import-css", "Import CSS Theme…"),
@@ -583,12 +583,12 @@ fn runtime_reparses_source_edits_for_rendered_modes() {
 
     let mut runtime = EditorRuntime::default();
     runtime.open_document(&document_path).unwrap();
-    runtime.set_mode(EditorMode::Source);
+    runtime.set_mode(EditorMode::Editor);
 
     let source = "# Source **mode**\n\n- Item with [link](https://example.com)\n\n> `quoted`";
     runtime.replace_active_document_source(source).unwrap();
 
-    runtime.set_mode(EditorMode::Preview);
+    runtime.set_mode(EditorMode::SplitView);
     assert_eq!(
         runtime.workspace().active_document().unwrap().document(),
         &parse_markdown(source)
@@ -688,7 +688,7 @@ fn workspace_uses_the_same_code_block_styling_in_preview_and_wysiwyg() {
 
     let wysiwyg = workspace.active_wysiwyg_view().unwrap();
 
-    workspace.set_mode(EditorMode::Preview);
+    workspace.set_mode(EditorMode::SplitView);
     let preview = workspace.active_preview_document().unwrap();
     let rust_wysiwyg = wysiwyg[0].code_block_style().unwrap().clone();
     let unknown_wysiwyg = wysiwyg[1].code_block_style().unwrap().clone();
@@ -889,12 +889,12 @@ fn runtime_restores_last_editor_mode_across_relaunches() {
     let session_path = temp.path().join("session.json");
 
     let mut first_runtime = EditorRuntime::default().with_session_store(session_path.clone());
-    first_runtime.set_mode(EditorMode::Preview);
+    first_runtime.set_mode(EditorMode::SplitView);
 
     let mut second_runtime = EditorRuntime::default().with_session_store(session_path);
     second_runtime.restore_session().unwrap();
 
-    assert_eq!(second_runtime.workspace().mode(), EditorMode::Preview);
+    assert_eq!(second_runtime.workspace().mode(), EditorMode::SplitView);
 }
 
 #[test]
@@ -939,7 +939,7 @@ fn runtime_imports_custom_css_theme_from_disk_and_restores_it_after_relaunch() {
             "body { font-family: 'IBM Plex Sans'; line-height: 1.7; color: #223344; }",
         )
     );
-    first_runtime.workspace_mut().set_mode(EditorMode::Preview);
+    first_runtime.workspace_mut().set_mode(EditorMode::SplitView);
     let preview = first_runtime.workspace().active_preview_document().unwrap();
     assert_eq!(
         preview.theme().stylesheet(),

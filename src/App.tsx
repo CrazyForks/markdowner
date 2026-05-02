@@ -745,11 +745,11 @@ export default function App() {
       case 'mode-wysiwyg':
         await handleSetMode('Wysiwyg');
         return;
-      case 'mode-source':
-        await handleSetMode('Source');
+      case 'mode-editor':
+        await handleSetMode('Editor');
         return;
-      case 'mode-preview':
-        await handleSetMode('Preview');
+      case 'mode-splitview':
+        await handleSetMode('SplitView');
       default:
     }
   });
@@ -844,13 +844,13 @@ export default function App() {
 
       if (matchesShortcut(event, '2')) {
         event.preventDefault();
-        void handleSetMode('Source');
+        void handleSetMode('Editor');
         return;
       }
 
       if (matchesShortcut(event, '3')) {
         event.preventDefault();
-        void handleSetMode('Preview');
+        void handleSetMode('SplitView');
       }
     };
 
@@ -1105,7 +1105,7 @@ export default function App() {
               variant="outline"
               size="sm"
             >
-              {(['Wysiwyg', 'Source', 'Preview'] as EditorMode[]).map((mode) => (
+              {(['Wysiwyg', 'Editor', 'SplitView'] as EditorMode[]).map((mode) => (
                 <ToggleGroupItem key={mode} value={mode} disabled={busy} aria-label={mode}>
                   {mode}
                 </ToggleGroupItem>
@@ -1242,7 +1242,7 @@ export default function App() {
             </div>
           ) : null}
 
-          {activeDocumentOpen && currentMode === 'Source' ? (
+          {activeDocumentOpen && currentMode === 'Editor' ? (
             <div className="min-h-0 flex-1 overflow-auto">
               <CodeMirror
                 value={localDraft}
@@ -1254,7 +1254,7 @@ export default function App() {
             </div>
           ) : null}
 
-          {activeDocumentOpen && currentMode === 'Preview' ? (
+          {activeDocumentOpen && currentMode === 'SplitView' ? (
             <div
               className={cn(
                 'markdown-surface min-h-0 flex-1 overflow-auto px-8 py-6',
