@@ -426,8 +426,37 @@ describe('App recent documents', () => {
 
     render(<App />);
 
-    await screen.findByText(/Saved/);
+    await screen.findByText(/Start your next document/);
     expect(screen.queryByText(/words ·/)).not.toBeInTheDocument();
+  });
+
+  it('omits the saved/unsaved status bar label when no document is open', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByText(/Start your next document/);
+    expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Unsaved Changes$/)).not.toBeInTheDocument();
+  });
+
+  it('shows the saved/unsaved status bar label when a document is open', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        activeDocumentDirty: false,
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    expect(await screen.findByText(/^Saved$/)).toBeInTheDocument();
   });
 
   it('reflects the active document dirty state in the window title', async () => {

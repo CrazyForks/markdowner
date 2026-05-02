@@ -1,7 +1,7 @@
 interface StatusBarProps {
   mode: string;
   theme: string;
-  isDirty: boolean;
+  isDirty?: boolean | null;
   workspaceName?: string | null;
   activeDocumentLabel?: string | null;
   cursorLine?: number | null;
@@ -25,11 +25,14 @@ export function StatusBar({
     typeof cursorLine === 'number' && typeof cursorColumn === 'number';
   const showDocumentStats =
     typeof wordCount === 'number' && typeof characterCount === 'number';
+  const showDirtyStatus = typeof isDirty === 'boolean';
 
   return (
     <footer className="flex items-center justify-between px-3 py-1 border-t border-border bg-muted/50 text-xs text-muted-foreground h-6">
       <div className="flex items-center gap-4 min-w-0">
-        <span>{isDirty ? 'Unsaved Changes' : 'Saved'}</span>
+        {showDirtyStatus ? (
+          <span>{isDirty ? 'Unsaved Changes' : 'Saved'}</span>
+        ) : null}
         {activeDocumentLabel ? (
           <span className="truncate" title={activeDocumentLabel}>
             {activeDocumentLabel}

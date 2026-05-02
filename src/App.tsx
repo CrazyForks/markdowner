@@ -1593,7 +1593,7 @@ export default function App() {
       <StatusBar
         mode={formatEditorMode(currentMode)}
         theme={snapshot.theme.kind}
-        isDirty={snapshot.activeDocumentDirty}
+        isDirty={activeDocumentOpen ? snapshot.activeDocumentDirty : null}
         workspaceName={snapshot.rootDir ? displayFileName(snapshot.rootDir) : null}
         activeDocumentLabel={
           snapshot.activeDocumentPath
