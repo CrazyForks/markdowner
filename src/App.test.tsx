@@ -393,6 +393,36 @@ describe('App recent documents', () => {
     });
   });
 
+  it('shows word and character counts in the status bar for an open document', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/^3 words · 15 chars$/),
+    ).toBeInTheDocument();
+  });
+
+  it('omits document statistics when no document is open', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByText(/Saved/);
+    expect(screen.queryByText(/words ·/)).not.toBeInTheDocument();
+  });
+
   it('reflects the active document dirty state in the window title', async () => {
     document.title = 'Markdowner';
     bootstrapMock.mockResolvedValue(

@@ -19,7 +19,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { startTransition, useEffect, useEffectEvent, useState } from 'react';
+import { startTransition, useEffect, useEffectEvent, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -394,6 +394,13 @@ export default function App() {
       setDebouncedLocalDraft(localDraft);
     }, 250);
     return () => clearTimeout(timer);
+  }, [localDraft]);
+
+  const documentStats = useMemo(() => {
+    const characters = localDraft.length;
+    const trimmed = localDraft.trim();
+    const words = trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
+    return { words, characters };
   }, [localDraft]);
 
   const handleToggleSidebar = useEffectEvent(() => {
@@ -1558,6 +1565,8 @@ export default function App() {
         }
         cursorLine={currentMode === 'Wysiwyg' ? null : cursorPosition.line}
         cursorColumn={currentMode === 'Wysiwyg' ? null : cursorPosition.column}
+        wordCount={activeDocumentOpen ? documentStats.words : null}
+        characterCount={activeDocumentOpen ? documentStats.characters : null}
       />
     </div>
   );
