@@ -31,6 +31,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
+import { ActivityBar } from '@/shell/ActivityBar';
 import { Header } from '@/shell/Header';
 import { StatusBar } from '@/shell/StatusBar';
 
@@ -1080,9 +1081,13 @@ export default function App() {
       <div
         className={cn(
           'flex-1 grid transition-[grid-template-columns] duration-300 ease-in-out',
-          isSidebarOpen ? 'grid-cols-[280px_minmax(0,1fr)]' : 'grid-cols-[0px_minmax(0,1fr)]',
+          isSidebarOpen ? 'grid-cols-[48px_280px_minmax(0,1fr)]' : 'grid-cols-[48px_0px_minmax(0,1fr)]',
         )}
       >
+        <ActivityBar 
+          onToggleSidebar={handleToggleSidebar} 
+          isSidebarOpen={isSidebarOpen} 
+        />
         <aside
           className={cn(
             'flex min-h-0 flex-col gap-5 overflow-y-auto border-r border-border bg-sidebar p-5 text-sidebar-foreground transition-opacity duration-300 ease-in-out',
