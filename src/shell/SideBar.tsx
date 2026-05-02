@@ -56,8 +56,8 @@ export function SideBar({
         </Badge>
         <h1 className="text-xl font-bold leading-tight">Write Markdown with confidence</h1>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Work locally, keep your files intact, and switch between WYSIWYG, Source, and Preview
-          without losing your place.
+          Work locally, keep your files intact, and switch between Editor, WYSIWYG, and Split
+          View without losing your place.
         </p>
       </div>
 
