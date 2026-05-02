@@ -51,7 +51,7 @@ export function StatusBar({
             Ln {cursorLine}, Col {cursorColumn}
           </span>
         ) : null}
-        <span className="uppercase">{theme}</span>
+        <span>{theme}</span>
         {workspaceName ? (
           <span title={`Workspace: ${workspaceName}`}>{workspaceName}</span>
         ) : null}

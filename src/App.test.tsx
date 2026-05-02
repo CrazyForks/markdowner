@@ -477,7 +477,9 @@ describe('App recent documents', () => {
     await screen.findByText(/Start your next document/);
     const statusBar = container.querySelector('footer');
     expect(statusBar).not.toBeNull();
-    expect(within(statusBar as HTMLElement).getByText(/^Dark$/)).toBeInTheDocument();
+    const themeLabel = within(statusBar as HTMLElement).getByText(/^Dark$/);
+    expect(themeLabel).toBeInTheDocument();
+    expect(themeLabel.className).not.toMatch(/uppercase/);
     expect(within(statusBar as HTMLElement).queryByText(/BuiltInDark/i)).not.toBeInTheDocument();
   });
 
