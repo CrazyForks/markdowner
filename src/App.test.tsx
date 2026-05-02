@@ -1220,6 +1220,44 @@ describe('App recent documents', () => {
     });
   });
 
+  it('groups Command Palette entries contiguously in File → View → Preferences → Theme order', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const options = within(dialog).getAllByRole('option');
+    const categories = options.map((option) => {
+      const labelNode = option.querySelector('.uppercase');
+      return labelNode?.textContent?.trim() ?? '';
+    });
+
+    let lastIndex = -1;
+    for (const expected of ['File', 'View', 'Preferences', 'Theme']) {
+      const firstIndex = categories.indexOf(expected);
+      const lastSeen = categories.lastIndexOf(expected);
+      expect(firstIndex).toBeGreaterThan(lastIndex);
+      const slice = categories.slice(firstIndex, lastSeen + 1);
+      expect(slice.every((category) => category === expected)).toBe(true);
+      lastIndex = lastSeen;
+    }
+  });
+
   it('opens the Settings dialog with the Cmd+, keyboard shortcut', async () => {
     invokeMock.mockResolvedValue({
       autoSave: false,

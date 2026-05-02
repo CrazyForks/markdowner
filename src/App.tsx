@@ -1297,6 +1297,13 @@ export default function App() {
       shortcut: '⌘P',
       run: () => setIsQuickOpenOpen(true),
     },
+    ...EDITOR_MODE_OPTIONS.map((option) => ({
+      id: `view.mode.${option.mode}`,
+      category: 'View',
+      label: `Mode: ${option.label}`,
+      shortcut: option.shortcutSymbol,
+      run: () => void handleSetMode(option.mode),
+    })),
     {
       id: 'preferences.toggleWordWrap',
       category: 'Preferences',
@@ -1310,13 +1317,13 @@ export default function App() {
       label: settings.autoSave ? 'Disable Auto Save' : 'Enable Auto Save',
       run: () => handleSettingsChange({ ...settings, autoSave: !settings.autoSave }),
     },
-    ...EDITOR_MODE_OPTIONS.map((option) => ({
-      id: `view.mode.${option.mode}`,
-      category: 'View',
-      label: `Mode: ${option.label}`,
-      shortcut: option.shortcutSymbol,
-      run: () => void handleSetMode(option.mode),
-    })),
+    {
+      id: 'app.settings',
+      category: 'Preferences',
+      label: 'Open Settings',
+      shortcut: '⌘,',
+      run: () => setIsSettingsOpen(true),
+    },
     {
       id: 'theme.light',
       category: 'Theme',
@@ -1340,13 +1347,6 @@ export default function App() {
       category: 'Theme',
       label: 'Import CSS Theme…',
       run: () => void handleImportTheme(),
-    },
-    {
-      id: 'app.settings',
-      category: 'Preferences',
-      label: 'Open Settings',
-      shortcut: '⌘,',
-      run: () => setIsSettingsOpen(true),
     },
   ];
 
