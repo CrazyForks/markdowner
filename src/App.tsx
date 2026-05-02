@@ -22,6 +22,24 @@ import { startTransition, useEffect, useEffectEvent, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { cn } from '@/lib/utils';
+
 import {
   type AppSnapshot,
   type EditorMode,
@@ -66,6 +84,32 @@ const MARKDOWN_FILE_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd'];
 const WINDOW_TITLE = 'Markdowner';
 const MENU_COMMAND_EVENT = 'markdowner://menu-command';
 const MENU_COMMAND_CLOSE_WINDOW = 'close-window';
+
+const THEME_MODE_STORAGE_KEY = 'markdowner.themeMode';
+type ThemeMode = 'system' | 'manual';
+
+function readThemeMode(): ThemeMode {
+  try {
+    return window.localStorage.getItem(THEME_MODE_STORAGE_KEY) === 'manual' ? 'manual' : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
+function writeThemeMode(mode: ThemeMode) {
+  try {
+    window.localStorage.setItem(THEME_MODE_STORAGE_KEY, mode);
+  } catch {
+    // localStorage unavailable; ignore
+  }
+}
+
+function resolveOsTheme(): ThemeKind {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'BuiltInDark';
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'BuiltInDark' : 'BuiltInLight';
+}
 
 function usesCommandModifier(event: KeyboardEvent) {
   return event.metaKey || event.ctrlKey;
@@ -281,10 +325,25 @@ export default function App() {
     let cancelled = false;
 
     bootstrap()
-      .then((next) => {
-        if (!cancelled) {
-          applySnapshot(next);
+      .then(async (next) => {
+        if (cancelled) {
+          return;
         }
+        if (readThemeMode() === 'system' && next.theme.kind !== 'CustomCss') {
+          const osKind = resolveOsTheme();
+          if (next.theme.kind !== osKind) {
+            try {
+              const synced = await setTheme(osKind);
+              if (!cancelled) {
+                applySnapshot(synced);
+              }
+              return;
+            } catch (error) {
+              console.error(error);
+            }
+          }
+        }
+        applySnapshot(next);
       })
       .catch((error) => {
         if (!cancelled) {
@@ -294,6 +353,28 @@ export default function App() {
 
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleOsThemeChange = async () => {
+      if (readThemeMode() !== 'system') {
+        return;
+      }
+      try {
+        const next = await setTheme(resolveOsTheme());
+        applySnapshot(next, true);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    mediaQuery.addEventListener('change', handleOsThemeChange);
+    return () => {
+      mediaQuery.removeEventListener('change', handleOsThemeChange);
     };
   }, []);
 
@@ -609,6 +690,7 @@ export default function App() {
 
   const handleSetTheme = async (themeKind: ThemeKind) => {
     await withBusy(async () => {
+      writeThemeMode('manual');
       const next = await setTheme(themeKind);
       applySnapshot(next, true);
     });
@@ -677,21 +759,21 @@ export default function App() {
       const collapsed = !filteringWorkspace && collapsedFolderKeys.includes(node.key);
 
       return (
-        <div key={node.key} className="tree-folder">
+        <div key={node.key} className="flex flex-col gap-1">
           <button
             type="button"
-            className="tree-folder-toggle"
+            className="flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
             aria-expanded={!collapsed}
             onClick={() => handleToggleWorkspaceFolder(node.key)}
-            style={{ paddingLeft: `${depth * 18}px` }}
+            style={{ paddingLeft: `${depth * 14}px` }}
           >
-            <span className="tree-folder-caret" aria-hidden="true">
+            <span className="inline-block w-3 text-center" aria-hidden="true">
               {collapsed ? '▸' : '▾'}
             </span>
-            <span>{node.name}</span>
+            <span className="truncate">{node.name}</span>
           </button>
           {!collapsed ? (
-            <div className="tree-folder-children">
+            <div className="flex flex-col gap-1">
               {node.children.map((child) => renderWorkspaceTreeNode(child, depth + 1))}
             </div>
           ) : null}
@@ -699,17 +781,21 @@ export default function App() {
       );
     }
 
+    const isActive = node.path === snapshot.activeDocumentPath;
+
     return (
       <button
         key={node.key}
-        className={
-          node.path === snapshot.activeDocumentPath ? 'tree-item tree-item-active' : 'tree-item'
-        }
+        type="button"
+        className={cn(
+          'flex w-full flex-col items-start gap-0.5 rounded-md border border-transparent px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+          isActive && 'border-border bg-accent text-accent-foreground',
+        )}
         onClick={() => handleOpenWorkspaceDocument(node.path)}
-        style={{ paddingLeft: `${14 + depth * 18}px` }}
+        style={{ paddingLeft: `${12 + depth * 14}px` }}
       >
-        <span className="tree-name">{node.name}</span>
-        <span className="tree-path">{node.relativePath}</span>
+        <span className="truncate font-medium">{node.name}</span>
+        <span className="truncate text-xs text-muted-foreground">{node.relativePath}</span>
       </button>
     );
   };
@@ -887,233 +973,277 @@ export default function App() {
     };
   }, []);
 
+  const documentMeta = snapshot.activeDocumentPath
+    ? displayWorkspacePath(snapshot.activeDocumentPath, snapshot.rootDir)
+    : activeDocumentOpen
+      ? 'Save As to choose where this draft lives.'
+      : 'Open a workspace or a Markdown file to begin.';
+
   return (
-    <div className="desktop-shell">
-      <aside className="left-rail">
-        <div className="brand-block">
-          <div className="eyebrow">Markdowner</div>
-          <h1>Write Markdown with confidence</h1>
-          <p>
-            Work locally, keep your files intact, and switch between WYSIWYG, Source,
-            and Preview without losing your place.
+    <div className="grid min-h-screen grid-cols-[280px_minmax(0,1fr)] bg-background text-foreground">
+      <aside className="flex min-h-0 flex-col gap-5 overflow-y-auto border-r border-border bg-sidebar text-sidebar-foreground p-5">
+        <div className="space-y-2">
+          <Badge variant="secondary" className="uppercase tracking-wider">
+            Markdowner
+          </Badge>
+          <h1 className="text-xl font-bold leading-tight">Write Markdown with confidence</h1>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Work locally, keep your files intact, and switch between WYSIWYG, Source, and Preview
+            without losing your place.
           </p>
         </div>
 
-        <div className="sidebar-group">
-          <div className="sidebar-group-header">Workspace</div>
-          <button className="primary-button" onClick={handleNewDocument} disabled={busy}>
-            New Document
-          </button>
-          <button className="secondary-button" onClick={handleOpenWorkspace} disabled={busy}>
-            Open Folder…
-          </button>
-          <button className="secondary-button" onClick={handleOpenDocument} disabled={busy}>
-            Open Markdown…
-          </button>
-        </div>
+        <Separator />
 
-        <div className="sidebar-group">
-          <div className="sidebar-group-header">Files</div>
+        <section className="flex flex-col gap-2">
+          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Workspace
+          </div>
+          <Button onClick={handleNewDocument} disabled={busy}>
+            New Document
+          </Button>
+          <Button variant="outline" onClick={handleOpenWorkspace} disabled={busy}>
+            Open Folder…
+          </Button>
+          <Button variant="outline" onClick={handleOpenDocument} disabled={busy}>
+            Open Markdown…
+          </Button>
+        </section>
+
+        <Separator />
+
+        <section className="flex min-h-0 flex-col gap-2">
+          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Files
+          </div>
           {workspaceTree.length === 0 ? (
-            <div className="empty-hint">Open a folder to populate the file tree.</div>
+            <p className="text-xs text-muted-foreground">
+              Open a folder to populate the file tree.
+            </p>
           ) : (
             <>
-              <label className="sidebar-field">
-                <span className="sidebar-field-label">Filter files</span>
-                <input
-                  type="text"
-                  className="sidebar-input"
-                  value={workspaceFilter}
-                  onChange={(event) => setWorkspaceFilter(event.target.value)}
-                  placeholder="Search this workspace"
-                  disabled={busy}
-                  aria-label="Filter files"
-                />
-              </label>
+              <Input
+                type="text"
+                value={workspaceFilter}
+                onChange={(event) => setWorkspaceFilter(event.target.value)}
+                placeholder="Search this workspace"
+                disabled={busy}
+                aria-label="Filter files"
+              />
               {filteredWorkspaceTree.length === 0 ? (
-                <div className="empty-hint">No files match this filter.</div>
+                <p className="text-xs text-muted-foreground">No files match this filter.</p>
               ) : (
-                <div className="tree-list">
-                  {filteredWorkspaceTree.map((node) => renderWorkspaceTreeNode(node))}
-                </div>
+                <ScrollArea className="max-h-[360px] pr-2">
+                  <div className="flex flex-col gap-1">
+                    {filteredWorkspaceTree.map((node) => renderWorkspaceTreeNode(node))}
+                  </div>
+                </ScrollArea>
               )}
             </>
           )}
-        </div>
+        </section>
 
-        <div className="sidebar-group">
-          <div className="sidebar-group-header">Recent</div>
+        <Separator />
+
+        <section className="flex flex-col gap-2">
+          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Recent
+          </div>
           {snapshot.recentDocuments.length === 0 ? (
-            <div className="empty-hint">Recent documents will appear here.</div>
+            <p className="text-xs text-muted-foreground">Recent documents will appear here.</p>
           ) : (
-            <div className="recent-list">
-              {snapshot.recentDocuments.slice(0, 5).map((path) => (
-                <button
-                  key={path}
-                  className={
-                    path === snapshot.activeDocumentPath
-                      ? 'tree-item tree-item-active recent-item-button'
-                      : 'tree-item recent-item-button'
-                  }
-                  onClick={() => handleOpenRecentDocument(path)}
-                  disabled={busy}
-                  title={path}
-                >
-                  <span className="tree-name">{displayFileName(path)}</span>
-                  <span className="tree-path">
-                    {displayWorkspacePath(path, snapshot.rootDir)}
-                  </span>
-                </button>
-              ))}
+            <div className="flex flex-col gap-1">
+              {snapshot.recentDocuments.slice(0, 5).map((path) => {
+                const isActive = path === snapshot.activeDocumentPath;
+                return (
+                  <button
+                    key={path}
+                    type="button"
+                    className={cn(
+                      'flex w-full flex-col items-start gap-0.5 rounded-md border border-transparent px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50',
+                      isActive && 'border-border bg-accent text-accent-foreground',
+                    )}
+                    onClick={() => handleOpenRecentDocument(path)}
+                    disabled={busy}
+                    title={path}
+                  >
+                    <span className="truncate font-medium">{displayFileName(path)}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {displayWorkspacePath(path, snapshot.rootDir)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
-        </div>
+        </section>
       </aside>
 
-      <main className="workspace-shell">
-        <header className="topbar">
-          <div className="topbar-actions">
-            <button className="primary-button" onClick={handleSave} disabled={!activeDocumentOpen || busy}>
+      <main className="flex min-w-0 flex-col gap-3 p-5">
+        <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-3 py-2 ring-1 ring-foreground/5">
+          <div className="flex items-center gap-2">
+            <Button onClick={handleSave} disabled={!activeDocumentOpen || busy}>
               Save
-            </button>
-            <button
-              className="secondary-button"
-              onClick={handleSaveAs}
-              disabled={!activeDocumentOpen || busy}
-            >
+            </Button>
+            <Button variant="outline" onClick={handleSaveAs} disabled={!activeDocumentOpen || busy}>
               Save As…
-            </button>
-            <button className="secondary-button" onClick={handleImportTheme} disabled={busy}>
+            </Button>
+            <Button variant="outline" onClick={handleImportTheme} disabled={busy}>
               Import CSS Theme…
-            </button>
+            </Button>
           </div>
 
-          <div className="segmented-control">
-            {(['Wysiwyg', 'Source', 'Preview'] as EditorMode[]).map((mode) => (
-              <button
-                key={mode}
-                className={mode === currentMode ? 'segment segment-active' : 'segment'}
-                onClick={() => handleSetMode(mode)}
-                disabled={busy}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
+          <div className="flex items-center gap-3">
+            <ToggleGroup
+              type="single"
+              value={currentMode}
+              onValueChange={(value) => {
+                if (value) {
+                  void handleSetMode(value as EditorMode);
+                }
+              }}
+              variant="outline"
+              size="sm"
+            >
+              {(['Wysiwyg', 'Source', 'Preview'] as EditorMode[]).map((mode) => (
+                <ToggleGroupItem key={mode} value={mode} disabled={busy} aria-label={mode}>
+                  {mode}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
 
-          <div className="segmented-control">
-            {([
-              ['BuiltInLight', 'Light'],
-              ['BuiltInDark', 'Dark'],
-            ] as Array<[ThemeKind, string]>).map(([themeKind, label]) => (
-              <button
-                key={themeKind}
-                className={snapshot.theme.kind === themeKind ? 'segment segment-active' : 'segment'}
-                onClick={() => handleSetTheme(themeKind)}
-                disabled={busy}
-              >
-                {label}
-              </button>
-            ))}
+            <ToggleGroup
+              type="single"
+              value={snapshot.theme.kind === 'CustomCss' ? '' : snapshot.theme.kind}
+              onValueChange={(value) => {
+                if (value) {
+                  void handleSetTheme(value as ThemeKind);
+                }
+              }}
+              variant="outline"
+              size="sm"
+            >
+              <ToggleGroupItem value="BuiltInLight" disabled={busy} aria-label="Light theme">
+                Light
+              </ToggleGroupItem>
+              <ToggleGroupItem value="BuiltInDark" disabled={busy} aria-label="Dark theme">
+                Dark
+              </ToggleGroupItem>
+            </ToggleGroup>
           </div>
         </header>
 
-        <section className="document-header">
-          <div>
-            <div className="document-title">{activeDocumentName}</div>
-            <div className="document-meta">
-              {snapshot.activeDocumentPath
-                ? displayWorkspacePath(snapshot.activeDocumentPath, snapshot.rootDir)
-                : activeDocumentOpen
-                  ? 'Save As to choose where this draft lives.'
-                  : 'Open a workspace or a Markdown file to begin.'}
-            </div>
-          </div>
-          <div className="document-status">
-            <span className={snapshot.activeDocumentDirty ? 'status-pill dirty' : 'status-pill clean'}>
-              {snapshot.activeDocumentDirty ? 'Unsaved' : 'Saved'}
-            </span>
-            <span className="status-pill neutral">{snapshot.theme.kind}</span>
-          </div>
-        </section>
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle className="truncate">{activeDocumentName}</CardTitle>
+            <CardDescription className="truncate">{documentMeta}</CardDescription>
+            <CardAction>
+              <div className="flex items-center gap-2">
+                <Badge variant={snapshot.activeDocumentDirty ? 'destructive' : 'secondary'}>
+                  {snapshot.activeDocumentDirty ? 'Unsaved' : 'Saved'}
+                </Badge>
+                <Badge variant="outline">{snapshot.theme.kind}</Badge>
+              </div>
+            </CardAction>
+          </CardHeader>
+        </Card>
 
-        {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
+        {errorMessage ? (
+          <Alert variant="destructive">
+            <AlertTitle>Something went wrong</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+
         {externalChangeMessage ? (
-          <div className="error-banner">
-            <div>{externalChangeMessage}</div>
+          <Alert>
+            <AlertTitle>External change detected</AlertTitle>
+            <AlertDescription>{externalChangeMessage}</AlertDescription>
             {showExternalChangeActions ? (
-              <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                <button
-                  type="button"
-                  className="secondary-button"
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={busy}
                   onClick={() => void handleReloadActiveDocument()}
                 >
                   Reload from disk
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={busy}
                   onClick={handleKeepLocalChanges}
                 >
                   Keep local
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={busy}
                   onClick={() => void handleCompareExternalChanges()}
                 >
                   Compare
-                </button>
+                </Button>
               </div>
             ) : null}
-          </div>
+          </Alert>
         ) : null}
 
         {externalCompareSource !== null ? (
-          <div className="error-banner" style={{ whiteSpace: 'pre-wrap' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-              <strong>Disk vs local</strong>
-              <button
-                type="button"
-                className="secondary-button"
+          <Alert>
+            <div className="flex items-center justify-between gap-2">
+              <AlertTitle>Disk vs local</AlertTitle>
+              <Button
+                variant="outline"
+                size="sm"
                 disabled={busy}
                 onClick={() => setExternalCompareSource(null)}
               >
                 Hide comparison
-              </button>
+              </Button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <div className="mt-2 grid grid-cols-2 gap-3">
               <div>
-                <h4>Disk</h4>
-                <pre>{externalCompareSource}</pre>
+                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Disk
+                </h4>
+                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
+                  {externalCompareSource}
+                </pre>
               </div>
               <div>
-                <h4>Local</h4>
-                <pre>{localDraft}</pre>
+                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Local
+                </h4>
+                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
+                  {localDraft}
+                </pre>
               </div>
             </div>
-          </div>
+          </Alert>
         ) : null}
 
-        <section className="editor-frame">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card ring-1 ring-foreground/5">
           {!activeDocumentOpen ? (
-            <div className="empty-state">
-              <h2>Start your next document</h2>
-              <p>
-                Create a new draft or open a Markdown file to begin editing right away.
-              </p>
-            </div>
+            <Empty className="flex-1 border-dashed">
+              <EmptyHeader>
+                <EmptyTitle>Start your next document</EmptyTitle>
+                <EmptyDescription>
+                  Create a new draft or open a Markdown file to begin editing right away.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : null}
 
           {activeDocumentOpen && currentMode === 'Wysiwyg' ? (
-            <EditorContent editor={editor} className="editor-scroll" />
+            <div className="markdown-surface min-h-0 flex-1 overflow-auto px-8 py-6">
+              <EditorContent editor={editor} />
+            </div>
           ) : null}
 
           {activeDocumentOpen && currentMode === 'Source' ? (
-            <div className="editor-scroll codemirror-shell">
+            <div className="min-h-0 flex-1 overflow-auto">
               <CodeMirror
                 value={localDraft}
                 height="100%"
@@ -1126,7 +1256,10 @@ export default function App() {
 
           {activeDocumentOpen && currentMode === 'Preview' ? (
             <div
-              className={`editor-scroll preview-shell ${MARKDOWN_CONTENT_SCOPE_CLASS}`}
+              className={cn(
+                'markdown-surface min-h-0 flex-1 overflow-auto px-8 py-6',
+                MARKDOWN_CONTENT_SCOPE_CLASS,
+              )}
             >
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewSource}</ReactMarkdown>
             </div>

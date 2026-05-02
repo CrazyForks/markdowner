@@ -13,8 +13,8 @@ use crate::{
 pub enum EditorMode {
     #[default]
     Wysiwyg,
-    Source,
-    Preview,
+    Editor,
+    SplitView,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -328,7 +328,7 @@ impl WorkspaceState {
     }
 
     pub fn active_preview_document(&self) -> Option<StyledDocument> {
-        if self.mode != EditorMode::Preview {
+        if self.mode != EditorMode::SplitView {
             return None;
         }
 
