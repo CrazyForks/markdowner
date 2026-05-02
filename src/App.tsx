@@ -1399,7 +1399,9 @@ export default function App() {
             : '48px 0px 0px minmax(0, 1fr)',
         }}
       >
-        <ActivityBar onOpenSettings={() => setIsSettingsOpen(true)}
+        <ActivityBar
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={isSidebarOpen}
         />

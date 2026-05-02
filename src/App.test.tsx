@@ -923,6 +923,24 @@ describe('App recent documents', () => {
     });
   });
 
+  it('opens the Quick Open dialog when the Activity Bar Search button is clicked', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        rootDir: '/tmp/project',
+        workspaceDocuments: ['/tmp/project/README.md'],
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const searchButton = await screen.findByRole('button', { name: /quick open \(cmd\+p\)/i });
+    fireEvent.click(searchButton);
+
+    await screen.findByRole('dialog', { name: /quick open/i });
+  });
+
   it('opens the Command Palette with Cmd+Shift+P and runs a selected command', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
