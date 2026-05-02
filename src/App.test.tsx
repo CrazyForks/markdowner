@@ -1157,7 +1157,7 @@ describe('App recent documents', () => {
       expect(separator).toHaveAttribute('aria-valuenow', '320');
       expect(separator).toHaveAttribute(
         'title',
-        'Drag to resize sidebar (double-click to reset width)',
+        'Drag to resize sidebar (double-click to reset, arrow keys to adjust)',
       );
 
       fireEvent.doubleClick(separator);
@@ -1166,6 +1166,56 @@ describe('App recent documents', () => {
         expect(separator).toHaveAttribute('aria-valuenow', '280');
       });
       expect(window.localStorage.getItem('markdowner.sidebarWidth')).toBe('280');
+    } finally {
+      window.localStorage.removeItem('markdowner.sidebarOpen');
+      window.localStorage.removeItem('markdowner.sidebarWidth');
+    }
+  });
+
+  it('resizes the sidebar with arrow / page / home / end keys on the separator', async () => {
+    window.localStorage.setItem('markdowner.sidebarOpen', 'true');
+    window.localStorage.setItem('markdowner.sidebarWidth', '280');
+
+    try {
+      const { default: App } = await import('./App');
+
+      render(<App />);
+
+      const separator = await screen.findByRole('separator', { name: /resize sidebar/i });
+      expect(separator).toHaveAttribute('tabindex', '0');
+
+      fireEvent.keyDown(separator, { key: 'ArrowRight' });
+      await waitFor(() => {
+        expect(separator).toHaveAttribute('aria-valuenow', '288');
+      });
+
+      fireEvent.keyDown(separator, { key: 'ArrowLeft' });
+      await waitFor(() => {
+        expect(separator).toHaveAttribute('aria-valuenow', '280');
+      });
+
+      fireEvent.keyDown(separator, { key: 'PageDown' });
+      await waitFor(() => {
+        expect(separator).toHaveAttribute('aria-valuenow', '312');
+      });
+
+      fireEvent.keyDown(separator, { key: 'End' });
+      await waitFor(() => {
+        expect(separator).toHaveAttribute('aria-valuenow', '320');
+      });
+
+      // Clamp at max — further increase is a no-op.
+      fireEvent.keyDown(separator, { key: 'ArrowRight' });
+      await waitFor(() => {
+        expect(separator).toHaveAttribute('aria-valuenow', '320');
+      });
+
+      fireEvent.keyDown(separator, { key: 'Home' });
+      await waitFor(() => {
+        expect(separator).toHaveAttribute('aria-valuenow', '220');
+      });
+
+      expect(window.localStorage.getItem('markdowner.sidebarWidth')).toBe('220');
     } finally {
       window.localStorage.removeItem('markdowner.sidebarOpen');
       window.localStorage.removeItem('markdowner.sidebarWidth');

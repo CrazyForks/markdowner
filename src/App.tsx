@@ -18,7 +18,7 @@ import { Markdown } from '@tiptap/markdown';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { startTransition, useEffect, useEffectEvent, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -127,6 +127,8 @@ const SIDEBAR_WIDTH_KEY = 'markdowner.sidebarWidth';
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 320;
 const SIDEBAR_DEFAULT_WIDTH = 280;
+const SIDEBAR_KEYBOARD_STEP = 8;
+const SIDEBAR_KEYBOARD_PAGE_STEP = 32;
 
 function readSidebarState(): boolean {
   try {
@@ -430,6 +432,38 @@ export default function App() {
   const handleSidebarResetWidth = () => {
     if (!isSidebarOpen) return;
     setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+  };
+
+  const handleSidebarResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!isSidebarOpen) return;
+    let delta = 0;
+    let absolute: number | null = null;
+    switch (event.key) {
+      case 'ArrowLeft':
+        delta = -SIDEBAR_KEYBOARD_STEP;
+        break;
+      case 'ArrowRight':
+        delta = SIDEBAR_KEYBOARD_STEP;
+        break;
+      case 'PageUp':
+        delta = -SIDEBAR_KEYBOARD_PAGE_STEP;
+        break;
+      case 'PageDown':
+        delta = SIDEBAR_KEYBOARD_PAGE_STEP;
+        break;
+      case 'Home':
+        absolute = SIDEBAR_MIN_WIDTH;
+        break;
+      case 'End':
+        absolute = SIDEBAR_MAX_WIDTH;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    setSidebarWidth((current) =>
+      clampSidebarWidth(absolute !== null ? absolute : current + delta),
+    );
   };
 
   useEffect(() => {
@@ -1540,9 +1574,11 @@ export default function App() {
           aria-valuenow={sidebarWidth}
           aria-valuemin={SIDEBAR_MIN_WIDTH}
           aria-valuemax={SIDEBAR_MAX_WIDTH}
-          title="Drag to resize sidebar (double-click to reset width)"
+          title="Drag to resize sidebar (double-click to reset, arrow keys to adjust)"
+          tabIndex={isSidebarOpen ? 0 : -1}
           onPointerDown={handleSidebarResizeStart}
           onDoubleClick={handleSidebarResetWidth}
+          onKeyDown={handleSidebarResizeKeyDown}
           className={cn(
             'group relative h-full select-none',
             isSidebarOpen ? 'cursor-col-resize' : 'pointer-events-none',
