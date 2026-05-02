@@ -1144,6 +1144,34 @@ describe('App recent documents', () => {
     }
   });
 
+  it('resets the sidebar width to the default when the resize separator is double-clicked', async () => {
+    window.localStorage.setItem('markdowner.sidebarOpen', 'true');
+    window.localStorage.setItem('markdowner.sidebarWidth', '320');
+
+    try {
+      const { default: App } = await import('./App');
+
+      render(<App />);
+
+      const separator = await screen.findByRole('separator', { name: /resize sidebar/i });
+      expect(separator).toHaveAttribute('aria-valuenow', '320');
+      expect(separator).toHaveAttribute(
+        'title',
+        'Drag to resize sidebar (double-click to reset width)',
+      );
+
+      fireEvent.doubleClick(separator);
+
+      await waitFor(() => {
+        expect(separator).toHaveAttribute('aria-valuenow', '280');
+      });
+      expect(window.localStorage.getItem('markdowner.sidebarWidth')).toBe('280');
+    } finally {
+      window.localStorage.removeItem('markdowner.sidebarOpen');
+      window.localStorage.removeItem('markdowner.sidebarWidth');
+    }
+  });
+
   it('opens the Quick Open dialog with Cmd+P and routes a workspace file selection', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

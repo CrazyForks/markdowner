@@ -427,6 +427,11 @@ export default function App() {
     setIsResizingSidebar(true);
   };
 
+  const handleSidebarResetWidth = () => {
+    if (!isSidebarOpen) return;
+    setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+  };
+
   useEffect(() => {
     if (!isResizingSidebar) return;
 
@@ -1535,7 +1540,9 @@ export default function App() {
           aria-valuenow={sidebarWidth}
           aria-valuemin={SIDEBAR_MIN_WIDTH}
           aria-valuemax={SIDEBAR_MAX_WIDTH}
+          title="Drag to resize sidebar (double-click to reset width)"
           onPointerDown={handleSidebarResizeStart}
+          onDoubleClick={handleSidebarResetWidth}
           className={cn(
             'group relative h-full select-none',
             isSidebarOpen ? 'cursor-col-resize' : 'pointer-events-none',
