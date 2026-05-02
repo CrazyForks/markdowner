@@ -2,6 +2,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -9,6 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { DEFAULT_SETTINGS, type Settings } from '@/lib/settings';
 
 export type { Settings } from '@/lib/settings';
@@ -105,6 +107,14 @@ export function SettingsDialog({
             </div>
           </div>
         </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onSettingsChange({ ...DEFAULT_SETTINGS })}
+          >
+            Reset to Defaults
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

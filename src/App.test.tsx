@@ -1301,6 +1301,45 @@ describe('App recent documents', () => {
     });
   });
 
+  it('restores default values when "Reset to Defaults" is clicked in the Settings dialog', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: true,
+          editorFontSize: 22,
+          editorFontFamily: 'JetBrains Mono',
+          editorLineWrap: false,
+        };
+      }
+      return undefined;
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const resetButton = within(dialog).getByRole('button', { name: /reset to defaults/i });
+
+    fireEvent.click(resetButton);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+        },
+      });
+    });
+
+    expect(within(dialog).getByLabelText(/font size/i)).toHaveValue(14);
+    expect(within(dialog).getByLabelText(/font family/i)).toHaveValue('');
+  });
+
   it('opens a Markdown document from the native menu event', async () => {
     openDialogMock.mockResolvedValue('/tmp/project/from-menu.md');
     openDocumentMock.mockResolvedValue(
