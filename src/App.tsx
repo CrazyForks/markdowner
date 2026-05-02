@@ -1458,6 +1458,9 @@ export default function App() {
         onKeepLocalChanges={handleKeepLocalChanges}
         onCompareExternalChanges={() => void handleCompareExternalChanges()}
         onHideComparison={() => setExternalCompareSource(null)}
+        onNewDocument={() => void handleNewDocument()}
+        onOpenDocument={() => void handleOpenDocument()}
+        onOpenWorkspace={() => void handleOpenWorkspace()}
         localDraft={localDraft}
         activeDocumentName={snapshot.activeDocumentName}
         fontSize={settings.editorFontSize || DEFAULT_SETTINGS.editorFontSize}

@@ -1,6 +1,12 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { cn } from '@/lib/utils';
 import { type CSSProperties, type ReactNode } from 'react';
 
@@ -16,6 +22,9 @@ export interface EditorAreaProps {
   onKeepLocalChanges: () => void;
   onCompareExternalChanges: () => void;
   onHideComparison: () => void;
+  onNewDocument?: () => void;
+  onOpenDocument?: () => void;
+  onOpenWorkspace?: () => void;
   localDraft: string;
   activeDocumentName: string | null;
   editorContent: ReactNode;
@@ -37,6 +46,9 @@ export function EditorArea({
   onKeepLocalChanges,
   onCompareExternalChanges,
   onHideComparison,
+  onNewDocument,
+  onOpenDocument,
+  onOpenWorkspace,
   localDraft,
   activeDocumentName,
   editorContent,
@@ -139,6 +151,41 @@ export function EditorArea({
                 Create a new draft or open a Markdown file to begin editing right away.
               </EmptyDescription>
             </EmptyHeader>
+            {onNewDocument || onOpenDocument || onOpenWorkspace ? (
+              <EmptyContent>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {onNewDocument ? (
+                    <Button
+                      size="sm"
+                      onClick={onNewDocument}
+                      disabled={busy}
+                    >
+                      New File
+                    </Button>
+                  ) : null}
+                  {onOpenDocument ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={onOpenDocument}
+                      disabled={busy}
+                    >
+                      Open File…
+                    </Button>
+                  ) : null}
+                  {onOpenWorkspace ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={onOpenWorkspace}
+                      disabled={busy}
+                    >
+                      Open Workspace…
+                    </Button>
+                  ) : null}
+                </div>
+              </EmptyContent>
+            ) : null}
           </Empty>
         ) : null}
 

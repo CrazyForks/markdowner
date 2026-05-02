@@ -191,6 +191,36 @@ describe('App recent documents', () => {
     );
   });
 
+  it('exposes empty-state action buttons that open dialogs and create documents', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    newDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'Untitled.md',
+        activeDocumentPath: null,
+        activeDocumentSource: '',
+        activeDocumentDirty: true,
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const newFileButton = await screen.findByRole('button', { name: /^new file$/i });
+    const openFileButton = screen.getByRole('button', { name: /^open file…$/i });
+    const openWorkspaceButton = screen.getByRole('button', { name: /^open workspace…$/i });
+
+    expect(newFileButton).toBeInTheDocument();
+    expect(openFileButton).toBeInTheDocument();
+    expect(openWorkspaceButton).toBeInTheDocument();
+
+    fireEvent.click(newFileButton);
+
+    await waitFor(() => {
+      expect(newDocumentMock).toHaveBeenCalled();
+    });
+  });
+
   it('reopens a recent document from the sidebar', async () => {
     const { default: App } = await import('./App');
 
