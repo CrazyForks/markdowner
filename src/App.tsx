@@ -1353,17 +1353,38 @@ export default function App() {
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-panel-left"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
             </Button>
-            <Button variant="ghost" size="sm" className="h-8" onClick={handleSave} disabled={!activeDocumentOpen || busy}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8"
+              onClick={handleSave}
+              disabled={!activeDocumentOpen || busy}
+              title="Save (Cmd+S)"
+            >
               Save
             </Button>
-            <Button variant="ghost" size="sm" className="h-8" onClick={handleSaveAs} disabled={!activeDocumentOpen || busy}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8"
+              onClick={handleSaveAs}
+              disabled={!activeDocumentOpen || busy}
+              title="Save As (Cmd+Shift+S)"
+            >
               Save As…
             </Button>
           </>
         }
         rightContent={
           <>
-            <Button variant="ghost" size="sm" className="h-8" onClick={handleImportTheme} disabled={busy}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8"
+              onClick={handleImportTheme}
+              disabled={busy}
+              title="Import a custom CSS theme"
+            >
               Import CSS…
             </Button>
             <ToggleGroup

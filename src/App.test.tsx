@@ -562,6 +562,34 @@ describe('App recent documents', () => {
     });
   });
 
+  it('exposes keyboard-shortcut tooltips on the Header Save and Save As buttons', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    const view = render(<App />);
+
+    const saveButton = await waitFor(() =>
+      within(view.container).getByRole('button', { name: /^save$/i }),
+    );
+    const saveAsButton = within(view.container).getByRole('button', {
+      name: /^save as…$/i,
+    });
+    const importCssButton = within(view.container).getByRole('button', {
+      name: /^import css…$/i,
+    });
+
+    expect(saveButton).toHaveAttribute('title', 'Save (Cmd+S)');
+    expect(saveAsButton).toHaveAttribute('title', 'Save As (Cmd+Shift+S)');
+    expect(importCssButton).toHaveAttribute('title', 'Import a custom CSS theme');
+  });
+
   it('creates an untitled document and saves it through Save As', async () => {
     newDocumentMock.mockResolvedValue(
       baseSnapshot({
