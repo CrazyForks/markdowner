@@ -1479,6 +1479,8 @@ export default function App() {
           onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={isSidebarOpen}
+          isSettingsOpen={isSettingsOpen}
+          isQuickOpenOpen={isQuickOpenOpen}
         />
         <SideBar
           isOpen={isSidebarOpen}

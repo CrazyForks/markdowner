@@ -1114,6 +1114,43 @@ describe('App recent documents', () => {
     await screen.findByRole('dialog', { name: /quick open/i });
   });
 
+  it('marks the Activity Bar Search button as pressed while the Quick Open dialog is open', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const searchButton = await screen.findByRole('button', { name: /quick open \(cmd\+p\)/i });
+    const settingsButton = await screen.findByRole('button', { name: /settings \(cmd\+,\)/i });
+
+    expect(searchButton).toHaveAttribute('aria-pressed', 'false');
+    expect(settingsButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(searchButton);
+    await screen.findByRole('dialog', { name: /quick open/i });
+
+    expect(searchButton).toHaveAttribute('aria-pressed', 'true');
+    expect(settingsButton).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('marks the Activity Bar Settings button as pressed while the Settings dialog is open', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const searchButton = await screen.findByRole('button', { name: /quick open \(cmd\+p\)/i });
+    const settingsButton = await screen.findByRole('button', { name: /settings \(cmd\+,\)/i });
+
+    fireEvent.click(settingsButton);
+    await screen.findByRole('dialog', { name: /settings/i });
+
+    expect(settingsButton).toHaveAttribute('aria-pressed', 'true');
+    expect(searchButton).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('opens the Command Palette with Cmd+Shift+P and runs a selected command', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

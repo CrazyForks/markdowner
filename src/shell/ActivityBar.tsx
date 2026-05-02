@@ -8,6 +8,8 @@ export interface ActivityBarProps {
   className?: string;
   onToggleSidebar?: () => void;
   isSidebarOpen?: boolean;
+  isSettingsOpen?: boolean;
+  isQuickOpenOpen?: boolean;
 }
 
 export function ActivityBar({
@@ -16,32 +18,47 @@ export function ActivityBar({
   isSidebarOpen,
   onOpenSettings,
   onOpenQuickOpen,
+  isSettingsOpen,
+  isQuickOpenOpen,
 }: ActivityBarProps) {
+  const activeClass = 'bg-accent text-accent-foreground';
+  const inactiveClass = 'text-muted-foreground hover:text-foreground';
   return (
     <div className={cn("flex flex-col items-center py-2 bg-muted/50 border-r border-border h-full", className)}>
       <div className="flex flex-col gap-2 w-full px-2">
         <Button
           variant="ghost"
           size="icon"
-          className={cn("w-8 h-8 rounded-md", isSidebarOpen && "bg-accent text-accent-foreground")}
+          className={cn('w-8 h-8 rounded-md', isSidebarOpen ? activeClass : inactiveClass)}
           onClick={onToggleSidebar}
           title="Explorer (Cmd+B)"
+          aria-label="Explorer (Cmd+B)"
+          aria-pressed={Boolean(isSidebarOpen)}
         >
           <Files className="w-5 h-5" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className="w-8 h-8 rounded-md text-muted-foreground hover:text-foreground"
+          className={cn('w-8 h-8 rounded-md', isQuickOpenOpen ? activeClass : inactiveClass)}
           title="Quick Open (Cmd+P)"
           aria-label="Quick Open (Cmd+P)"
+          aria-pressed={Boolean(isQuickOpenOpen)}
           onClick={onOpenQuickOpen}
         >
           <Search className="w-5 h-5" />
         </Button>
       </div>
       <div className="mt-auto flex flex-col gap-2 w-full px-2 mb-2">
-        <Button variant="ghost" size="icon" className="w-8 h-8 rounded-md text-muted-foreground hover:text-foreground" title="Settings (Cmd+,)" onClick={onOpenSettings}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn('w-8 h-8 rounded-md', isSettingsOpen ? activeClass : inactiveClass)}
+          title="Settings (Cmd+,)"
+          aria-label="Settings (Cmd+,)"
+          aria-pressed={Boolean(isSettingsOpen)}
+          onClick={onOpenSettings}
+        >
           <Settings className="w-5 h-5" />
         </Button>
       </div>
