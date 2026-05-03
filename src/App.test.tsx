@@ -746,6 +746,28 @@ describe('App recent documents', () => {
     expect(splitToggle).toHaveAttribute('aria-keyshortcuts', 'Meta+3 Control+3');
   });
 
+  it('exposes aria-keyshortcuts on the ActivityBar Explorer/Quick Open/Settings buttons', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    const view = render(<App />);
+
+    const explorerButton = await waitFor(() =>
+      within(view.container).getByRole('button', { name: /^explorer \(cmd\+b\)$/i }),
+    );
+    const quickOpenButton = within(view.container).getByRole('button', {
+      name: /^quick open \(cmd\+p\)$/i,
+    });
+    const settingsButton = within(view.container).getByRole('button', {
+      name: /^settings \(cmd\+,\)$/i,
+    });
+
+    expect(explorerButton).toHaveAttribute('aria-keyshortcuts', 'Meta+B Control+B');
+    expect(quickOpenButton).toHaveAttribute('aria-keyshortcuts', 'Meta+P Control+P');
+    expect(settingsButton).toHaveAttribute('aria-keyshortcuts', 'Meta+, Control+,');
+  });
+
   it('exposes consistent tooltips on the Header theme toggle items', async () => {
     bootstrapMock.mockResolvedValue(baseSnapshot());
 

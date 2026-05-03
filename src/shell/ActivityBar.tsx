@@ -33,6 +33,7 @@ export function ActivityBar({
           onClick={onToggleSidebar}
           title="Explorer (Cmd+B)"
           aria-label="Explorer (Cmd+B)"
+          aria-keyshortcuts="Meta+B Control+B"
           aria-pressed={Boolean(isSidebarOpen)}
         >
           <Files className="w-5 h-5" />
@@ -43,6 +44,7 @@ export function ActivityBar({
           className={cn('w-8 h-8 rounded-md', isQuickOpenOpen ? activeClass : inactiveClass)}
           title="Quick Open (Cmd+P)"
           aria-label="Quick Open (Cmd+P)"
+          aria-keyshortcuts="Meta+P Control+P"
           aria-pressed={Boolean(isQuickOpenOpen)}
           onClick={onOpenQuickOpen}
         >
@@ -56,6 +58,7 @@ export function ActivityBar({
           className={cn('w-8 h-8 rounded-md', isSettingsOpen ? activeClass : inactiveClass)}
           title="Settings (Cmd+,)"
           aria-label="Settings (Cmd+,)"
+          aria-keyshortcuts="Meta+, Control+,"
           aria-pressed={Boolean(isSettingsOpen)}
           onClick={onOpenSettings}
         >
