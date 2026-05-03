@@ -1641,6 +1641,58 @@ describe('App recent documents', () => {
     expect(headerCategories).toEqual(['File', 'View', 'Preferences', 'Theme']);
   });
 
+  it('renders the Command Palette empty-state placeholder with role="presentation" when no commands match', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(dialog).getByRole('textbox', { name: /command palette search/i });
+
+    fireEvent.change(input, { target: { value: 'zzznotacommand' } });
+
+    await waitFor(() => {
+      expect(within(dialog).queryAllByRole('option')).toHaveLength(0);
+    });
+
+    const placeholder = dialog.querySelector('[data-empty-state="command-palette"]');
+    expect(placeholder).not.toBeNull();
+    expect(placeholder?.getAttribute('role')).toBe('presentation');
+    expect(placeholder?.textContent).toMatch(/no matches/i);
+  });
+
+  it('renders the Quick Open empty-state placeholder with role="presentation" when no files match', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        workspaceDocuments: ['/tmp/project/api.md'],
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /quick open/i });
+    const input = within(dialog).getByRole('textbox', { name: /quick open file search/i });
+
+    fireEvent.change(input, { target: { value: 'zzznotamatch' } });
+
+    await waitFor(() => {
+      expect(within(dialog).queryAllByRole('option')).toHaveLength(0);
+    });
+
+    const placeholder = dialog.querySelector('[data-empty-state="quick-open"]');
+    expect(placeholder).not.toBeNull();
+    expect(placeholder?.getAttribute('role')).toBe('presentation');
+    expect(placeholder?.textContent).toMatch(/no matches/i);
+  });
+
   it('opens the Settings dialog with the Cmd+, keyboard shortcut', async () => {
     invokeMock.mockResolvedValue({
       autoSave: false,

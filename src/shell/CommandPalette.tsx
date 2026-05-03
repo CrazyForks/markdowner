@@ -130,7 +130,11 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
           className="max-h-80 overflow-y-auto py-1"
         >
           {filtered.length === 0 ? (
-            <li className="px-3 py-6 text-center text-sm text-muted-foreground">
+            <li
+              role="presentation"
+              data-empty-state="command-palette"
+              className="px-3 py-6 text-center text-sm text-muted-foreground"
+            >
               {commands.length === 0 ? 'No commands available.' : 'No matches.'}
             </li>
           ) : (
