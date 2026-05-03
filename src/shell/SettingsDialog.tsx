@@ -125,6 +125,15 @@ export function SettingsDialog({
               />
             </div>
 
+            <div className="flex items-center justify-between mt-2">
+              <Label htmlFor="focus-mode" className="text-sm">Focus Mode</Label>
+              <Switch
+                id="focus-mode"
+                checked={settings.focusModeEnabled}
+                onCheckedChange={(checked) => handleSettingChange('focusModeEnabled', checked)}
+              />
+            </div>
+
             <div className="flex items-center justify-between gap-4 mt-2">
               <Label htmlFor="default-mode" className="text-sm">Default Startup Mode</Label>
               <ToggleGroup

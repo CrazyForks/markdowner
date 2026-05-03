@@ -2575,6 +2575,38 @@ describe('App recent documents', () => {
     });
   });
 
+  it('persists Focus Mode changes from the Settings dialog through save_settings', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          focusModeEnabled: false,
+        };
+      }
+      return undefined;
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const focusModeToggle = within(dialog).getByLabelText(/focus mode/i);
+
+    fireEvent.click(focusModeToggle);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: expect.objectContaining({ focusModeEnabled: true }),
+      });
+    });
+  });
+
   it('persists PDF Paper Size changes from the Settings dialog through save_settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
