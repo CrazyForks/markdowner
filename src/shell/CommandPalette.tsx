@@ -97,6 +97,16 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
       );
       return;
     }
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setHighlightedIndex(0);
+      return;
+    }
+    if (event.key === 'End') {
+      event.preventDefault();
+      setHighlightedIndex(filtered.length - 1);
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       commitSelection(highlightedIndex);

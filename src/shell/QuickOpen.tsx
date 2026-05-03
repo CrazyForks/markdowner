@@ -98,6 +98,16 @@ export function QuickOpen({ open, onOpenChange, items, onSelect }: QuickOpenProp
       );
       return;
     }
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setHighlightedIndex(0);
+      return;
+    }
+    if (event.key === 'End') {
+      event.preventDefault();
+      setHighlightedIndex(filtered.length - 1);
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       commitSelection(highlightedIndex);

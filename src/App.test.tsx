@@ -1761,6 +1761,73 @@ describe('App recent documents', () => {
     expect(placeholder?.textContent).toMatch(/no matches/i);
   });
 
+  it('jumps to the last and first Quick Open option with End and Home keys', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        rootDir: '/tmp/project',
+        workspaceDocuments: [
+          '/tmp/project/alpha.md',
+          '/tmp/project/beta.md',
+          '/tmp/project/gamma.md',
+        ],
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /quick open/i });
+    const input = within(dialog).getByRole('textbox', { name: /quick open file search/i });
+
+    const options = await within(dialog).findAllByRole('option');
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveAttribute('data-active', 'true');
+
+    fireEvent.keyDown(input, { key: 'End' });
+    await waitFor(() => {
+      const refreshed = within(dialog).getAllByRole('option');
+      expect(refreshed[refreshed.length - 1]).toHaveAttribute('data-active', 'true');
+    });
+
+    fireEvent.keyDown(input, { key: 'Home' });
+    await waitFor(() => {
+      const refreshed = within(dialog).getAllByRole('option');
+      expect(refreshed[0]).toHaveAttribute('data-active', 'true');
+    });
+  });
+
+  it('jumps to the last and first Command Palette command with End and Home keys', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(dialog).getByRole('textbox', { name: /command palette search/i });
+
+    const options = await within(dialog).findAllByRole('option');
+    expect(options.length).toBeGreaterThan(1);
+    expect(options[0]).toHaveAttribute('data-active', 'true');
+
+    fireEvent.keyDown(input, { key: 'End' });
+    await waitFor(() => {
+      const refreshed = within(dialog).getAllByRole('option');
+      expect(refreshed[refreshed.length - 1]).toHaveAttribute('data-active', 'true');
+    });
+
+    fireEvent.keyDown(input, { key: 'Home' });
+    await waitFor(() => {
+      const refreshed = within(dialog).getAllByRole('option');
+      expect(refreshed[0]).toHaveAttribute('data-active', 'true');
+    });
+  });
+
   it('opens the Settings dialog with the Cmd+, keyboard shortcut', async () => {
     invokeMock.mockResolvedValue({
       autoSave: false,
