@@ -5,6 +5,13 @@ export interface Settings {
   editorFontSize: number;
   editorFontFamily: string;
   editorLineWrap: boolean;
+  defaultMode: 'Editor' | 'Wysiwyg' | 'SplitView';
+  focusModeEnabled: boolean;
+  typewriterModeEnabled: boolean;
+  assetFolder: string;
+  themeFollowSystem: boolean;
+  pdfPaperSize: 'A4' | 'Letter';
+  diagnosticsEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -12,6 +19,13 @@ export const DEFAULT_SETTINGS: Settings = {
   editorFontSize: 14,
   editorFontFamily: '',
   editorLineWrap: true,
+  defaultMode: 'Wysiwyg',
+  focusModeEnabled: false,
+  typewriterModeEnabled: false,
+  assetFolder: 'assets',
+  themeFollowSystem: true,
+  pdfPaperSize: 'A4',
+  diagnosticsEnabled: false,
 };
 
 function normalizeSettings(value: Partial<Settings> | null | undefined): Settings {

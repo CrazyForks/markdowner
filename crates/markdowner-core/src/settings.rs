@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::EditorMode;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -7,6 +9,13 @@ pub struct Settings {
     pub editor_font_size: u32,
     pub editor_font_family: String,
     pub editor_line_wrap: bool,
+    pub default_mode: EditorMode,
+    pub focus_mode_enabled: bool,
+    pub typewriter_mode_enabled: bool,
+    pub asset_folder: String,
+    pub theme_follow_system: bool,
+    pub pdf_paper_size: String,
+    pub diagnostics_enabled: bool,
 }
 
 impl Default for Settings {
@@ -16,6 +25,13 @@ impl Default for Settings {
             editor_font_size: 0,
             editor_font_family: String::new(),
             editor_line_wrap: true,
+            default_mode: EditorMode::Wysiwyg,
+            focus_mode_enabled: false,
+            typewriter_mode_enabled: false,
+            asset_folder: "assets".to_string(),
+            theme_follow_system: true,
+            pdf_paper_size: "A4".to_string(),
+            diagnostics_enabled: false,
         }
     }
 }
@@ -44,6 +60,7 @@ mod tests {
             editor_font_size: 14,
             editor_font_family: String::new(),
             editor_line_wrap: false,
+            ..Default::default()
         };
         let payload = serde_json::to_string(&original).expect("serialize");
         assert!(payload.contains("\"editorLineWrap\":false"));

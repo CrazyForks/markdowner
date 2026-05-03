@@ -1806,6 +1806,13 @@ describe('App recent documents', () => {
           editorFontSize: 14,
           editorFontFamily: '',
           editorLineWrap: true,
+          defaultMode: 'Wysiwyg',
+          focusModeEnabled: false,
+          typewriterModeEnabled: false,
+          assetFolder: 'assets',
+          themeFollowSystem: true,
+          pdfPaperSize: 'A4',
+          diagnosticsEnabled: false,
         },
       });
     });
@@ -2509,6 +2516,13 @@ describe('App recent documents', () => {
           editorFontSize: 14,
           editorFontFamily: '',
           editorLineWrap: true,
+          defaultMode: 'Wysiwyg',
+          focusModeEnabled: false,
+          typewriterModeEnabled: false,
+          assetFolder: 'assets',
+          themeFollowSystem: true,
+          pdfPaperSize: 'A4',
+          diagnosticsEnabled: false,
         },
       });
     });
