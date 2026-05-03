@@ -8,6 +8,7 @@ interface StatusBarProps {
   cursorColumn?: number | null;
   wordCount?: number | null;
   characterCount?: number | null;
+  readingTimeMinutes?: number | null;
 }
 
 export function StatusBar({
@@ -20,11 +21,13 @@ export function StatusBar({
   cursorColumn,
   wordCount,
   characterCount,
+  readingTimeMinutes,
 }: StatusBarProps) {
   const showCursorPosition =
     typeof cursorLine === 'number' && typeof cursorColumn === 'number';
   const showDocumentStats =
     typeof wordCount === 'number' && typeof characterCount === 'number';
+  const showReadingTime = typeof readingTimeMinutes === 'number' && readingTimeMinutes > 0;
   const showDirtyStatus = typeof isDirty === 'boolean';
 
   return (
@@ -43,6 +46,7 @@ export function StatusBar({
         {showDocumentStats ? (
           <span title="Document statistics">
             {wordCount} {wordCount === 1 ? 'word' : 'words'} · {characterCount} {characterCount === 1 ? 'char' : 'chars'}
+            {showReadingTime ? ` · ~${readingTimeMinutes} min read` : ''}
           </span>
         ) : null}
         <span title="Active editor mode">{mode}</span>

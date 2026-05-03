@@ -465,12 +465,14 @@ describe('App recent documents', () => {
     });
   });
 
-  it('shows word and character counts in the status bar for an open document', async () => {
+  it('shows word, character, and reading time counts in the status bar for an open document', async () => {
+    const twoHundredOneWords = Array.from({ length: 201 }, (_, index) => `word${index + 1}`).join(' ');
+
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
-        activeDocumentSource: '# Meeting notes',
+        activeDocumentSource: twoHundredOneWords,
         mode: 'Editor',
       }),
     );
@@ -480,7 +482,7 @@ describe('App recent documents', () => {
     render(<App />);
 
     expect(
-      await screen.findByText(/^3 words · 15 chars$/),
+      await screen.findByText(/^201 words · 1499 chars · ~2 min read$/),
     ).toBeInTheDocument();
   });
 

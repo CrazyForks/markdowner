@@ -396,7 +396,8 @@ export default function App() {
     const characters = localDraft.length;
     const trimmed = localDraft.trim();
     const words = trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
-    return { words, characters };
+    const readingTimeMinutes = words === 0 ? 0 : Math.max(1, Math.ceil(words / 200));
+    return { words, characters, readingTimeMinutes };
   }, [localDraft]);
   const themeMode: ThemeMode = settings.themeFollowSystem ? 'system' : 'manual';
 
@@ -1700,6 +1701,7 @@ export default function App() {
         cursorColumn={currentMode === 'Wysiwyg' ? null : cursorPosition.column}
         wordCount={activeDocumentOpen ? documentStats.words : null}
         characterCount={activeDocumentOpen ? documentStats.characters : null}
+        readingTimeMinutes={activeDocumentOpen ? documentStats.readingTimeMinutes : null}
       />
     </div>
   );
