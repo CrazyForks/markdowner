@@ -709,6 +709,43 @@ describe('App recent documents', () => {
     expect(importCssButton).toHaveAttribute('title', 'Import a custom CSS theme');
   });
 
+  it('exposes aria-keyshortcuts on the Header shortcut buttons and mode toggles', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    const view = render(<App />);
+
+    const toggleSidebarButton = await waitFor(() =>
+      within(view.container).getByRole('button', { name: /^toggle sidebar$/i }),
+    );
+    const saveButton = within(view.container).getByRole('button', { name: /^save$/i });
+    const saveAsButton = within(view.container).getByRole('button', {
+      name: /^save as…$/i,
+    });
+
+    expect(toggleSidebarButton).toHaveAttribute('aria-keyshortcuts', 'Meta+B Control+B');
+    expect(saveButton).toHaveAttribute('aria-keyshortcuts', 'Meta+S Control+S');
+    expect(saveAsButton).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Meta+Shift+S Control+Shift+S',
+    );
+
+    const editorToggle = within(view.container).getByRole('radio', { name: 'Editor' });
+    const wysiwygToggle = within(view.container).getByRole('radio', { name: 'WYSIWYG' });
+    const splitToggle = within(view.container).getByRole('radio', { name: 'Split View' });
+
+    expect(editorToggle).toHaveAttribute('aria-keyshortcuts', 'Meta+1 Control+1');
+    expect(wysiwygToggle).toHaveAttribute('aria-keyshortcuts', 'Meta+2 Control+2');
+    expect(splitToggle).toHaveAttribute('aria-keyshortcuts', 'Meta+3 Control+3');
+  });
+
   it('exposes consistent tooltips on the Header theme toggle items', async () => {
     bootstrapMock.mockResolvedValue(baseSnapshot());
 

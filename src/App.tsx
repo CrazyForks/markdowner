@@ -320,12 +320,13 @@ type EditorModeOption = {
   label: string;
   shortcutSymbol: string;
   shortcutText: string;
+  ariaKeyshortcuts: string;
 };
 
 const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
-  { mode: 'Editor', label: 'Editor', shortcutSymbol: '⌘1', shortcutText: 'Cmd+1' },
-  { mode: 'Wysiwyg', label: 'WYSIWYG', shortcutSymbol: '⌘2', shortcutText: 'Cmd+2' },
-  { mode: 'SplitView', label: 'Split View', shortcutSymbol: '⌘3', shortcutText: 'Cmd+3' },
+  { mode: 'Editor', label: 'Editor', shortcutSymbol: '⌘1', shortcutText: 'Cmd+1', ariaKeyshortcuts: 'Meta+1 Control+1' },
+  { mode: 'Wysiwyg', label: 'WYSIWYG', shortcutSymbol: '⌘2', shortcutText: 'Cmd+2', ariaKeyshortcuts: 'Meta+2 Control+2' },
+  { mode: 'SplitView', label: 'Split View', shortcutSymbol: '⌘3', shortcutText: 'Cmd+3', ariaKeyshortcuts: 'Meta+3 Control+3' },
 ];
 
 const EDITOR_MODE_LABELS: Record<EditorMode, string> = EDITOR_MODE_OPTIONS.reduce(
@@ -1421,6 +1422,7 @@ export default function App() {
               title="Toggle Sidebar (Cmd+B)"
               aria-label="Toggle Sidebar"
               aria-pressed={isSidebarOpen}
+              aria-keyshortcuts="Meta+B Control+B"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-panel-left"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
             </Button>
@@ -1431,6 +1433,7 @@ export default function App() {
               onClick={handleSave}
               disabled={!activeDocumentOpen || busy}
               title="Save (Cmd+S)"
+              aria-keyshortcuts="Meta+S Control+S"
             >
               Save
             </Button>
@@ -1441,6 +1444,7 @@ export default function App() {
               onClick={handleSaveAs}
               disabled={!activeDocumentOpen || busy}
               title="Save As (Cmd+Shift+S)"
+              aria-keyshortcuts="Meta+Shift+S Control+Shift+S"
             >
               Save As…
             </Button>
@@ -1477,6 +1481,7 @@ export default function App() {
                   disabled={busy}
                   aria-label={option.label}
                   title={`${option.label} (${option.shortcutText})`}
+                  aria-keyshortcuts={option.ariaKeyshortcuts}
                 >
                   {option.label}
                 </ToggleGroupItem>
