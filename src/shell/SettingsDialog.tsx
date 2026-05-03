@@ -11,6 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { DEFAULT_SETTINGS, type Settings } from '@/lib/settings';
 
 export type { Settings } from '@/lib/settings';
@@ -104,6 +105,32 @@ export function SettingsDialog({
                 checked={settings.editorLineWrap}
                 onCheckedChange={(checked) => handleSettingChange('editorLineWrap', checked)}
               />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 mt-2">
+              <Label htmlFor="default-mode" className="text-sm">Default Startup Mode</Label>
+              <ToggleGroup
+                id="default-mode"
+                type="single"
+                value={settings.defaultMode}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  handleSettingChange('defaultMode', value as Settings['defaultMode']);
+                }}
+                variant="outline"
+                size="sm"
+                className="h-8"
+              >
+                <ToggleGroupItem value="Editor" aria-label="Editor" title="Editor startup mode">
+                  Editor
+                </ToggleGroupItem>
+                <ToggleGroupItem value="Wysiwyg" aria-label="WYSIWYG" title="WYSIWYG startup mode">
+                  WYSIWYG
+                </ToggleGroupItem>
+                <ToggleGroupItem value="SplitView" aria-label="Split View" title="Split View startup mode">
+                  Split View
+                </ToggleGroupItem>
+              </ToggleGroup>
             </div>
 
             <div className="flex items-center justify-between mt-2">

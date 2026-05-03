@@ -2543,6 +2543,38 @@ describe('App recent documents', () => {
     });
   });
 
+  it('persists Default Startup Mode changes from the Settings dialog through save_settings', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          defaultMode: 'Editor',
+        };
+      }
+      return undefined;
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const splitViewToggle = within(dialog).getByRole('radio', { name: /split view/i });
+
+    fireEvent.click(splitViewToggle);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: expect.objectContaining({ defaultMode: 'SplitView' }),
+      });
+    });
+  });
+
   it('restores default values when "Reset to Defaults" is clicked in the Settings dialog', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
