@@ -533,6 +533,35 @@ describe('App recent documents', () => {
     expect(document.title).toBe('● meeting-notes.md — Markdowner');
   });
 
+  it('surfaces the active document path as a hover tooltip on the Header title', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    const { unmount } = render(<App />);
+
+    const headerTitle = await screen.findByTestId('header-title');
+    await waitFor(() => {
+      expect(headerTitle).toHaveAttribute('title', '/tmp/project/meeting-notes.md');
+    });
+
+    unmount();
+    cleanup();
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    render(<App />);
+
+    const emptyHeaderTitle = await screen.findByTestId('header-title');
+    expect(emptyHeaderTitle).not.toHaveAttribute('title');
+  });
+
   it('exposes a System theme toggle that follows OS preference', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

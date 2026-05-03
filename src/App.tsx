@@ -1410,6 +1410,7 @@ export default function App() {
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
       <Header
         title={activeDocumentName ? `${activeDocumentName}${snapshot.activeDocumentDirty ? ' •' : ''}` : 'Markdowner'}
+        titleTooltip={snapshot.activeDocumentPath ?? undefined}
         leftContent={
           <>
             <Button
