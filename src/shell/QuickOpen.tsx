@@ -36,10 +36,11 @@ function filterItems(items: QuickOpenItem[], query: string): QuickOpenItem[] {
   if (!trimmed) {
     return items.slice(0, MAX_RESULTS);
   }
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
   const filtered: QuickOpenItem[] = [];
   for (const item of items) {
     const haystack = `${item.name} ${item.relativePath}`.toLowerCase();
-    if (haystack.includes(trimmed)) {
+    if (tokens.every((token) => haystack.includes(token))) {
       filtered.push(item);
       if (filtered.length >= MAX_RESULTS) break;
     }

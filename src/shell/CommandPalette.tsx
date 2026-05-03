@@ -35,10 +35,11 @@ function filterCommands(
   if (!trimmed) {
     return commands.slice(0, MAX_RESULTS);
   }
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
   const filtered: CommandPaletteCommand[] = [];
   for (const command of commands) {
     const haystack = `${command.label} ${command.category ?? ''}`.toLowerCase();
-    if (haystack.includes(trimmed)) {
+    if (tokens.every((token) => haystack.includes(token))) {
       filtered.push(command);
       if (filtered.length >= MAX_RESULTS) break;
     }
