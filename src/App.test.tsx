@@ -247,6 +247,27 @@ describe('App recent documents', () => {
     );
   });
 
+  it('exposes Split View source and preview panes as named landmark regions', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: '# Notes',
+        mode: 'SplitView',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceRegion = await screen.findByRole('region', { name: /markdown source/i });
+    const previewRegion = await screen.findByRole('region', { name: /markdown preview/i });
+
+    expect(sourceRegion).toHaveAttribute('data-testid', 'editor-surface-source');
+    expect(previewRegion).toHaveAttribute('data-testid', 'editor-surface-preview');
+  });
+
   it('reopens a recent document from the sidebar', async () => {
     const { default: App } = await import('./App');
 

@@ -219,6 +219,8 @@ export function EditorArea({
           <div className="flex min-h-0 flex-1 divide-x divide-border">
             <div
               data-testid="editor-surface-source"
+              role="region"
+              aria-label="Markdown source"
               className="flex-1 overflow-auto"
               style={editorSurfaceStyle}
             >
@@ -226,6 +228,8 @@ export function EditorArea({
             </div>
             <div
               data-testid="editor-surface-preview"
+              role="region"
+              aria-label="Markdown preview"
               className="flex-1 overflow-auto bg-background"
               style={editorSurfaceStyle}
             >
