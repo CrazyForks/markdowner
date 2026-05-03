@@ -159,6 +159,29 @@ export function SettingsDialog({
                 onCheckedChange={(checked) => handleSettingChange('themeFollowSystem', checked)}
               />
             </div>
+
+            <div className="flex items-center justify-between gap-4 mt-2">
+              <Label htmlFor="pdf-paper-size" className="text-sm">PDF Paper Size</Label>
+              <ToggleGroup
+                id="pdf-paper-size"
+                type="single"
+                value={settings.pdfPaperSize}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  handleSettingChange('pdfPaperSize', value as Settings['pdfPaperSize']);
+                }}
+                variant="outline"
+                size="sm"
+                className="h-8"
+              >
+                <ToggleGroupItem value="A4" aria-label="A4" title="A4 PDF paper size">
+                  A4
+                </ToggleGroupItem>
+                <ToggleGroupItem value="Letter" aria-label="Letter" title="Letter PDF paper size">
+                  Letter
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
           </div>
         </div>
         <DialogFooter>
