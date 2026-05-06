@@ -111,7 +111,12 @@ vi.mock('@uiw/react-codemirror', () => ({
       }
     />
   ),
-  EditorView: { lineWrapping: LINE_WRAPPING_SENTINEL },
+  EditorView: {
+    lineWrapping: LINE_WRAPPING_SENTINEL,
+    updateListener: {
+      of: (listener: unknown) => ({ listener }),
+    },
+  },
 }));
 
 const baseSnapshot = (overrides: Partial<AppSnapshot> = {}): AppSnapshot => ({
@@ -136,6 +141,17 @@ async function openAppMenu() {
   const menuButton = await screen.findByRole('button', { name: /^app menu$/i });
   fireEvent.click(menuButton);
   return screen.findByRole('menu', { name: /^app menu$/i });
+}
+
+function setScrollMetrics(element: HTMLElement, scrollHeight: number, clientHeight: number) {
+  Object.defineProperty(element, 'scrollHeight', {
+    configurable: true,
+    value: scrollHeight,
+  });
+  Object.defineProperty(element, 'clientHeight', {
+    configurable: true,
+    value: clientHeight,
+  });
 }
 
 describe('App recent documents', () => {
@@ -397,6 +413,61 @@ describe('App recent documents', () => {
     expect(previewRegion).toHaveAttribute('data-testid', 'editor-surface-preview');
     expect(sourceRegion).toHaveClass('min-h-0');
     expect(previewRegion).toHaveClass('min-h-0');
+  });
+
+  it('syncs Split View source and preview scrolling proportionally', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: Array.from({ length: 80 }, (_, index) => `Line ${index + 1}`).join('\n'),
+        mode: 'SplitView',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceRegion = await screen.findByRole('region', { name: /markdown source/i });
+    const previewRegion = await screen.findByRole('region', { name: /markdown preview/i });
+
+    setScrollMetrics(sourceRegion, 1000, 200);
+    setScrollMetrics(previewRegion, 600, 100);
+
+    sourceRegion.scrollTop = 400;
+    fireEvent.scroll(sourceRegion);
+    expect(previewRegion.scrollTop).toBe(250);
+
+    previewRegion.scrollTop = 125;
+    fireEvent.scroll(previewRegion);
+    expect(sourceRegion.scrollTop).toBe(200);
+  });
+
+  it('moves the source cursor to the clicked rendered block in Split View', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: ['# Title', '', 'First paragraph', '', 'Second paragraph'].join('\n'),
+        mode: 'SplitView',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    const secondParagraph = await screen.findByText('Second paragraph');
+
+    fireEvent.click(secondParagraph);
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveFocus();
+      expect((sourceEditor as HTMLTextAreaElement).selectionStart).toBe(26);
+      expect((sourceEditor as HTMLTextAreaElement).selectionEnd).toBe(26);
+    });
   });
 
   it('constrains the desktop shell so editor panes own vertical scrolling', async () => {

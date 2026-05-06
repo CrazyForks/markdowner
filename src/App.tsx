@@ -18,9 +18,22 @@ import { Markdown } from '@tiptap/markdown';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { startTransition, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  UIEvent as ReactUIEvent,
+} from 'react';
+import {
+  createElement,
+  startTransition,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -97,6 +110,27 @@ const MENU_COMMAND_QUIT_APP = 'quit-app';
 type CloseTarget = 'window' | 'app';
 
 type ThemeMode = 'system' | 'manual';
+type MarkdownSourceNode = {
+  position?: {
+    start?: {
+      line?: number;
+      offset?: number;
+    };
+    end?: {
+      offset?: number;
+    };
+  };
+};
+type MarkdownSourceLineProps = {
+  node?: MarkdownSourceNode;
+};
+type CaretDocument = Document & {
+  caretPositionFromPoint?: (
+    x: number,
+    y: number,
+  ) => { offsetNode: Node; offset: number } | null;
+  caretRangeFromPoint?: (x: number, y: number) => Range | null;
+};
 
 function resolveOsTheme(): ThemeKind {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -108,6 +142,37 @@ function resolveOsTheme(): ThemeKind {
 function usesCommandModifier(event: KeyboardEvent) {
   return event.metaKey || event.ctrlKey;
 }
+
+function createSourceLineComponent(tagName: keyof HTMLElementTagNameMap) {
+  return function SourceLineComponent(props: MarkdownSourceLineProps) {
+    const { node, ...elementProps } = props as MarkdownSourceLineProps & Record<string, unknown>;
+    const sourceLine = node?.position?.start?.line;
+    const sourceOffset = node?.position?.start?.offset;
+    const sourceEndOffset = node?.position?.end?.offset;
+
+    return createElement(tagName, {
+      ...elementProps,
+      'data-source-line': Number.isFinite(sourceLine) ? sourceLine : undefined,
+      'data-source-offset': Number.isFinite(sourceOffset) ? sourceOffset : undefined,
+      'data-source-end-offset': Number.isFinite(sourceEndOffset) ? sourceEndOffset : undefined,
+    });
+  };
+}
+
+const sourceLineMarkdownComponents = {
+  h1: createSourceLineComponent('h1'),
+  h2: createSourceLineComponent('h2'),
+  h3: createSourceLineComponent('h3'),
+  h4: createSourceLineComponent('h4'),
+  h5: createSourceLineComponent('h5'),
+  h6: createSourceLineComponent('h6'),
+  p: createSourceLineComponent('p'),
+  li: createSourceLineComponent('li'),
+  blockquote: createSourceLineComponent('blockquote'),
+  pre: createSourceLineComponent('pre'),
+  table: createSourceLineComponent('table'),
+  tr: createSourceLineComponent('tr'),
+} satisfies Components;
 
 const SIDEBAR_STATE_KEY = 'markdowner.sidebarOpen';
 const SIDEBAR_WIDTH_KEY = 'markdowner.sidebarWidth';
@@ -157,6 +222,135 @@ function writeSidebarWidth(width: number) {
   } catch {
     // localStorage unavailable; ignore
   }
+}
+
+function buildLineStartOffsets(source: string) {
+  const offsets = [0];
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === '\n') {
+      offsets.push(index + 1);
+    }
+  }
+  return offsets;
+}
+
+function lineTextFromOffset(source: string, offset: number) {
+  const lineEnd = source.indexOf('\n', offset);
+  const text = source.slice(offset, lineEnd === -1 ? source.length : lineEnd);
+  return text.endsWith('\r') ? text.slice(0, -1) : text;
+}
+
+function syncScrollPosition(source: HTMLElement, target: HTMLElement | null) {
+  if (!target) return;
+
+  const sourceMax = source.scrollHeight - source.clientHeight;
+  const targetMax = target.scrollHeight - target.clientHeight;
+  const nextScrollTop =
+    sourceMax > 0 && targetMax > 0 ? Math.round((source.scrollTop / sourceMax) * targetMax) : 0;
+
+  if (target.scrollTop !== nextScrollTop) {
+    target.scrollTop = nextScrollTop;
+  }
+}
+
+function clampSelectionOffset(offset: number, sourceLength: number) {
+  if (!Number.isFinite(offset)) return 0;
+  return Math.max(0, Math.min(sourceLength, Math.round(offset)));
+}
+
+function readSourceNumber(element: HTMLElement, key: keyof DOMStringMap) {
+  const value = element.dataset[key];
+  if (value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function getTextLength(node: Node): number {
+  return node.textContent?.length ?? 0;
+}
+
+function getTextOffsetWithinElement(root: HTMLElement, targetNode: Node, targetOffset: number) {
+  if (!root.contains(targetNode)) return null;
+
+  const nodeFilter = root.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
+  const walker = root.ownerDocument.createTreeWalker(root, nodeFilter);
+  let offset = 0;
+
+  while (walker.nextNode()) {
+    const currentNode = walker.currentNode;
+    if (currentNode === targetNode) {
+      return offset + Math.max(0, Math.min(targetOffset, getTextLength(currentNode)));
+    }
+    offset += getTextLength(currentNode);
+  }
+
+  if (targetNode instanceof HTMLElement && root.contains(targetNode)) {
+    return Array.from(targetNode.childNodes)
+      .slice(0, targetOffset)
+      .reduce((total, childNode) => total + getTextLength(childNode), offset);
+  }
+
+  return null;
+}
+
+function getRenderedTextOffset(element: HTMLElement, clientX: number, clientY: number) {
+  const ownerDocument = element.ownerDocument as CaretDocument;
+  const caretPosition = ownerDocument.caretPositionFromPoint?.(clientX, clientY);
+  if (caretPosition) {
+    const offset = getTextOffsetWithinElement(
+      element,
+      caretPosition.offsetNode,
+      caretPosition.offset,
+    );
+    if (offset !== null) return offset;
+  }
+
+  const caretRange = ownerDocument.caretRangeFromPoint?.(clientX, clientY);
+  if (caretRange) {
+    const offset = getTextOffsetWithinElement(
+      element,
+      caretRange.startContainer,
+      caretRange.startOffset,
+    );
+    if (offset !== null) return offset;
+  }
+
+  return null;
+}
+
+function estimateRenderedTextOffset(
+  element: HTMLElement,
+  event: ReactMouseEvent<HTMLDivElement>,
+  renderedTextLength: number,
+) {
+  if (renderedTextLength <= 0) return 0;
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0) return 0;
+
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  return Math.round(ratio * renderedTextLength);
+}
+
+function mapRenderedTextOffsetToSourceOffset(
+  element: HTMLElement,
+  source: string,
+  sourceOffset: number,
+  sourceEndOffset: number,
+  renderedOffset: number,
+) {
+  const renderedText = element.textContent ?? '';
+  const rawStart = clampSelectionOffset(sourceOffset, source.length);
+  const rawEnd = Math.max(rawStart, clampSelectionOffset(sourceEndOffset, source.length));
+  const rawText = source.slice(rawStart, rawEnd);
+
+  if (renderedText.length > 0) {
+    const renderedTextStart = rawText.indexOf(renderedText);
+    if (renderedTextStart >= 0) {
+      return clampSelectionOffset(rawStart + renderedTextStart + renderedOffset, source.length);
+    }
+  }
+
+  return clampSelectionOffset(rawStart + renderedOffset, source.length);
 }
 
 function matchesShortcut(
@@ -413,6 +607,8 @@ export default function App() {
   });
   const sourceEditorViewRef = useRef<EditorView | null>(null);
   const sourceEditorContainerRef = useRef<HTMLDivElement | null>(null);
+  const splitSourceScrollRef = useRef<HTMLDivElement | null>(null);
+  const splitPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const modeRequestIdRef = useRef(0);
   const activeDocumentOpen = snapshot.activeDocumentSource !== null;
 
@@ -472,7 +668,33 @@ export default function App() {
       selectionEnd: (match.index ?? 0) + match[0].trimEnd().length,
     }));
   }, [activeDocumentOpen, localDraft]);
+  const sourceLineStartOffsets = useMemo(() => buildLineStartOffsets(localDraft), [localDraft]);
   const themeMode: ThemeMode = settings.themeFollowSystem ? 'system' : 'manual';
+
+  const getSourceOffsetForLine = (lineNumber: number) => {
+    if (!Number.isFinite(lineNumber) || lineNumber < 1) {
+      return 0;
+    }
+    return sourceLineStartOffsets[lineNumber - 1] ?? localDraft.length;
+  };
+
+  const focusSourceSelection = (selectionStart: number, selectionEnd = selectionStart) => {
+    const nextSelectionStart = clampSelectionOffset(selectionStart, localDraft.length);
+    const nextSelectionEnd = clampSelectionOffset(selectionEnd, localDraft.length);
+    const selection = { anchor: nextSelectionStart, head: nextSelectionEnd };
+
+    if (sourceEditorViewRef.current) {
+      sourceEditorViewRef.current.dispatch({ selection, scrollIntoView: true });
+      sourceEditorViewRef.current.focus();
+      return;
+    }
+
+    const sourceTextarea = sourceEditorContainerRef.current?.querySelector('textarea');
+    if (sourceTextarea instanceof HTMLTextAreaElement) {
+      sourceTextarea.focus();
+      sourceTextarea.setSelectionRange(nextSelectionStart, nextSelectionEnd);
+    }
+  };
 
   const handleStartWindowDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -508,19 +730,54 @@ export default function App() {
       return;
     }
 
-    const selection = { anchor: item.selectionStart, head: item.selectionEnd };
-    if (sourceEditorViewRef.current) {
-      sourceEditorViewRef.current.dispatch({ selection, scrollIntoView: true });
-      sourceEditorViewRef.current.focus();
-      return;
-    }
-
-    const sourceTextarea = sourceEditorContainerRef.current?.querySelector('textarea');
-    if (sourceTextarea instanceof HTMLTextAreaElement) {
-      sourceTextarea.focus();
-      sourceTextarea.setSelectionRange(item.selectionStart, item.selectionEnd);
-    }
+    focusSourceSelection(item.selectionStart, item.selectionEnd);
   });
+
+  const handleSplitSourceScroll = (event: ReactUIEvent<HTMLDivElement>) => {
+    syncScrollPosition(event.currentTarget, splitPreviewScrollRef.current);
+  };
+
+  const handleSplitPreviewScroll = (event: ReactUIEvent<HTMLDivElement>) => {
+    syncScrollPosition(
+      event.currentTarget,
+      sourceEditorViewRef.current?.scrollDOM ?? splitSourceScrollRef.current,
+    );
+  };
+
+  const handleSourceEditorViewportChange = useEffectEvent((scrollElement: HTMLElement) => {
+    if (currentMode !== 'SplitView') return;
+    syncScrollPosition(scrollElement, splitPreviewScrollRef.current);
+  });
+
+  const handleSplitPreviewClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (currentMode !== 'SplitView') return;
+    if (!(event.target instanceof Element)) return;
+
+    const sourceLineElement = event.target.closest<HTMLElement>('[data-source-line]');
+    if (!sourceLineElement || !event.currentTarget.contains(sourceLineElement)) return;
+
+    const sourceLine = readSourceNumber(sourceLineElement, 'sourceLine');
+    if (sourceLine === null) return;
+
+    const lineStart = getSourceOffsetForLine(sourceLine);
+    const lineText = lineTextFromOffset(localDraft, lineStart);
+    const sourceOffset = readSourceNumber(sourceLineElement, 'sourceOffset') ?? lineStart;
+    const sourceEndOffset =
+      readSourceNumber(sourceLineElement, 'sourceEndOffset') ?? lineStart + lineText.length;
+    const renderedTextLength = sourceLineElement.textContent?.length ?? 0;
+    const renderedOffset =
+      getRenderedTextOffset(sourceLineElement, event.clientX, event.clientY) ??
+      estimateRenderedTextOffset(sourceLineElement, event, renderedTextLength);
+    const selectionOffset = mapRenderedTextOffsetToSourceOffset(
+      sourceLineElement,
+      localDraft,
+      sourceOffset,
+      sourceEndOffset,
+      renderedOffset,
+    );
+
+    focusSourceSelection(selectionOffset);
+  };
 
   const handleSidebarResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!isSidebarOpen) return;
@@ -798,6 +1055,18 @@ export default function App() {
   const previewSource = activeDocumentOpen
     ? debouncedLocalDraft
     : '*Open a Markdown document to preview it.*';
+  const sourceEditorExtensions = useMemo(
+    () => [
+      markdown(),
+      ...(settings.editorLineWrap ? [EditorView.lineWrapping] : []),
+      EditorView.updateListener.of((update) => {
+        if (update.viewportChanged) {
+          handleSourceEditorViewportChange(update.view.scrollDOM);
+        }
+      }),
+    ],
+    [handleSourceEditorViewportChange, settings.editorLineWrap],
+  );
 
   const withBusy = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -1763,13 +2032,18 @@ export default function App() {
         activeDocumentName={snapshot.activeDocumentName}
         fontSize={settings.editorFontSize || DEFAULT_SETTINGS.editorFontSize}
         fontFamily={settings.editorFontFamily}
+        splitSourceRef={splitSourceScrollRef}
+        splitPreviewRef={splitPreviewScrollRef}
+        onSplitSourceScroll={handleSplitSourceScroll}
+        onSplitPreviewScroll={handleSplitPreviewScroll}
+        onSplitPreviewClick={handleSplitPreviewClick}
         editorContent={<EditorContent editor={editor} />}
         sourceEditor={
           <div ref={sourceEditorContainerRef} className="h-full min-h-0">
             <CodeMirror
               value={localDraft}
               height="100%"
-              extensions={settings.editorLineWrap ? [markdown(), EditorView.lineWrapping] : [markdown()]}
+              extensions={sourceEditorExtensions}
               onChange={(value) => setLocalDraft(value)}
               onStatistics={(stats) => {
                 const head = stats.selectionAsSingle.head;
@@ -1792,7 +2066,12 @@ export default function App() {
               MARKDOWN_CONTENT_SCOPE_CLASS,
             )}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewSource}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={sourceLineMarkdownComponents}
+            >
+              {previewSource}
+            </ReactMarkdown>
           </div>
         }
       />

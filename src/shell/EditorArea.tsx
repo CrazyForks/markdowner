@@ -8,7 +8,13 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { cn } from '@/lib/utils';
-import { type CSSProperties, type ReactNode } from 'react';
+import {
+  type CSSProperties,
+  type MouseEventHandler,
+  type ReactNode,
+  type Ref,
+  type UIEventHandler,
+} from 'react';
 
 export interface EditorAreaProps {
   busy: boolean;
@@ -30,6 +36,11 @@ export interface EditorAreaProps {
   editorContent: ReactNode;
   sourceEditor: ReactNode;
   splitViewPreview: ReactNode;
+  splitSourceRef?: Ref<HTMLDivElement>;
+  splitPreviewRef?: Ref<HTMLDivElement>;
+  onSplitSourceScroll?: UIEventHandler<HTMLDivElement>;
+  onSplitPreviewScroll?: UIEventHandler<HTMLDivElement>;
+  onSplitPreviewClick?: MouseEventHandler<HTMLDivElement>;
   fontSize?: number;
   fontFamily?: string;
 }
@@ -54,6 +65,11 @@ export function EditorArea({
   editorContent,
   sourceEditor,
   splitViewPreview,
+  splitSourceRef,
+  splitPreviewRef,
+  onSplitSourceScroll,
+  onSplitPreviewScroll,
+  onSplitPreviewClick,
   fontSize,
   fontFamily,
 }: EditorAreaProps) {
@@ -218,19 +234,24 @@ export function EditorArea({
         {activeDocumentOpen && currentMode === 'SplitView' ? (
           <div className="flex min-h-0 flex-1 divide-x divide-border">
             <div
+              ref={splitSourceRef}
               data-testid="editor-surface-source"
               role="region"
               aria-label="Markdown source"
               className="min-h-0 flex-1 overflow-auto"
+              onScroll={onSplitSourceScroll}
               style={editorSurfaceStyle}
             >
               {sourceEditor}
             </div>
             <div
+              ref={splitPreviewRef}
               data-testid="editor-surface-preview"
               role="region"
               aria-label="Markdown preview"
               className="min-h-0 flex-1 overflow-auto bg-background"
+              onScroll={onSplitPreviewScroll}
+              onClick={onSplitPreviewClick}
               style={editorSurfaceStyle}
             >
               {splitViewPreview}
