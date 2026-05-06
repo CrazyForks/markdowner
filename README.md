@@ -25,12 +25,12 @@ Completed or solid:
 - Safety model: atomic writes, read-only file protection, external disk-change detection, compare/reload/keep-local flow, dirty close confirmation, session restore
 - Navigation and shell UX: Activity Bar, resizable/collapsible sidebar, workspace tree, file-name filtering, Quick Open, Command Palette, Outline panel, document stats, status bar metadata
 - Markdown coverage for headings, paragraphs, quotes, bullets, checklists, images, tables, fenced code blocks, links, emphasis, inline code, and raw-preserved unsupported blocks
-- Settings persistence for autosave, editor font, word wrap, startup mode, focus/typewriter toggles, asset folder, system theme following, PDF paper size, and diagnostics flag
+- Settings persistence and runtime behavior for autosave, editor font, word wrap, startup mode, focus/typewriter writing aids, system theme following, and diagnostics logging; asset folder and PDF paper size preferences are stored for follow-on export/asset workflows
 - Custom CSS theme import with validation plus frontend scoping to Markdown content surfaces
 
 Partially complete:
 
-- Focus mode, Typewriter mode, diagnostics logging, asset folder, and PDF paper size are persisted in settings, but their full runtime behaviors are not implemented yet
+- Asset folder and PDF paper size are persisted in settings, but their full runtime behaviors are waiting on the image asset and export workflows
 - Code highlighting exists in the Rust core model for known code fences, but frontend preview/WYSIWYG highlighting policy still needs product-level polish
 - macOS bundle generation is enabled, but production signing, notarization, release metadata, and distribution workflow are not complete
 - Test coverage is meaningful at the Rust core and React shell levels, but there is no full desktop E2E, screenshot regression, or automated accessibility gate yet

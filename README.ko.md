@@ -25,12 +25,12 @@ Markdowner는 `Tauri v2`, `React`, `Vite`, `Tiptap` 기반으로 구성된 Rust 
 - 안전성 모델: 원자적 쓰기, 읽기 전용 파일 보호, 외부 디스크 변경 감지, 비교/다시 로드/로컬 유지 흐름, dirty close confirmation, 세션 복원
 - 탐색과 셸 UX: Activity Bar, 리사이즈/접힘 가능한 사이드바, 워크스페이스 트리, 파일명 필터, Quick Open, Command Palette, Outline 패널, 문서 통계, Status Bar metadata
 - Markdown coverage: heading, paragraph, quote, bullet, checklist, image, table, fenced code block, link, emphasis, inline code, raw-preserved unsupported block
-- 설정 영속화: autosave, editor font, word wrap, startup mode, focus/typewriter toggle, asset folder, system theme following, PDF paper size, diagnostics flag
+- 설정 영속화와 런타임 동작: autosave, editor font, word wrap, startup mode, focus/typewriter writing aid, system theme following, diagnostics logging. asset folder와 PDF paper size preference는 후속 asset/export workflow를 위해 저장됩니다
 - 사용자 CSS 테마 import 검증과 Markdown content surface 로의 frontend scoping
 
 부분 완료 항목:
 
-- Focus mode, Typewriter mode, diagnostics logging, asset folder, PDF paper size 는 설정으로 저장되지만 실제 런타임 동작은 아직 완성되지 않았습니다
+- Asset folder와 PDF paper size는 설정으로 저장되지만, 실제 런타임 동작은 이미지 asset/export workflow 구현에 맞춰 연결될 예정입니다
 - 코드 하이라이팅은 Rust core 모델에 알려진 code fence 기준으로 존재하지만, frontend preview/WYSIWYG 하이라이팅 정책은 제품 수준 polish가 더 필요합니다
 - macOS bundle 생성은 켜져 있지만, production signing, notarization, release metadata, 배포 workflow는 미완료입니다
 - Rust core와 React shell 테스트는 의미 있게 존재하지만, 전체 데스크톱 E2E, screenshot regression, 자동 접근성 gate는 아직 없습니다

@@ -1,4 +1,3 @@
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -68,19 +67,6 @@ export function SideBar({
         !isOpen && 'opacity-0 invisible overflow-hidden p-0 border-r-0',
       )}
     >
-      <div className="space-y-2">
-        <Badge variant="secondary" className="uppercase tracking-wider">
-          Markdowner
-        </Badge>
-        <h1 className="text-xl font-bold leading-tight">Write Markdown with confidence</h1>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Work locally, keep your files intact, and switch between Editor, WYSIWYG, and Split
-          View without losing your place.
-        </p>
-      </div>
-
-      <Separator />
-
       {showOutline ? (
         <section className="flex min-h-0 flex-col gap-2">
           <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

@@ -531,6 +531,27 @@ const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
   { mode: 'Wysiwyg', label: 'WYSIWYG', shortcutSymbol: '⌘2', shortcutText: 'Cmd+2', ariaKeyshortcuts: 'Meta+2 Control+2' },
   { mode: 'SplitView', label: 'Split View', shortcutSymbol: '⌘3', shortcutText: 'Cmd+3', ariaKeyshortcuts: 'Meta+3 Control+3' },
 ];
+const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>;
+
+const sourceFocusModeExtension = EditorView.theme({
+  '&.cm-focused .cm-line': {
+    opacity: '0.46',
+    transition: 'opacity 120ms ease',
+  },
+  '&.cm-focused .cm-line:hover, &.cm-focused .cm-line:has(.cm-selectionBackground)': {
+    opacity: '1',
+  },
+});
+
+const sourceTypewriterModeExtension = EditorView.theme({
+  '.cm-scroller': {
+    scrollPaddingBlock: '45%',
+  },
+  '.cm-content': {
+    paddingTop: '35vh',
+    paddingBottom: '35vh',
+  },
+});
 
 const EDITOR_MODE_LABELS: Record<EditorMode, string> = EDITOR_MODE_OPTIONS.reduce(
   (acc, option) => {
@@ -580,6 +601,22 @@ function buildWindowTitle(snapshot: AppSnapshot) {
 
   const prefix = snapshot.activeDocumentDirty ? '● ' : '';
   return `${prefix}${snapshot.activeDocumentName} — ${WINDOW_TITLE}`;
+}
+
+function centerSourceEditorLine(view: EditorView) {
+  const scrollElement = view.scrollDOM;
+  if (!scrollElement || scrollElement.clientHeight <= 0) return;
+
+  const selectionHead = view.state.selection.main.head;
+  const lineBlock = view.lineBlockAt(selectionHead);
+  const nextScrollTop = Math.max(
+    0,
+    lineBlock.top + lineBlock.height / 2 - scrollElement.clientHeight / 2,
+  );
+
+  if (Number.isFinite(nextScrollTop)) {
+    scrollElement.scrollTop = nextScrollTop;
+  }
 }
 
 export default function App() {
@@ -747,6 +784,11 @@ export default function App() {
   const handleSourceEditorViewportChange = useEffectEvent((scrollElement: HTMLElement) => {
     if (currentMode !== 'SplitView') return;
     syncScrollPosition(scrollElement, splitPreviewScrollRef.current);
+  });
+
+  const handleSourceEditorTypewriterChange = useEffectEvent((view: EditorView) => {
+    if (!settings.typewriterModeEnabled) return;
+    window.requestAnimationFrame(() => centerSourceEditorLine(view));
   });
 
   const handleSplitPreviewClick = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -931,8 +973,15 @@ export default function App() {
   }, []);
 
   const handleSettingsChange = (next: Settings) => {
+    const changedKeys = SETTINGS_KEYS.filter((key) => !Object.is(settings[key], next[key]));
     setSettings(next);
     void saveSettings(next);
+    if (next.diagnosticsEnabled) {
+      console.info('[Markdowner diagnostics]', 'settings.changed', {
+        changedKeys,
+        diagnosticsEnabled: next.diagnosticsEnabled,
+      });
+    }
   };
 
   useEffect(() => {
@@ -1059,14 +1108,38 @@ export default function App() {
     () => [
       markdown(),
       ...(settings.editorLineWrap ? [EditorView.lineWrapping] : []),
+      ...(settings.focusModeEnabled ? [sourceFocusModeExtension] : []),
+      ...(settings.typewriterModeEnabled ? [sourceTypewriterModeExtension] : []),
       EditorView.updateListener.of((update) => {
         if (update.viewportChanged) {
           handleSourceEditorViewportChange(update.view.scrollDOM);
         }
+        if (update.selectionSet || update.docChanged || update.focusChanged) {
+          handleSourceEditorTypewriterChange(update.view);
+        }
       }),
     ],
-    [handleSourceEditorViewportChange, settings.editorLineWrap],
+    [
+      handleSourceEditorTypewriterChange,
+      handleSourceEditorViewportChange,
+      settings.editorLineWrap,
+      settings.focusModeEnabled,
+      settings.typewriterModeEnabled,
+    ],
   );
+
+  useEffect(() => {
+    if (!settings.typewriterModeEnabled || !sourceEditorViewRef.current) {
+      return;
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      if (sourceEditorViewRef.current) {
+        centerSourceEditorLine(sourceEditorViewRef.current);
+      }
+    });
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [settings.typewriterModeEnabled, currentMode]);
 
   const withBusy = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -1918,7 +1991,10 @@ export default function App() {
   ];
 
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+    <div
+      className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground"
+      data-diagnostics-enabled={String(settings.diagnosticsEnabled)}
+    >
       <div
         data-testid="app-titlebar"
         className="flex h-[35px] shrink-0 items-center border-b border-border/60 bg-background"
@@ -2038,6 +2114,8 @@ export default function App() {
         activeDocumentName={snapshot.activeDocumentName}
         fontSize={settings.editorFontSize || DEFAULT_SETTINGS.editorFontSize}
         fontFamily={settings.editorFontFamily}
+        focusModeEnabled={settings.focusModeEnabled}
+        typewriterModeEnabled={settings.typewriterModeEnabled}
         splitSourceRef={splitSourceScrollRef}
         splitPreviewRef={splitPreviewScrollRef}
         onSplitSourceScroll={handleSplitSourceScroll}

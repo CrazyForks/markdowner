@@ -43,6 +43,8 @@ export interface EditorAreaProps {
   onSplitPreviewClick?: MouseEventHandler<HTMLDivElement>;
   fontSize?: number;
   fontFamily?: string;
+  focusModeEnabled?: boolean;
+  typewriterModeEnabled?: boolean;
 }
 
 export function EditorArea({
@@ -72,6 +74,8 @@ export function EditorArea({
   onSplitPreviewClick,
   fontSize,
   fontFamily,
+  focusModeEnabled = false,
+  typewriterModeEnabled = false,
 }: EditorAreaProps) {
   const editorSurfaceStyle: CSSProperties = {};
   if (fontSize && Number.isFinite(fontSize) && fontSize > 0) {
@@ -80,6 +84,14 @@ export function EditorArea({
   if (fontFamily && fontFamily.trim().length > 0) {
     editorSurfaceStyle.fontFamily = fontFamily;
   }
+  const editorModeAttributes = {
+    'data-focus-mode': String(focusModeEnabled),
+    'data-typewriter-mode': String(typewriterModeEnabled),
+  };
+  const editorModeClassName = cn(
+    focusModeEnabled && 'editor-focus-mode',
+    typewriterModeEnabled && 'editor-typewriter-mode',
+  );
   return (
     <main className="relative flex h-full min-h-0 min-w-0 flex-col">
       {errorMessage ? (
@@ -214,7 +226,11 @@ export function EditorArea({
         {activeDocumentOpen && currentMode === 'Wysiwyg' ? (
           <div
             data-testid="editor-surface-wysiwyg"
-            className="markdown-surface min-h-0 flex-1 overflow-auto px-8 py-6"
+            {...editorModeAttributes}
+            className={cn(
+              'markdown-surface min-h-0 flex-1 overflow-auto px-8 py-6',
+              editorModeClassName,
+            )}
             style={editorSurfaceStyle}
           >
             {editorContent}
@@ -224,7 +240,8 @@ export function EditorArea({
         {activeDocumentOpen && currentMode === 'Editor' ? (
           <div
             data-testid="editor-surface-source"
-            className="min-h-0 flex-1 overflow-auto"
+            {...editorModeAttributes}
+            className={cn('min-h-0 flex-1 overflow-auto', editorModeClassName)}
             style={editorSurfaceStyle}
           >
             {sourceEditor}
@@ -236,9 +253,10 @@ export function EditorArea({
             <div
               ref={splitSourceRef}
               data-testid="editor-surface-source"
+              {...editorModeAttributes}
               role="region"
               aria-label="Markdown source"
-              className="min-h-0 flex-1 overflow-auto"
+              className={cn('min-h-0 flex-1 overflow-auto', editorModeClassName)}
               onScroll={onSplitSourceScroll}
               style={editorSurfaceStyle}
             >
@@ -247,9 +265,13 @@ export function EditorArea({
             <div
               ref={splitPreviewRef}
               data-testid="editor-surface-preview"
+              {...editorModeAttributes}
               role="region"
               aria-label="Markdown preview"
-              className="min-h-0 flex-1 overflow-auto bg-background"
+              className={cn(
+                'min-h-0 flex-1 overflow-auto bg-background',
+                editorModeClassName,
+              )}
               onScroll={onSplitPreviewScroll}
               onClick={onSplitPreviewClick}
               style={editorSurfaceStyle}

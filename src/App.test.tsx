@@ -114,6 +114,7 @@ vi.mock('@uiw/react-codemirror', () => ({
   ),
   EditorView: {
     lineWrapping: LINE_WRAPPING_SENTINEL,
+    theme: (spec: unknown) => ({ spec }),
     updateListener: {
       of: (listener: unknown) => ({ listener }),
     },
@@ -3328,6 +3329,46 @@ describe('App recent documents', () => {
     });
   });
 
+  it('applies Focus Mode to the active editor surface when toggled in Settings', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          focusModeEnabled: false,
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: '# Notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const surface = await screen.findByTestId('editor-surface-source');
+    expect(surface).toHaveAttribute('data-focus-mode', 'false');
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const focusModeToggle = within(dialog).getByLabelText(/focus mode/i);
+    fireEvent.click(focusModeToggle);
+
+    await waitFor(() => {
+      expect(surface).toHaveAttribute('data-focus-mode', 'true');
+    });
+  });
+
   it('persists Typewriter Mode changes from the Settings dialog through save_settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
@@ -3357,6 +3398,46 @@ describe('App recent documents', () => {
       expect(invokeMock).toHaveBeenCalledWith('save_settings', {
         settings: expect.objectContaining({ typewriterModeEnabled: true }),
       });
+    });
+  });
+
+  it('applies Typewriter Mode to the active editor surface when toggled in Settings', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          typewriterModeEnabled: false,
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: '# Notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const surface = await screen.findByTestId('editor-surface-source');
+    expect(surface).toHaveAttribute('data-typewriter-mode', 'false');
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const typewriterModeToggle = within(dialog).getByLabelText(/typewriter mode/i);
+    fireEvent.click(typewriterModeToggle);
+
+    await waitFor(() => {
+      expect(surface).toHaveAttribute('data-typewriter-mode', 'true');
     });
   });
 
@@ -3422,6 +3503,47 @@ describe('App recent documents', () => {
         settings: expect.objectContaining({ diagnosticsEnabled: true }),
       });
     });
+  });
+
+  it('emits local diagnostics after Diagnostics Logging is enabled', async () => {
+    const consoleInfoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          diagnosticsEnabled: false,
+        };
+      }
+      return undefined;
+    });
+
+    try {
+      const { default: App } = await import('./App');
+
+      render(<App />);
+
+      fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+      const dialog = await screen.findByRole('dialog', { name: /settings/i });
+      const diagnosticsToggle = within(dialog).getByLabelText(/diagnostics logging/i);
+      fireEvent.click(diagnosticsToggle);
+
+      await waitFor(() => {
+        expect(consoleInfoSpy).toHaveBeenCalledWith(
+          '[Markdowner diagnostics]',
+          'settings.changed',
+          expect.objectContaining({
+            changedKeys: ['diagnosticsEnabled'],
+            diagnosticsEnabled: true,
+          }),
+        );
+      });
+    } finally {
+      consoleInfoSpy.mockRestore();
+    }
   });
 
   it('falls back to the default asset folder when the Settings dialog input is cleared', async () => {

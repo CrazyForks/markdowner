@@ -193,6 +193,17 @@
   .markdown-surface hr {
     @apply my-6 border-border;
   }
+  .editor-focus-mode.markdown-surface > * {
+    opacity: 0.48;
+    transition: opacity 120ms ease;
+  }
+  .editor-focus-mode.markdown-surface > *:hover,
+  .editor-focus-mode.markdown-surface > *:focus-within {
+    opacity: 1;
+  }
+  .editor-typewriter-mode {
+    scroll-padding-block: 45%;
+  }
   .markdown-surface ul[data-type="taskList"] {
     @apply list-none pl-0;
   }
