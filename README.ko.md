@@ -119,13 +119,13 @@ pnpm tauri dev
 
 이 명령은 다음을 수행합니다.
 
-- `http://localhost:1420` 에 Vite dev server 실행
+- `http://127.0.0.1:14238` 에 Vite dev server 실행
 - Tauri Rust 셸 컴파일
 - 로컬 debug 데스크톱 실행 파일 실행
 
 이 저장소에서 실제로 검증한 결과, 시작 시 먼저 `pnpm dev` 가 실행되고 이어서 `target/debug/markdowner-desktop` 이 실행됩니다.
 
-`pnpm tauri dev` 가 바로 실패하면, 기본적으로 Vite dev server 가 `1420` 포트를 사용하므로 해당 포트가 이미 사용 중인지 먼저 확인하세요.
+`pnpm tauri dev` 가 바로 실패하면, `14238` 포트가 이미 사용 중인지 먼저 확인하세요. Markdowner는 다른 프로젝트의 dev server에 조용히 붙지 않도록 Vite dev server를 `127.0.0.1:14238`에 `strictPort`로 고정합니다.
 
 ## macOS 로컬 빌드
 

@@ -119,13 +119,13 @@ pnpm tauri dev
 
 What this does:
 
-- starts the Vite dev server on `http://localhost:1420`
+- starts the Vite dev server on `http://127.0.0.1:14238`
 - compiles the Tauri Rust shell
 - launches the local debug desktop executable
 
 This command was verified locally in this repository. During startup, Tauri runs `pnpm dev` first, then runs the Rust desktop app from `target/debug/markdowner-desktop`.
 
-If `pnpm tauri dev` fails immediately, first check whether port `1420` is already in use because the Vite dev server binds to that port by default.
+If `pnpm tauri dev` fails immediately, first check whether port `14238` is already in use. Markdowner binds the Vite dev server to `127.0.0.1:14238` with `strictPort` enabled so it does not silently attach to another project's dev server.
 
 ## Local Build on macOS
 
