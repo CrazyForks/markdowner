@@ -976,6 +976,11 @@ export default function App() {
     const changedKeys = SETTINGS_KEYS.filter((key) => !Object.is(settings[key], next[key]));
     setSettings(next);
     void saveSettings(next);
+    if (changedKeys.includes('themeFollowSystem') && next.themeFollowSystem) {
+      void setTheme(resolveOsTheme())
+        .then((synced) => applySnapshot(synced, true))
+        .catch((error) => console.error(error));
+    }
     if (next.diagnosticsEnabled) {
       console.info('[Markdowner diagnostics]', 'settings.changed', {
         changedKeys,

@@ -1143,6 +1143,56 @@ describe('App recent documents', () => {
     });
   });
 
+  it('applies the current OS theme when Follow System Theme is enabled from Settings', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          themeFollowSystem: false,
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        theme: { kind: 'BuiltInLight', stylesheet: null, stylesheetPath: null },
+      }),
+    );
+    setThemeMock.mockImplementation(async (kind: 'BuiltInLight' | 'BuiltInDark' | 'CustomCss') =>
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        theme: { kind, stylesheet: null, stylesheetPath: null },
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const systemThemeToggle = within(dialog).getByLabelText(/follow system theme/i);
+    fireEvent.click(systemThemeToggle);
+
+    await waitFor(() => {
+      expect(setThemeMock).toHaveBeenCalledWith('BuiltInDark');
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: expect.objectContaining({ themeFollowSystem: true }),
+      });
+    });
+  });
+
   it('does not sync the theme to the OS on startup when themeFollowSystem is disabled', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
