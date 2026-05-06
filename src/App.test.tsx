@@ -155,6 +155,36 @@ function setScrollMetrics(element: HTMLElement, scrollHeight: number, clientHeig
   });
 }
 
+function captureRuntimeErrors() {
+  const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const errors: unknown[] = [];
+  const handleError = (event: ErrorEvent) => {
+    errors.push(event.error ?? event.message);
+  };
+  const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+    errors.push(event.reason);
+  };
+
+  window.addEventListener('error', handleError);
+  window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+  return {
+    async expectClean() {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(errors).toEqual([]);
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    },
+    restore() {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      consoleErrorSpy.mockRestore();
+    },
+  };
+}
+
 describe('App recent documents', () => {
   afterEach(() => {
     cleanup();
@@ -335,6 +365,173 @@ describe('App recent documents', () => {
     expect(
       within(toolbar).getByRole('button', { name: /^settings \(cmd\+,\)$/i }),
     ).toBeInTheDocument();
+  });
+
+  it('smoke-tests empty-state controls without runtime errors', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    openDialogMock.mockResolvedValue(null);
+    newDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'Untitled.md',
+        activeDocumentPath: null,
+        activeDocumentSource: '',
+        activeDocumentDirty: true,
+      }),
+    );
+    const runtimeErrors = captureRuntimeErrors();
+
+    try {
+      const { default: App } = await import('./App');
+
+      render(<App />);
+
+      const newFileButton = await screen.findByRole('button', { name: /^new file$/i });
+      const openFileButton = screen.getByRole('button', { name: /^open file…$/i });
+      const openWorkspaceButton = screen.getByRole('button', { name: /^open workspace…$/i });
+
+      fireEvent.click(openFileButton);
+      await waitFor(() => expect(openDialogMock).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(openWorkspaceButton);
+      await waitFor(() => expect(openDialogMock).toHaveBeenCalledTimes(2));
+
+      fireEvent.click(screen.getByRole('button', { name: /^quick open \(cmd\+p\)$/i }));
+      const quickOpenDialog = await screen.findByRole('dialog', { name: /quick open/i });
+      const quickOpenInput = within(quickOpenDialog).getByRole('textbox', {
+        name: /quick open file search/i,
+      });
+      fireEvent.change(quickOpenInput, { target: { value: 'missing' } });
+      fireEvent.keyDown(quickOpenInput, { key: 'Escape' });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /quick open/i })).toBeNull();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /^settings \(cmd\+,\)$/i }));
+      const settingsDialog = await screen.findByRole('dialog', { name: /^settings$/i });
+      fireEvent.click(within(settingsDialog).getByRole('button', { name: /^close$/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /^settings$/i })).toBeNull();
+      });
+
+      fireEvent.click(newFileButton);
+      await waitFor(() => expect(newDocumentMock).toHaveBeenCalled());
+
+      await runtimeErrors.expectClean();
+    } finally {
+      runtimeErrors.restore();
+    }
+  });
+
+  it('smoke-tests active document menus and commands without runtime errors', async () => {
+    const activeSnapshot = baseSnapshot({
+      rootDir: '/tmp/project',
+      workspaceDocuments: [
+        '/tmp/project/README.md',
+        '/tmp/project/guides/reference/api.md',
+      ],
+      recentDocuments: ['/tmp/project/README.md'],
+      activeDocumentName: 'meeting-notes.md',
+      activeDocumentPath: '/tmp/project/meeting-notes.md',
+      activeDocumentSource: ['# Agenda', '', '## Decisions'].join('\n'),
+      mode: 'Editor',
+    });
+    bootstrapMock.mockResolvedValue(activeSnapshot);
+    openDialogMock.mockResolvedValue(null);
+    saveActiveDocumentMock.mockResolvedValue(activeSnapshot);
+    openWorkspaceDocumentMock.mockResolvedValue({
+      ...activeSnapshot,
+      activeDocumentName: 'api.md',
+      activeDocumentPath: '/tmp/project/guides/reference/api.md',
+      activeDocumentSource: '# API',
+    });
+    setModeMock.mockImplementation(async (mode: EditorMode) => ({
+      ...activeSnapshot,
+      mode,
+    }));
+    setThemeMock.mockImplementation(async (themeKind: AppSnapshot['theme']['kind']) => ({
+      ...activeSnapshot,
+      theme: {
+        kind: themeKind,
+        stylesheet: null,
+        stylesheetPath: null,
+      },
+    }));
+    const runtimeErrors = captureRuntimeErrors();
+
+    try {
+      const { default: App } = await import('./App');
+
+      render(<App />);
+
+      await screen.findByLabelText(/source editor/i);
+
+      let menu = await openAppMenu();
+      fireEvent.click(within(menu).getByRole('menuitem', { name: /^save$/i }));
+      await waitFor(() => expect(saveActiveDocumentMock).toHaveBeenCalled());
+
+      menu = await openAppMenu();
+      fireEvent.click(within(menu).getByRole('menuitem', { name: /^import css…$/i }));
+      await waitFor(() => expect(openDialogMock).toHaveBeenCalled());
+
+      menu = await openAppMenu();
+      fireEvent.click(within(menu).getByRole('menuitemradio', { name: /^split view$/i }));
+      await waitFor(() => expect(setModeMock).toHaveBeenCalledWith('SplitView'));
+
+      menu = await openAppMenu();
+      fireEvent.click(within(menu).getByRole('menuitemradio', { name: /^light theme$/i }));
+      await waitFor(() => expect(setThemeMock).toHaveBeenCalledWith('BuiltInLight'));
+
+      menu = await openAppMenu();
+      fireEvent.click(within(menu).getByRole('menuitem', { name: /^settings$/i }));
+      const settingsDialog = await screen.findByRole('dialog', { name: /^settings$/i });
+      fireEvent.click(within(settingsDialog).getByRole('button', { name: /^close$/i }));
+
+      fireEvent.click(screen.getByRole('button', { name: /^outline$/i }));
+      const agendaHeading = await screen.findByRole('button', { name: /^agenda$/i });
+      fireEvent.click(agendaHeading);
+
+      fireEvent.click(screen.getByRole('button', { name: /^quick open \(cmd\+p\)$/i }));
+      const quickOpenDialog = await screen.findByRole('dialog', { name: /quick open/i });
+      fireEvent.change(
+        within(quickOpenDialog).getByRole('textbox', {
+          name: /quick open file search/i,
+        }),
+        { target: { value: 'api' } },
+      );
+      fireEvent.click(
+        await within(quickOpenDialog).findByRole('option', { name: /api\.md/i }),
+      );
+      await waitFor(() => {
+        expect(openWorkspaceDocumentMock).toHaveBeenCalledWith(
+          '/tmp/project/guides/reference/api.md',
+        );
+      });
+
+      fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+      const commandPaletteDialog = await screen.findByRole('dialog', {
+        name: /command palette/i,
+      });
+      fireEvent.change(
+        within(commandPaletteDialog).getByRole('textbox', {
+          name: /command palette search/i,
+        }),
+        { target: { value: 'word wrap' } },
+      );
+      fireEvent.click(
+        await within(commandPaletteDialog).findByRole('option', {
+          name: /disable word wrap/i,
+        }),
+      );
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+          settings: expect.objectContaining({ editorLineWrap: false }),
+        });
+      });
+
+      await runtimeErrors.expectClean();
+    } finally {
+      runtimeErrors.restore();
+    }
   });
 
   it('opens an Outline sidebar view with document headings from the active draft', async () => {
