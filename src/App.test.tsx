@@ -2510,6 +2510,45 @@ describe('App recent documents', () => {
     await screen.findByRole('dialog', { name: /settings/i });
   });
 
+  it('keeps the Settings dialog layout usable at compact window widths', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          defaultMode: 'Wysiwyg',
+          assetFolder: 'assets',
+          pdfPaperSize: 'A4',
+        };
+      }
+      return undefined;
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const body = within(dialog).getByTestId('settings-dialog-body');
+    const aliasSnippet = within(dialog).getByText(/^alias markdowner=/);
+    const fontFamilyRow = within(dialog).getByTestId('settings-field-font-family');
+    const fontFamilyInput = within(dialog).getByLabelText(/font family/i);
+    const defaultModeToggle = within(dialog).getByTestId('settings-default-mode-toggle');
+    const pdfPaperSizeToggle = within(dialog).getByTestId('settings-pdf-paper-size-toggle');
+
+    expect(dialog).toHaveClass('max-h-[calc(100dvh-3rem)]', 'overflow-hidden', 'p-0');
+    expect(body).toHaveClass('overflow-y-auto');
+    expect(aliasSnippet).toHaveClass('whitespace-pre-wrap', 'break-all');
+    expect(fontFamilyRow).toHaveClass('grid', 'gap-2');
+    expect(fontFamilyInput).toHaveClass('w-full', 'min-w-0');
+    expect(defaultModeToggle).toHaveClass('h-auto', 'w-full', 'flex-wrap');
+    expect(pdfPaperSizeToggle).toHaveClass('h-auto', 'w-full', 'flex-wrap');
+  });
+
   it('applies the persisted editor font size to the source pane on startup', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
