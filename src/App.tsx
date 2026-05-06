@@ -1560,6 +1560,12 @@ export default function App() {
         return;
       }
 
+      if (matchesShortcut(event, 'w')) {
+        event.preventDefault();
+        void handleWindowCloseCommand();
+        return;
+      }
+
       if (matchesShortcut(event, '1')) {
         event.preventDefault();
         void handleSetMode('Editor');

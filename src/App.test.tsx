@@ -3610,6 +3610,71 @@ describe('App recent documents', () => {
     });
   });
 
+  it('closes the window with Cmd+W when document is clean', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('textbox', { name: /source editor/i });
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+
+    await waitFor(() => {
+      expect(destroyWindowMock).toHaveBeenCalled();
+    });
+    expect(messageMock).not.toHaveBeenCalled();
+  });
+
+  it('closes a dirty window from Cmd+W without saving when discard is selected', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        activeDocumentDirty: true,
+        mode: 'Editor',
+      }),
+    );
+    messageMock.mockResolvedValue("Don't Save");
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const editor = await screen.findByRole('textbox', { name: /source editor/i });
+    fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+
+    await waitFor(() => {
+      expect(messageMock).toHaveBeenCalledWith(
+        "Save changes to 'meeting-notes.md' before closing?",
+        {
+          buttons: {
+            yes: 'Save',
+            no: "Don't Save",
+            cancel: 'Cancel',
+          },
+          kind: 'warning',
+          title: 'Markdowner',
+        },
+      );
+      expect(destroyWindowMock).toHaveBeenCalled();
+    });
+    expect(saveActiveDocumentMock).not.toHaveBeenCalled();
+    expect(saveActiveDocumentAsMock).not.toHaveBeenCalled();
+    expect(quitAppMock).not.toHaveBeenCalled();
+  });
+
   it('quits the app from the native quit menu command when document is clean', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
