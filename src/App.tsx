@@ -181,6 +181,7 @@ const SIDEBAR_MAX_WIDTH = 320;
 const SIDEBAR_DEFAULT_WIDTH = 280;
 const SIDEBAR_KEYBOARD_STEP = 8;
 const SIDEBAR_KEYBOARD_PAGE_STEP = 32;
+const CHORD_PREFIX_TIMEOUT_MS = 1500;
 
 function readSidebarState(): boolean {
   try {
@@ -527,9 +528,9 @@ type EditorModeOption = {
 };
 
 const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
-  { mode: 'Editor', label: 'Editor', shortcutSymbol: '⌘1', shortcutText: 'Cmd+1', ariaKeyshortcuts: 'Meta+1 Control+1' },
-  { mode: 'Wysiwyg', label: 'WYSIWYG', shortcutSymbol: '⌘2', shortcutText: 'Cmd+2', ariaKeyshortcuts: 'Meta+2 Control+2' },
-  { mode: 'SplitView', label: 'Split View', shortcutSymbol: '⌘3', shortcutText: 'Cmd+3', ariaKeyshortcuts: 'Meta+3 Control+3' },
+  { mode: 'Editor', label: 'Editor', shortcutSymbol: '⌘K ⌘E', shortcutText: 'Cmd+K Cmd+E', ariaKeyshortcuts: 'Meta+K Meta+E' },
+  { mode: 'Wysiwyg', label: 'WYSIWYG', shortcutSymbol: '⌘K ⌘W', shortcutText: 'Cmd+K Cmd+W', ariaKeyshortcuts: 'Meta+K Meta+W' },
+  { mode: 'SplitView', label: 'Split View', shortcutSymbol: '⌘K ⌘S', shortcutText: 'Cmd+K Cmd+S', ariaKeyshortcuts: 'Meta+K Meta+S' },
 ];
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>;
 
@@ -670,6 +671,15 @@ export default function App() {
   const splitSourceScrollRef = useRef<HTMLDivElement | null>(null);
   const splitPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const modeRequestIdRef = useRef(0);
+  const chordPrefixActiveRef = useRef(false);
+  const chordPrefixTimerRef = useRef<number | null>(null);
+  const clearChordPrefix = () => {
+    chordPrefixActiveRef.current = false;
+    if (chordPrefixTimerRef.current !== null) {
+      window.clearTimeout(chordPrefixTimerRef.current);
+      chordPrefixTimerRef.current = null;
+    }
+  };
   const activeDocumentOpen = snapshot.activeDocumentSource !== null;
 
   useEffect(() => {
@@ -1435,14 +1445,16 @@ export default function App() {
     localDraft,
   ]);
 
-  const handleSetMode = async (nextMode: EditorMode) => {
-    if (currentMode === nextMode) {
+  const handleSetMode = useEffectEvent(async (nextMode: EditorMode) => {
+    // Always read snapshot/localDraft from the latest state via useEffectEvent
+    // so concurrent menu, palette, and keyboard chord paths agree on the truth.
+    if (snapshot.mode === nextMode) {
       return;
     }
 
     const requestId = modeRequestIdRef.current + 1;
     modeRequestIdRef.current = requestId;
-    const previousMode = currentMode;
+    const previousMode = snapshot.mode;
     applyModeOptimistically(nextMode);
 
     try {
@@ -1469,7 +1481,7 @@ export default function App() {
         applyModeOptimistically(previousMode);
       }
     }
-  };
+  });
 
   const handleSetTheme = async (themeKind: ThemeKind) => {
     await withBusy(async () => {
@@ -1610,6 +1622,37 @@ export default function App() {
         return;
       }
 
+      // Resolve a pending Cmd+K chord (Cmd+K → Cmd+W/E/S, with or without the
+      // second Cmd held). This must run before single-key handlers so the
+      // second stroke is not consumed by, e.g., the Cmd+W close-window shortcut.
+      if (chordPrefixActiveRef.current) {
+        const key = event.key.toLowerCase();
+        if (key === 'meta' || key === 'control' || key === 'shift' || key === 'alt') {
+          return;
+        }
+        clearChordPrefix();
+        if (event.altKey || event.shiftKey) {
+          return;
+        }
+        if (key === 'w') {
+          event.preventDefault();
+          void handleSetMode('Wysiwyg');
+          return;
+        }
+        if (key === 'e') {
+          event.preventDefault();
+          void handleSetMode('Editor');
+          return;
+        }
+        if (key === 's') {
+          event.preventDefault();
+          void handleSetMode('SplitView');
+          return;
+        }
+        // Unknown chord completion — drop quietly.
+        return;
+      }
+
       if (matchesShortcut(event, 'n')) {
         event.preventDefault();
         void handleNewDocument();
@@ -1686,21 +1729,22 @@ export default function App() {
         return;
       }
 
-      if (matchesShortcut(event, '1')) {
+      // Cmd+K starts a chord. Subsequent Cmd+W/E/S (or plain w/e/s) selects a view mode.
+      if (matchesShortcut(event, 'k')) {
         event.preventDefault();
-        void handleSetMode('Editor');
+        clearChordPrefix();
+        chordPrefixActiveRef.current = true;
+        chordPrefixTimerRef.current = window.setTimeout(() => {
+          chordPrefixActiveRef.current = false;
+          chordPrefixTimerRef.current = null;
+        }, CHORD_PREFIX_TIMEOUT_MS);
         return;
       }
 
-      if (matchesShortcut(event, '2')) {
+      // Reserve Cmd+0..9 for future tab switching — intercept so they don't
+      // bubble to other handlers, but do nothing for now.
+      if (event.key.length === 1 && /[0-9]/.test(event.key) && usesCommandModifier(event) && !event.shiftKey && !event.altKey) {
         event.preventDefault();
-        void handleSetMode('Wysiwyg');
-        return;
-      }
-
-      if (matchesShortcut(event, '3')) {
-        event.preventDefault();
-        void handleSetMode('SplitView');
         return;
       }
 
@@ -1720,6 +1764,7 @@ export default function App() {
 
     return () => {
       window.removeEventListener('keydown', handleKeyboardShortcut);
+      clearChordPrefix();
     };
   }, [busy, localDraft, snapshot, settings]);
 

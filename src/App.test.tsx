@@ -857,7 +857,8 @@ describe('App recent documents', () => {
       }),
     );
 
-    fireEvent.keyDown(window, { key: '2', metaKey: true });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
 
     await waitFor(() => {
       expect(screen.queryByText(/^Ln \d+, Col \d+$/)).not.toBeInTheDocument();
@@ -1785,7 +1786,7 @@ describe('App recent documents', () => {
     });
   });
 
-  it('switches modes with the keyboard shortcuts (Cmd+1/2/3)', async () => {
+  it('switches modes with the Cmd+K chord shortcuts (Cmd+K Cmd+E/W/S)', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'meeting-notes.md',
@@ -1808,17 +1809,20 @@ describe('App recent documents', () => {
 
     await screen.findByText(/^meeting-notes\.md/);
 
-    fireEvent.keyDown(window, { key: '1', metaKey: true });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 'e', metaKey: true });
     await waitFor(() => {
       expect(setModeMock).toHaveBeenCalledWith('Editor');
     });
 
-    fireEvent.keyDown(window, { key: '2', metaKey: true });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
     await waitFor(() => {
       expect(setModeMock).toHaveBeenCalledWith('Wysiwyg');
     });
 
-    fireEvent.keyDown(window, { key: '3', metaKey: true });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
     await waitFor(() => {
       expect(setModeMock).toHaveBeenCalledWith('SplitView');
     });
@@ -1850,7 +1854,8 @@ describe('App recent documents', () => {
     await screen.findByText(/^meeting-notes\.md/);
     expect(screen.queryByRole('textbox', { name: /source editor/i })).not.toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: '1', metaKey: true });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 'e', metaKey: true });
 
     await waitFor(() => {
       expect(setModeMock).toHaveBeenCalledWith('Editor');
@@ -1895,8 +1900,10 @@ describe('App recent documents', () => {
 
     await screen.findByText(/^meeting-notes\.md/);
 
-    fireEvent.keyDown(window, { key: '1', metaKey: true });
-    fireEvent.keyDown(window, { key: '3', metaKey: true });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 'e', metaKey: true });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
 
     await waitFor(() => {
       expect(setModeMock).toHaveBeenCalledWith('Editor');
@@ -1976,7 +1983,8 @@ describe('App recent documents', () => {
       expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith('# Edited notes');
     });
 
-    fireEvent.keyDown(window, { key: '3', metaKey: true });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
     expect(await screen.findByTestId('editor-surface-preview')).toBeInTheDocument();
 
     await act(async () => {

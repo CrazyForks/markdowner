@@ -37,62 +37,65 @@ const MENU_RECENT_EMPTY_LABEL: &str = "No Recent Documents";
 struct MenuCommandDescriptor {
     id: &'static str,
     label: &'static str,
-    accelerator: &'static str,
+    accelerator: Option<&'static str>,
 }
 
 const FILE_MENU_COMMANDS: &[MenuCommandDescriptor] = &[
     MenuCommandDescriptor {
         id: MENU_COMMAND_NEW_DOCUMENT,
         label: "New Document",
-        accelerator: "CmdOrCtrl+N",
+        accelerator: Some("CmdOrCtrl+N"),
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_OPEN_DOCUMENT,
         label: "Open Markdown…",
-        accelerator: "CmdOrCtrl+O",
+        accelerator: Some("CmdOrCtrl+O"),
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_OPEN_WORKSPACE,
         label: "Open Folder…",
-        accelerator: "CmdOrCtrl+Shift+O",
+        accelerator: Some("CmdOrCtrl+Shift+O"),
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_SAVE_ACTIVE_DOCUMENT,
         label: "Save",
-        accelerator: "CmdOrCtrl+S",
+        accelerator: Some("CmdOrCtrl+S"),
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS,
         label: "Save As…",
-        accelerator: "CmdOrCtrl+Shift+S",
+        accelerator: Some("CmdOrCtrl+Shift+S"),
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_CLOSE_WINDOW,
         label: "Close",
-        accelerator: "CmdOrCtrl+W",
+        accelerator: Some("CmdOrCtrl+W"),
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_QUIT_APP,
         label: "Quit Markdowner",
-        accelerator: "CmdOrCtrl+Q",
+        accelerator: Some("CmdOrCtrl+Q"),
     },
 ];
 
+// View mode shortcuts use a chord (Cmd+K Cmd+E/W/S) handled in the frontend.
+// macOS NSMenu cannot display chord accelerators, so we surface the chord in
+// the label instead and leave the accelerator unset.
 const VIEW_MENU_COMMANDS: &[MenuCommandDescriptor] = &[
     MenuCommandDescriptor {
         id: MENU_COMMAND_SET_MODE_EDITOR,
-        label: "Editor",
-        accelerator: "CmdOrCtrl+1",
+        label: "Editor (⌘K ⌘E)",
+        accelerator: None,
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_SET_MODE_WYSIWYG,
-        label: "WYSIWYG",
-        accelerator: "CmdOrCtrl+2",
+        label: "WYSIWYG (⌘K ⌘W)",
+        accelerator: None,
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_SET_MODE_SPLITVIEW,
-        label: "Split-view",
-        accelerator: "CmdOrCtrl+3",
+        label: "Split-view (⌘K ⌘S)",
+        accelerator: None,
     },
 ];
 
@@ -284,9 +287,11 @@ fn build_menu_item<R: Runtime>(
     app: &AppHandle<R>,
     descriptor: MenuCommandDescriptor,
 ) -> tauri::Result<tauri::menu::MenuItem<R>> {
-    MenuItemBuilder::with_id(descriptor.id, descriptor.label)
-        .accelerator(descriptor.accelerator)
-        .build(app)
+    let mut builder = MenuItemBuilder::with_id(descriptor.id, descriptor.label);
+    if let Some(accel) = descriptor.accelerator {
+        builder = builder.accelerator(accel);
+    }
+    builder.build(app)
 }
 
 fn recent_document_menu_command(path: &str) -> String {
@@ -828,14 +833,14 @@ mod tests {
                 .iter()
                 .map(|descriptor| descriptor.accelerator)
                 .collect::<Vec<_>>(),
-            vec!["CmdOrCtrl+1", "CmdOrCtrl+2", "CmdOrCtrl+3"]
+            vec![None, None, None]
         );
         assert_eq!(
             VIEW_MENU_COMMANDS
                 .iter()
                 .map(|descriptor| descriptor.label)
                 .collect::<Vec<_>>(),
-            vec!["Editor", "WYSIWYG", "Split-view"]
+            vec!["Editor (⌘K ⌘E)", "WYSIWYG (⌘K ⌘W)", "Split-view (⌘K ⌘S)"]
         );
     }
 
