@@ -1,7 +1,7 @@
 mod document;
 mod markdown;
 mod platform;
-mod storage;
+pub mod storage;
 mod theme;
 mod workspace;
 

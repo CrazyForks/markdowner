@@ -99,6 +99,13 @@ const VIEW_MENU_COMMANDS: &[MenuCommandDescriptor] = &[
     },
 ];
 
+#[derive(Debug, Default, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenTabsPayload {
+    pub open_tabs: Vec<String>,
+    pub active_tab_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSnapshot {
@@ -240,6 +247,51 @@ impl DesktopBackend {
     pub fn set_mode(&mut self, mode: EditorMode) -> AppSnapshot {
         self.runtime.set_mode(mode);
         self.snapshot()
+    }
+
+    pub fn save_open_tabs(
+        &self,
+        open_tabs: &[String],
+        active_tab_path: Option<String>,
+    ) -> Result<(), String> {
+        // Persist tabs alongside the existing session payload, keeping
+        // mode/theme/recent_documents from live state so the session file
+        // stays consistent when only tabs change.
+        let Some(session_path) = self.runtime.session_store_path().map(Path::to_path_buf) else {
+            return Ok(());
+        };
+        let workspace = self.runtime.workspace();
+        let recent: Vec<PathBuf> = workspace.recent_documents().to_vec();
+        let tabs: Vec<PathBuf> = open_tabs.iter().map(PathBuf::from).collect();
+        let active = active_tab_path.map(PathBuf::from);
+        markdowner_core::storage::persist_workspace_session(
+            &session_path,
+            &recent,
+            workspace.mode(),
+            workspace.theme(),
+            &tabs,
+            active.as_deref(),
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    pub fn load_open_tabs(&self) -> Result<OpenTabsPayload, String> {
+        let Some(session_path) = self.runtime.session_store_path().map(Path::to_path_buf) else {
+            return Ok(OpenTabsPayload::default());
+        };
+        let session = markdowner_core::storage::load_workspace_session(&session_path)
+            .map_err(|error| error.to_string())?;
+        Ok(OpenTabsPayload {
+            open_tabs: session
+                .open_tabs
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
+            active_tab_path: session
+                .active_tab_path
+                .as_deref()
+                .map(|p| p.to_string_lossy().into_owned()),
+        })
     }
 
     pub fn set_theme_kind(&mut self, theme_kind: ThemeKind) -> AppSnapshot {
@@ -483,6 +535,22 @@ fn set_mode(mode: EditorMode, state: State<'_, DesktopAppState>) -> Result<AppSn
 }
 
 #[tauri::command]
+fn save_open_tabs(
+    open_tabs: Vec<String>,
+    active_tab_path: Option<String>,
+    state: State<'_, DesktopAppState>,
+) -> Result<(), String> {
+    with_backend(state, |backend| {
+        backend.save_open_tabs(&open_tabs, active_tab_path.clone())
+    })
+}
+
+#[tauri::command]
+fn load_open_tabs(state: State<'_, DesktopAppState>) -> Result<OpenTabsPayload, String> {
+    with_backend(state, |backend| backend.load_open_tabs())
+}
+
+#[tauri::command]
 fn set_theme(
     theme_kind: ThemeKind,
     state: State<'_, DesktopAppState>,
@@ -622,6 +690,8 @@ pub fn run() {
             import_theme,
             load_settings,
             save_settings,
+            load_open_tabs,
+            save_open_tabs,
             open_dropped_path,
             quit_app,
         ])
@@ -884,5 +954,63 @@ mod tests {
         let recent_command = "open-recent-document:/tmp/project/meeting-notes.md";
 
         assert_eq!(menu_command_from_id(recent_command), Some(recent_command.to_string()));
+    }
+
+    #[test]
+    fn save_open_tabs_persists_tabs_into_session_file() {
+        use markdowner_core::storage_test_helpers::load_workspace_session;
+
+        let temp = tempdir().unwrap();
+        let session_path = temp.path().join("workspace-session.json");
+        let backend = DesktopBackend::new(Some(session_path.clone()));
+
+        backend
+            .save_open_tabs(
+                &["/tmp/a.md".to_string(), "/tmp/b.md".to_string()],
+                Some("/tmp/b.md".to_string()),
+            )
+            .expect("save_open_tabs ok");
+
+        let loaded = load_workspace_session(&session_path).expect("loaded");
+        assert_eq!(
+            loaded.open_tabs,
+            vec![
+                std::path::PathBuf::from("/tmp/a.md"),
+                std::path::PathBuf::from("/tmp/b.md"),
+            ],
+        );
+        assert_eq!(
+            loaded.active_tab_path,
+            Some(std::path::PathBuf::from("/tmp/b.md")),
+        );
+    }
+
+    #[test]
+    fn load_open_tabs_returns_persisted_tabs() {
+        let temp = tempdir().unwrap();
+        let session_path = temp.path().join("workspace-session.json");
+        let backend = DesktopBackend::new(Some(session_path.clone()));
+
+        backend
+            .save_open_tabs(
+                &["/tmp/x.md".to_string(), "/tmp/y.md".to_string()],
+                Some("/tmp/x.md".to_string()),
+            )
+            .expect("save ok");
+
+        let payload = backend.load_open_tabs().expect("load ok");
+        assert_eq!(
+            payload.open_tabs,
+            vec!["/tmp/x.md".to_string(), "/tmp/y.md".to_string()],
+        );
+        assert_eq!(payload.active_tab_path, Some("/tmp/x.md".to_string()));
+    }
+
+    #[test]
+    fn load_open_tabs_returns_default_when_no_session_store_configured() {
+        let backend = DesktopBackend::new(None);
+        let payload = backend.load_open_tabs().expect("load ok");
+        assert!(payload.open_tabs.is_empty());
+        assert!(payload.active_tab_path.is_none());
     }
 }

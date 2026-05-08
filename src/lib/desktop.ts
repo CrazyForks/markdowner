@@ -81,3 +81,26 @@ export async function openDroppedPath(path: string) {
 export async function quitApp() {
   return invoke<void>('quit_app');
 }
+
+export interface OpenTabsPayload {
+  openTabs: string[];
+  activeTabPath: string | null;
+}
+
+export async function loadOpenTabs(): Promise<OpenTabsPayload> {
+  const result = await invoke<{
+    openTabs?: string[];
+    activeTabPath?: string | null;
+  }>('load_open_tabs');
+  return {
+    openTabs: result.openTabs ?? [],
+    activeTabPath: result.activeTabPath ?? null,
+  };
+}
+
+export async function saveOpenTabs(payload: OpenTabsPayload): Promise<void> {
+  await invoke('save_open_tabs', {
+    openTabs: payload.openTabs,
+    activeTabPath: payload.activeTabPath,
+  });
+}

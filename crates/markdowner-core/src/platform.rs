@@ -158,6 +158,10 @@ impl EditorRuntime {
         self.session_store = Some(path);
     }
 
+    pub fn session_store_path(&self) -> Option<&Path> {
+        self.session_store.as_deref()
+    }
+
     pub fn bootstrap_ui(&mut self, adapter: &mut impl PlatformAdapter) {
         adapter.present_window(&WindowDescriptor::new("main", "Markdowner"));
         adapter.install_menu(&MenuDescriptor::new(vec![
