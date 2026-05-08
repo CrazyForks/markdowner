@@ -17,11 +17,20 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { EditorMode, ThemeKind } from '@/lib/desktop';
 
+export interface AppMenuModeOption {
+  mode: EditorMode;
+  label: string;
+  shortcutSymbol: string;
+  shortcutText: string;
+  ariaKeyshortcuts: string;
+}
+
 interface AppMenuProps {
   className?: string;
   busy: boolean;
   activeDocumentOpen: boolean;
   currentMode: EditorMode;
+  modeOptions: ReadonlyArray<AppMenuModeOption>;
   themeKind: ThemeKind;
   themeMode: 'manual' | 'system';
   onSave: () => void;
@@ -49,6 +58,7 @@ type MenuRadioProps = {
   disabled?: boolean;
   icon?: ReactNode;
   title?: string;
+  shortcut?: string;
   ariaLabel?: string;
   ariaKeyshortcuts?: string;
   onSelect: () => void;
@@ -95,6 +105,7 @@ function MenuRadio({
   disabled,
   icon,
   title,
+  shortcut,
   ariaLabel,
   ariaKeyshortcuts,
   onSelect,
@@ -115,6 +126,11 @@ function MenuRadio({
         {icon}
       </span>
       <span className="min-w-0 flex-1 truncate">{children}</span>
+      {shortcut ? (
+        <span aria-hidden="true" className="ml-2 shrink-0 text-xs text-muted-foreground">
+          {shortcut}
+        </span>
+      ) : null}
       <Check className={cn('size-4 shrink-0', checked ? 'opacity-100' : 'opacity-0')} />
     </button>
   );
@@ -132,11 +148,18 @@ function MenuSeparator() {
   return <div role="separator" className="my-1 h-px bg-border" />;
 }
 
+const MODE_ICONS: Record<EditorMode, ReactNode> = {
+  Editor: <Code className="size-4" />,
+  Wysiwyg: <Eye className="size-4" />,
+  SplitView: <Columns2 className="size-4" />,
+};
+
 export function AppMenu({
   className,
   busy,
   activeDocumentOpen,
   currentMode,
+  modeOptions,
   themeKind,
   themeMode,
   onSave,
@@ -230,36 +253,20 @@ export function AppMenu({
 
           <MenuSeparator />
           <MenuSectionLabel>Mode</MenuSectionLabel>
-          <MenuRadio
-            checked={currentMode === 'Editor'}
-            disabled={busy}
-            icon={<Code className="size-4" />}
-            title="Editor (Cmd+1)"
-            ariaKeyshortcuts="Meta+1 Control+1"
-            onSelect={() => run(() => onSetMode('Editor'))}
-          >
-            Editor
-          </MenuRadio>
-          <MenuRadio
-            checked={currentMode === 'Wysiwyg'}
-            disabled={busy}
-            icon={<Eye className="size-4" />}
-            title="WYSIWYG (Cmd+2)"
-            ariaKeyshortcuts="Meta+2 Control+2"
-            onSelect={() => run(() => onSetMode('Wysiwyg'))}
-          >
-            WYSIWYG
-          </MenuRadio>
-          <MenuRadio
-            checked={currentMode === 'SplitView'}
-            disabled={busy}
-            icon={<Columns2 className="size-4" />}
-            title="Split View (Cmd+3)"
-            ariaKeyshortcuts="Meta+3 Control+3"
-            onSelect={() => run(() => onSetMode('SplitView'))}
-          >
-            Split View
-          </MenuRadio>
+          {modeOptions.map((option) => (
+            <MenuRadio
+              key={option.mode}
+              checked={currentMode === option.mode}
+              disabled={busy}
+              icon={MODE_ICONS[option.mode]}
+              title={`${option.label} (${option.shortcutText})`}
+              shortcut={option.shortcutSymbol}
+              ariaKeyshortcuts={option.ariaKeyshortcuts}
+              onSelect={() => run(() => onSetMode(option.mode))}
+            >
+              {option.label}
+            </MenuRadio>
+          ))}
 
           <MenuSeparator />
           <MenuSectionLabel>Theme</MenuSectionLabel>

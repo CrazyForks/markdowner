@@ -2582,6 +2582,7 @@ export default function App() {
           busy={busy}
           activeDocumentOpen={activeDocumentOpen}
           currentMode={currentMode}
+          modeOptions={EDITOR_MODE_OPTIONS}
           themeKind={snapshot.theme.kind}
           themeMode={themeMode}
           onSave={() => void handleSave()}
