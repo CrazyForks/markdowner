@@ -155,6 +155,46 @@ Verified output path:
 target/debug/markdowner-desktop
 ```
 
+## Convenience Scripts (macOS)
+
+Two helper scripts wrap the build, launch, and install flow.
+
+### `scripts/build-and-run.sh`
+
+Builds the Tauri app and launches it immediately.
+
+```bash
+scripts/build-and-run.sh           # release build, then open the .app
+scripts/build-and-run.sh --debug   # debug build
+scripts/build-and-run.sh --no-run  # build only, do not launch
+```
+
+Behavior:
+
+- Verifies `pnpm` and `cargo` are on `PATH`
+- Runs `pnpm install` if `node_modules` is missing
+- Runs `pnpm tauri build` (or `pnpm tauri build --debug`)
+- On macOS opens `target/{release,debug}/bundle/macos/Markdowner.app`; on other platforms runs `target/{release,debug}/markdowner-desktop`
+
+### `scripts/build-and-install.sh`
+
+Builds the Tauri app and installs the resulting `.app` bundle into a target directory.
+
+```bash
+scripts/build-and-install.sh                    # release build, install to /Applications
+scripts/build-and-install.sh --path ~/Applications
+scripts/build-and-install.sh --debug            # debug build
+scripts/build-and-install.sh --no-build         # install an already-built bundle
+```
+
+Behavior:
+
+- macOS only (the bundle target in `src-tauri/tauri.conf.json` is `app`)
+- Installs to `/Applications` by default; override with `--path <DIR>` (e.g. `~/Applications`)
+- Uses `sudo` automatically only when the install path is not writable
+- Replaces any existing `Markdowner.app` at the destination, copies with `ditto`, and clears the `com.apple.quarantine` attribute so the locally built bundle launches without a Gatekeeper prompt
+- Pass `--no-build` to install an already-built bundle without rebuilding
+
 ## Verify the Current App
 
 Run the frontend and Rust test suites:
