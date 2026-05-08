@@ -82,6 +82,7 @@ import {
   loadSettings,
   saveSettings,
 } from './lib/settings';
+import { moveTab } from './lib/tabs';
 import {
   MARKDOWN_CONTENT_SCOPE_CLASS,
   scopeImportedStylesheet,
@@ -2124,6 +2125,62 @@ export default function App() {
       if (matchesShortcut(event, 'w')) {
         event.preventDefault();
         void handleCloseTabOrWindow();
+        return;
+      }
+
+      // Cmd+Shift+] / Cmd+Shift+[ → next / previous tab (wrapping). Users see
+      // these as ⌘} / ⌘{ since `{` and `}` are Shift-bracket on US/KR layouts.
+      if (
+        usesCommandModifier(event) &&
+        event.shiftKey &&
+        !event.altKey &&
+        (event.key === ']' || event.key === '}')
+      ) {
+        event.preventDefault();
+        if (tabs.length > 0 && activeTabId) {
+          const idx = tabs.findIndex((tab) => tab.id === activeTabId);
+          if (idx >= 0) {
+            const next = tabs[(idx + 1) % tabs.length];
+            if (next && next.id !== activeTabId) {
+              void switchToTab(next.id);
+            }
+          }
+        }
+        return;
+      }
+      if (
+        usesCommandModifier(event) &&
+        event.shiftKey &&
+        !event.altKey &&
+        (event.key === '[' || event.key === '{')
+      ) {
+        event.preventDefault();
+        if (tabs.length > 0 && activeTabId) {
+          const idx = tabs.findIndex((tab) => tab.id === activeTabId);
+          if (idx >= 0) {
+            const prev = tabs[(idx - 1 + tabs.length) % tabs.length];
+            if (prev && prev.id !== activeTabId) {
+              void switchToTab(prev.id);
+            }
+          }
+        }
+        return;
+      }
+
+      // Ctrl+Shift+PageUp / PageDown → move active tab left / right (no wrap),
+      // matching VS Code "Move Editor Left/Right".
+      if (
+        event.ctrlKey &&
+        event.shiftKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        (event.key === 'PageUp' || event.key === 'PageDown')
+      ) {
+        event.preventDefault();
+        if (tabs.length > 0 && activeTabId) {
+          const direction = event.key === 'PageDown' ? 1 : -1;
+          setTabs((prev) => moveTab(prev, activeTabId, direction));
+        }
         return;
       }
 
