@@ -3912,6 +3912,26 @@ describe('App recent documents', () => {
     expect(messageMock).not.toHaveBeenCalled();
   });
 
+  it('closes the window with Cmd+W when no tabs are open', async () => {
+    // Empty-state bootstrap (no active document, no persisted tabs) means the
+    // tab list is empty. Cmd+W must short-circuit straight to window.destroy()
+    // — there is nothing dirty to prompt about. Regression for FR-TABS-003.
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('button', { name: /^new file$/i });
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+
+    await waitFor(() => {
+      expect(destroyWindowMock).toHaveBeenCalled();
+    });
+    expect(messageMock).not.toHaveBeenCalled();
+  });
+
   it('closes a dirty window from Cmd+W without saving when discard is selected', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
