@@ -7,3 +7,5 @@ dist/
 .vite/
 tasks/
 .ralph-tui/
+docs/superpowers/
+
