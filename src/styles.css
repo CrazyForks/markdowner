@@ -232,3 +232,19 @@ section[data-mode='Wysiwyg'] {
      when we add transitions later. */
   display: none !important;
 }
+
+/* Cursor-following scroll (FR-EDIT-001): make .cm-scroller the only scroll
+   container so CodeMirror 6's built-in scrollIntoView reaches the cursor on
+   shift+ArrowDown, typing, and selection extension. The outer pane is
+   overflow:hidden so the cm-scroller wins; scroll-padding-block keeps a few
+   lines of context above/below the cursor (typewriter mode overrides this). */
+.editor-pane-source [class^='cm-theme-'],
+.editor-pane-source .cm-theme {
+  height: 100%;
+}
+.editor-pane-source .cm-editor {
+  height: 100%;
+}
+.editor-pane-source .cm-scroller {
+  scroll-padding-block: 4ex;
+}
