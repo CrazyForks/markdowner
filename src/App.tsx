@@ -1143,7 +1143,13 @@ export default function App() {
 
     const markdownFromEditor = editor.getMarkdown();
     if (markdownFromEditor !== localDraft) {
-      editor.commands.setContent(localDraft || '', { contentType: 'markdown' });
+      // emitUpdate:false prevents Tiptap from firing onUpdate, which would
+      // setLocalDraft to a possibly-renormalized markdown string and
+      // re-trigger this effect indefinitely (React error #185).
+      editor.commands.setContent(localDraft || '', {
+        contentType: 'markdown',
+        emitUpdate: false,
+      });
     }
   }, [editor, localDraft]);
 
