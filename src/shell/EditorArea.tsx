@@ -170,7 +170,10 @@ export function EditorArea({
         </Alert>
       ) : null}
 
-      <section className="flex min-h-0 flex-1 flex-col bg-background">
+      <section
+        className="flex min-h-0 flex-1 flex-col bg-background"
+        data-mode={currentMode}
+      >
         {!activeDocumentOpen ? (
           <Empty className="flex-1 border-dashed">
             <EmptyHeader>
@@ -223,67 +226,66 @@ export function EditorArea({
           </Empty>
         ) : null}
 
-        {/* Keep the Wysiwyg surface mounted at all times — Tiptap loses
-            cursor and content state if its view DOM is unmounted on mode
-            switch, which made Editor → WYSIWYG transitions feel jumpy.
-            Visibility is toggled via the `hidden` class instead. */}
+        {/* Persistent source pane. Visible in Editor (full width) and
+            Split-view (left half). Hidden in Wysiwyg. Stays mounted at
+            all times so CodeMirror's view state survives mode switches. */}
+        <div
+          ref={splitSourceRef}
+          data-testid="editor-surface-source"
+          {...editorModeAttributes}
+          role="region"
+          aria-label="Markdown source"
+          className={cn(
+            'editor-pane editor-pane-source min-h-0 overflow-hidden',
+            editorModeClassName,
+            !activeDocumentOpen && 'hidden',
+            activeDocumentOpen && currentMode === 'Wysiwyg' && 'hidden',
+            activeDocumentOpen && currentMode === 'Editor' && 'flex-1',
+            activeDocumentOpen && currentMode === 'SplitView' && 'flex-1 border-r border-border',
+          )}
+          onScroll={onSplitSourceScroll}
+          style={editorSurfaceStyle}
+          aria-hidden={!activeDocumentOpen || currentMode === 'Wysiwyg'}
+        >
+          {sourceEditor}
+        </div>
+
+        {/* Persistent preview pane. Visible only in Split-view. */}
+        <div
+          ref={splitPreviewRef}
+          data-testid="editor-surface-preview"
+          {...editorModeAttributes}
+          role="region"
+          aria-label="Markdown preview"
+          className={cn(
+            'editor-pane editor-pane-preview min-h-0 overflow-auto bg-background',
+            editorModeClassName,
+            !(activeDocumentOpen && currentMode === 'SplitView') && 'hidden',
+            activeDocumentOpen && currentMode === 'SplitView' && 'flex-1',
+          )}
+          onScroll={onSplitPreviewScroll}
+          onClick={onSplitPreviewClick}
+          style={editorSurfaceStyle}
+          aria-hidden={!(activeDocumentOpen && currentMode === 'SplitView')}
+        >
+          {splitViewPreview}
+        </div>
+
+        {/* Persistent Wysiwyg surface. Visible only in Wysiwyg mode. */}
         <div
           data-testid="editor-surface-wysiwyg"
           {...editorModeAttributes}
           className={cn(
-            'markdown-surface min-h-0 flex-1 overflow-auto px-8 py-6',
+            'editor-pane editor-pane-wysiwyg markdown-surface min-h-0 overflow-auto px-8 py-6',
             editorModeClassName,
             !(activeDocumentOpen && currentMode === 'Wysiwyg') && 'hidden',
+            activeDocumentOpen && currentMode === 'Wysiwyg' && 'flex-1',
           )}
           style={editorSurfaceStyle}
           aria-hidden={!(activeDocumentOpen && currentMode === 'Wysiwyg')}
         >
           {editorContent}
         </div>
-
-        {activeDocumentOpen && currentMode === 'Editor' ? (
-          <div
-            data-testid="editor-surface-source"
-            {...editorModeAttributes}
-            className={cn('min-h-0 flex-1 overflow-auto', editorModeClassName)}
-            style={editorSurfaceStyle}
-          >
-            {sourceEditor}
-          </div>
-        ) : null}
-
-        {activeDocumentOpen && currentMode === 'SplitView' ? (
-          <div className="flex min-h-0 flex-1 divide-x divide-border">
-            <div
-              ref={splitSourceRef}
-              data-testid="editor-surface-source"
-              {...editorModeAttributes}
-              role="region"
-              aria-label="Markdown source"
-              className={cn('min-h-0 flex-1 overflow-auto', editorModeClassName)}
-              onScroll={onSplitSourceScroll}
-              style={editorSurfaceStyle}
-            >
-              {sourceEditor}
-            </div>
-            <div
-              ref={splitPreviewRef}
-              data-testid="editor-surface-preview"
-              {...editorModeAttributes}
-              role="region"
-              aria-label="Markdown preview"
-              className={cn(
-                'min-h-0 flex-1 overflow-auto bg-background',
-                editorModeClassName,
-              )}
-              onScroll={onSplitPreviewScroll}
-              onClick={onSplitPreviewClick}
-              style={editorSurfaceStyle}
-            >
-              {splitViewPreview}
-            </div>
-          </div>
-        ) : null}
       </section>
     </main>
   );

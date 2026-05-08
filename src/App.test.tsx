@@ -689,7 +689,9 @@ describe('App recent documents', () => {
 
     expect(shellGrid).toHaveClass('min-h-0');
     expect(editorRoot).toHaveClass('min-h-0');
-    expect(sourceSurface).toHaveClass('overflow-auto');
+    // The source pane is now overflow-hidden so CodeMirror's inner
+    // .cm-scroller owns the scroll surface (see FR-EDIT-001).
+    expect(sourceSurface).toHaveClass('overflow-hidden');
   });
 
   it('reopens a recent document from the sidebar', async () => {

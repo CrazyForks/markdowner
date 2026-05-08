@@ -216,3 +216,19 @@
     @apply mt-1;
   }
 }
+
+/* Editor surface layout — three persistent panes, mode toggles flex direction. */
+section[data-mode='SplitView'] {
+  flex-direction: row;
+}
+section[data-mode='Editor'],
+section[data-mode='Wysiwyg'] {
+  flex-direction: column;
+}
+.editor-pane.editor-pane-source.hidden,
+.editor-pane.editor-pane-preview.hidden,
+.editor-pane.editor-pane-wysiwyg.hidden {
+  /* Tailwind's `hidden` already applies `display:none`; this is a guard for
+     when we add transitions later. */
+  display: none !important;
+}
