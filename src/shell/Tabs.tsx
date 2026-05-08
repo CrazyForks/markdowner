@@ -6,6 +6,7 @@ export interface TabsItem {
   id: string;
   name: string;
   isDirty: boolean;
+  missing: boolean;
   shortcutLabel: string | null;
 }
 
@@ -49,7 +50,18 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab }: TabsProps)
               isActive && 'bg-accent text-accent-foreground',
             )}
           >
-            <span className="truncate">{item.name}</span>
+            <span className={cn('truncate', item.missing && 'italic text-muted-foreground line-through')}>
+              {item.name}
+            </span>
+            {item.missing ? (
+              <span
+                aria-label="File missing on disk"
+                title="File no longer exists on disk"
+                className="ml-1 rounded bg-destructive/15 px-1 text-[10px] uppercase tracking-wide text-destructive"
+              >
+                missing
+              </span>
+            ) : null}
             {item.isDirty ? (
               <span aria-label="Unsaved changes" className="text-base leading-none text-muted-foreground">
                 ●

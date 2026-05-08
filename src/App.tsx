@@ -73,6 +73,8 @@ import {
   setTheme,
   openDroppedPath,
   quitApp,
+  loadOpenTabs,
+  saveOpenTabs,
 } from './lib/desktop';
 import {
   DEFAULT_SETTINGS,
@@ -119,6 +121,8 @@ type DocumentTab = {
   name: string;
   source: string;
   draft: string;
+  /** True when the tab references a file path that does not exist on disk. */
+  missing: boolean;
 };
 
 type ThemeMode = 'system' | 'manual';
@@ -743,7 +747,7 @@ export default function App() {
 
     const replaceAt = (index: number) => {
       newTabs = tabs.map((tab, i) =>
-        i === index ? { ...tab, path, name, source, draft: source } : tab,
+        i === index ? { ...tab, path, name, source, draft: source, missing: false } : tab,
       );
       newActiveId = newTabs[index].id;
     };
@@ -776,6 +780,7 @@ export default function App() {
         name,
         source,
         draft: source,
+        missing: false,
       };
       newTabs = [...tabs, newTab];
       newActiveId = newTab.id;
@@ -796,7 +801,9 @@ export default function App() {
     startTransition(() => {
       setTabs((prev) =>
         prev.map((tab) =>
-          tab.id === activeTabId ? { ...tab, path, name, source, draft: source } : tab,
+          tab.id === activeTabId
+            ? { ...tab, path, name, source, draft: source, missing: false }
+            : tab,
         ),
       );
     });
@@ -1132,6 +1139,67 @@ export default function App() {
         if (next.activeDocumentSource !== null) {
           upsertActiveTabFromSnapshot(next);
         }
+
+        try {
+          const persistedTabs = await loadOpenTabs();
+          if (cancelled) return;
+          if (persistedTabs.openTabs.length === 0) {
+            return;
+          }
+          const restored: DocumentTab[] = [];
+          for (const path of persistedTabs.openTabs) {
+            try {
+              const opened = await openDocument(path);
+              restored.push({
+                id: generateTabId(),
+                path: opened.activeDocumentPath ?? path,
+                name: opened.activeDocumentName ?? displayFileName(path),
+                source: opened.activeDocumentSource ?? '',
+                draft: opened.activeDocumentSource ?? '',
+                missing: false,
+              });
+            } catch {
+              // File is gone — keep the tab as a missing-file placeholder.
+              restored.push({
+                id: generateTabId(),
+                path,
+                name: displayFileName(path),
+                source: '',
+                draft: '',
+                missing: true,
+              });
+            }
+          }
+          if (cancelled) return;
+          const activePath = persistedTabs.activeTabPath;
+          const target = activePath
+            ? restored.find((tab) => tab.path === activePath)
+            : restored[0];
+          startTransition(() => {
+            setTabs(restored);
+            if (target) {
+              setActiveTabId(target.id);
+            }
+          });
+          // Drive the live editor to whichever tab we marked active.
+          if (target && target.path && !target.missing) {
+            try {
+              const opened = await openDocument(target.path);
+              if (!cancelled) {
+                applySnapshot(opened);
+              }
+            } catch {
+              // File vanished between the loop above and now — leave snapshot
+              // alone; the tab will already be rendered as missing.
+            }
+          } else if (target && target.missing) {
+            setLocalDraft('');
+          }
+        } catch (error) {
+          if (!cancelled) {
+            console.error('[Markdowner] Failed to restore open tabs:', error);
+          }
+        }
       })
       .catch((error) => {
         if (!cancelled) {
@@ -1191,6 +1259,22 @@ export default function App() {
   useEffect(() => {
     document.title = buildWindowTitle(snapshot);
   }, [snapshot]);
+
+  // Persist open tabs whenever the tab list or active tab changes. Only
+  // path-bearing tabs are saved; untitled drafts stay session-local.
+  useEffect(() => {
+    const paths = tabs
+      .map((tab) => tab.path)
+      .filter((path): path is string => path !== null);
+    const activePath = (() => {
+      if (!activeTabId) return null;
+      const active = tabs.find((tab) => tab.id === activeTabId);
+      return active?.path ?? null;
+    })();
+    void saveOpenTabs({ openTabs: paths, activeTabPath: activePath }).catch((error) => {
+      console.error('[Markdowner] Failed to persist open tabs:', error);
+    });
+  }, [tabs, activeTabId]);
 
   useEffect(() => {
     const nextFolderKeys = new Set<string>();
@@ -1466,6 +1550,7 @@ export default function App() {
           name: next.activeDocumentName ?? path,
           source: next.activeDocumentSource ?? '',
           draft: next.activeDocumentSource ?? '',
+          missing: false,
         };
         additions.push(tab);
         lastSnapshot = next;
@@ -1762,6 +1847,12 @@ export default function App() {
       await syncActiveDraft();
 
       try {
+        if (target.missing && target.path) {
+          // Missing files: stay on the empty editor; do not call into Rust.
+          setActiveTabId(target.id);
+          setLocalDraft('');
+          return;
+        }
         let next: AppSnapshot;
         if (target.path) {
           next = await openDocument(target.path);
@@ -1782,12 +1873,21 @@ export default function App() {
                   source: next.activeDocumentSource ?? tab.source,
                   name: next.activeDocumentName ?? tab.name,
                   path: next.activeDocumentPath ?? tab.path,
+                  missing: false,
                 }
               : tab,
           ),
         );
       } catch (error) {
         console.error(error);
+        // The file disappeared between sessions — convert this tab to missing.
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === target.id ? { ...tab, missing: true, source: '', draft: '' } : tab,
+          ),
+        );
+        setActiveTabId(target.id);
+        setLocalDraft('');
       }
     });
   });
@@ -2571,6 +2671,7 @@ export default function App() {
               tab.id === activeTabId
                 ? localDraft !== tab.source
                 : tab.draft !== tab.source,
+            missing: tab.missing,
             shortcutLabel:
               index < 9 ? `⌘${index + 1}` : index === 9 ? '⌘0' : null,
           }))}

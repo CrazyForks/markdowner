@@ -27,6 +27,8 @@ const setModeMock = vi.fn();
 const setThemeMock = vi.fn();
 const openDroppedPathMock = vi.fn();
 const quitAppMock = vi.fn();
+const loadOpenTabsMock = vi.fn();
+const saveOpenTabsMock = vi.fn();
 const openDialogMock = vi.fn();
 const saveDialogMock = vi.fn();
 const messageMock = vi.fn();
@@ -58,6 +60,8 @@ vi.mock('./lib/desktop', () => ({
   setTheme: setThemeMock,
   openDroppedPath: openDroppedPathMock,
   quitApp: quitAppMock,
+  loadOpenTabs: loadOpenTabsMock,
+  saveOpenTabs: saveOpenTabsMock,
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -205,6 +209,10 @@ describe('App recent documents', () => {
     setModeMock.mockReset();
     setThemeMock.mockReset();
     quitAppMock.mockReset();
+    loadOpenTabsMock.mockReset();
+    loadOpenTabsMock.mockResolvedValue({ openTabs: [], activeTabPath: null });
+    saveOpenTabsMock.mockReset();
+    saveOpenTabsMock.mockResolvedValue(undefined);
     openDialogMock.mockReset();
     saveDialogMock.mockReset();
     messageMock.mockReset();
