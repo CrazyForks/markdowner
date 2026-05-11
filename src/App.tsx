@@ -2683,9 +2683,6 @@ export default function App() {
           recentDocuments={snapshot.recentDocuments}
           activeDocumentPath={snapshot.activeDocumentPath}
           rootDir={snapshot.rootDir}
-          onNewDocument={handleNewDocument}
-          onOpenWorkspace={handleOpenWorkspace}
-          onOpenDocument={handleOpenDocument}
           onOpenRecentDocument={handleOpenRecentDocument}
           renderWorkspaceTreeNodes={() => filteredWorkspaceTree.map((node) => renderWorkspaceTreeNode(node))}
           displayFileName={displayFileName}

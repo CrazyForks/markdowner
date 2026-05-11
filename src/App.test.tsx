@@ -1411,53 +1411,6 @@ describe('App recent documents', () => {
     expect(systemToggle).toHaveAttribute('title', 'Follow system theme');
   });
 
-  it('exposes keyboard-shortcut tooltips on the SideBar workspace action buttons', async () => {
-    bootstrapMock.mockResolvedValue(baseSnapshot());
-
-    const { default: App } = await import('./App');
-
-    render(<App />);
-
-    const newDocumentButton = await screen.findByRole('button', {
-      name: /^new document$/i,
-    });
-    const openFolderButton = screen.getByRole('button', {
-      name: /^open folder…$/i,
-    });
-    const openMarkdownButton = screen.getByRole('button', {
-      name: /^open markdown…$/i,
-    });
-
-    expect(newDocumentButton).toHaveAttribute('title', 'New Document (Cmd+N)');
-    expect(openFolderButton).toHaveAttribute('title', 'Open Folder (Cmd+Shift+O)');
-    expect(openMarkdownButton).toHaveAttribute('title', 'Open Markdown (Cmd+O)');
-  });
-
-  it('exposes aria-keyshortcuts on the SideBar workspace action buttons', async () => {
-    bootstrapMock.mockResolvedValue(baseSnapshot());
-
-    const { default: App } = await import('./App');
-
-    render(<App />);
-
-    const newDocumentButton = await screen.findByRole('button', {
-      name: /^new document$/i,
-    });
-    const openFolderButton = screen.getByRole('button', {
-      name: /^open folder…$/i,
-    });
-    const openMarkdownButton = screen.getByRole('button', {
-      name: /^open markdown…$/i,
-    });
-
-    expect(newDocumentButton).toHaveAttribute('aria-keyshortcuts', 'Meta+N Control+N');
-    expect(openFolderButton).toHaveAttribute(
-      'aria-keyshortcuts',
-      'Meta+Shift+O Control+Shift+O',
-    );
-    expect(openMarkdownButton).toHaveAttribute('aria-keyshortcuts', 'Meta+O Control+O');
-  });
-
   it('creates an untitled document and saves it through Save As', async () => {
     newDocumentMock.mockResolvedValue(
       baseSnapshot({
@@ -1481,10 +1434,8 @@ describe('App recent documents', () => {
 
     render(<App />);
 
-    const newDocumentButton = await screen.findByRole('button', {
-      name: /new document/i,
-    });
-    fireEvent.click(newDocumentButton);
+    await screen.findByText(/Start your next document/);
+    fireEvent.keyDown(window, { key: 'n', metaKey: true });
 
     await screen.findAllByText(/^Untitled\.md/);
 
@@ -1730,10 +1681,7 @@ describe('App recent documents', () => {
     const editor = await screen.findByRole('textbox', { name: /source editor/i });
     fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
 
-    const newDocumentButton = await screen.findByRole('button', {
-      name: /new document/i,
-    });
-    fireEvent.click(newDocumentButton);
+    fireEvent.keyDown(window, { key: 'n', metaKey: true });
 
     await waitFor(() => {
       expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith(
@@ -1779,10 +1727,7 @@ describe('App recent documents', () => {
     const editor = await screen.findByRole('textbox', { name: /source editor/i });
     fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
 
-    const openWorkspaceButton = await screen.findByRole('button', {
-      name: /open folder/i,
-    });
-    fireEvent.click(openWorkspaceButton);
+    fireEvent.keyDown(window, { key: 'o', metaKey: true, shiftKey: true });
 
     await waitFor(() => {
       expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith(

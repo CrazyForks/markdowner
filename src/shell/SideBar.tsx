@@ -1,4 +1,3 @@
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -26,9 +25,6 @@ export interface SideBarProps {
   recentDocuments: string[];
   activeDocumentPath: string | null;
   rootDir: string | null;
-  onNewDocument: () => void;
-  onOpenWorkspace: () => void;
-  onOpenDocument: () => void;
   onOpenRecentDocument: (path: string) => void;
   renderWorkspaceTreeNodes: () => ReactNode;
   displayFileName: (path: string) => string;
@@ -48,9 +44,6 @@ export function SideBar({
   recentDocuments,
   activeDocumentPath,
   rootDir,
-  onNewDocument,
-  onOpenWorkspace,
-  onOpenDocument,
   onOpenRecentDocument,
   renderWorkspaceTreeNodes,
   displayFileName,
@@ -97,40 +90,6 @@ export function SideBar({
         </section>
       ) : (
         <>
-          <section className="flex flex-col gap-2">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Workspace
-            </div>
-            <Button
-              onClick={onNewDocument}
-              disabled={busy}
-              title="New Document (Cmd+N)"
-              aria-keyshortcuts="Meta+N Control+N"
-            >
-              New Document
-            </Button>
-            <Button
-              variant="outline"
-              onClick={onOpenWorkspace}
-              disabled={busy}
-              title="Open Folder (Cmd+Shift+O)"
-              aria-keyshortcuts="Meta+Shift+O Control+Shift+O"
-            >
-              Open Folder…
-            </Button>
-            <Button
-              variant="outline"
-              onClick={onOpenDocument}
-              disabled={busy}
-              title="Open Markdown (Cmd+O)"
-              aria-keyshortcuts="Meta+O Control+O"
-            >
-              Open Markdown…
-            </Button>
-          </section>
-
-          <Separator />
-
           <section className="flex min-h-0 flex-col gap-2">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Files
