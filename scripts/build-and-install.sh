@@ -5,6 +5,7 @@
 #   scripts/build-and-install.sh             # release build, install to /Applications
 #   scripts/build-and-install.sh --debug     # debug build
 #   scripts/build-and-install.sh --no-build  # install an already-built bundle
+#   scripts/build-and-install.sh --open      # install and launch the app
 
 set -euo pipefail
 
@@ -13,16 +14,18 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 MODE="release"
-INSTALL_PATH="/Applications"
+INSTALL_PATH="${MARKDOWNER_INSTALL_PATH:-/Applications}"
 DO_BUILD=1
+OPEN_AFTER_INSTALL=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --debug) MODE="debug"; shift ;;
     --release) MODE="release"; shift ;;
     --no-build) DO_BUILD=0; shift ;;
+    --open) OPEN_AFTER_INSTALL=1; shift ;;
     -h|--help)
-      sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -99,4 +102,10 @@ ${SUDO} ditto "${APP_BUNDLE}" "${DEST}"
 ${SUDO} xattr -dr com.apple.quarantine "${DEST}" 2>/dev/null || true
 
 echo "==> Done. Installed: ${DEST}"
-echo "    Launch with: open '${DEST}'"
+
+if [[ "${OPEN_AFTER_INSTALL}" -eq 1 ]]; then
+  echo "==> Opening ${DEST}"
+  open "${DEST}"
+else
+  echo "    Launch with: open '${DEST}'"
+fi
