@@ -1,9 +1,12 @@
 import { MouseEvent } from 'react';
-import { X } from 'lucide-react';
+import { Settings as SettingsIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+export type TabsItemKind = 'document' | 'settings';
 
 export interface TabsItem {
   id: string;
+  kind: TabsItemKind;
   name: string;
   isDirty: boolean;
   missing: boolean;
@@ -50,6 +53,9 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab }: TabsProps)
               isActive && 'bg-accent text-accent-foreground',
             )}
           >
+            {item.kind === 'settings' ? (
+              <SettingsIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            ) : null}
             <span className={cn('truncate', item.missing && 'italic text-muted-foreground line-through')}>
               {item.name}
             </span>

@@ -416,10 +416,11 @@ describe('App recent documents', () => {
       });
 
       fireEvent.click(screen.getByRole('button', { name: /^settings \(cmd\+,\)$/i }));
-      const settingsDialog = await screen.findByRole('dialog', { name: /^settings$/i });
-      fireEvent.click(within(settingsDialog).getByRole('button', { name: /^close$/i }));
+      await screen.findByTestId('settings-panel');
+      // Cmd+, toggles the settings tab closed.
+      fireEvent.keyDown(window, { key: ',', metaKey: true });
       await waitFor(() => {
-        expect(screen.queryByRole('dialog', { name: /^settings$/i })).toBeNull();
+        expect(screen.queryByTestId('settings-panel')).toBeNull();
       });
 
       fireEvent.click(newFileButton);
@@ -492,8 +493,11 @@ describe('App recent documents', () => {
 
       menu = await openAppMenu();
       fireEvent.click(within(menu).getByRole('menuitem', { name: /^settings$/i }));
-      const settingsDialog = await screen.findByRole('dialog', { name: /^settings$/i });
-      fireEvent.click(within(settingsDialog).getByRole('button', { name: /^close$/i }));
+      await screen.findByTestId('settings-panel');
+      fireEvent.keyDown(window, { key: ',', metaKey: true });
+      await waitFor(() => {
+        expect(screen.queryByTestId('settings-panel')).toBeNull();
+      });
 
       fireEvent.click(screen.getByRole('button', { name: /^outline$/i }));
       const agendaHeading = await screen.findByRole('button', { name: /^agenda$/i });
@@ -1191,8 +1195,14 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const systemThemeToggle = within(dialog).getByLabelText(/follow system theme/i);
+    // Wait for the mocked load_settings (themeFollowSystem: false) to settle
+    // before clicking, otherwise the click toggles the initial DEFAULT_SETTINGS
+    // value (true → false) and the "follow system" branch never fires.
+    await waitFor(() => {
+      expect(systemThemeToggle).toHaveAttribute('aria-checked', 'false');
+    });
     fireEvent.click(systemThemeToggle);
 
     await waitFor(() => {
@@ -2464,7 +2474,7 @@ describe('App recent documents', () => {
     const settingsButton = await screen.findByRole('button', { name: /settings \(cmd\+,\)/i });
 
     fireEvent.click(settingsButton);
-    await screen.findByRole('dialog', { name: /settings/i });
+    await screen.findByTestId('settings-panel');
 
     expect(settingsButton).toHaveAttribute('aria-pressed', 'true');
     expect(searchButton).toHaveAttribute('aria-pressed', 'false');
@@ -3051,14 +3061,14 @@ describe('App recent documents', () => {
 
     render(<App />);
 
-    expect(screen.queryByRole('dialog', { name: /settings/i })).toBeNull();
+    expect(screen.queryByTestId('settings-panel')).toBeNull();
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    await screen.findByRole('dialog', { name: /settings/i });
+    await screen.findByTestId('settings-panel');
   });
 
-  it('keeps the Settings dialog layout usable at compact window widths', async () => {
+  it('keeps the Settings panel layout usable at compact window widths', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
         return {
@@ -3080,15 +3090,15 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
-    const body = within(dialog).getByTestId('settings-dialog-body');
-    const aliasSnippet = within(dialog).getByText(/^alias markdowner=/);
-    const fontFamilyRow = within(dialog).getByTestId('settings-field-font-family');
-    const fontFamilyInput = within(dialog).getByLabelText(/font family/i);
-    const defaultModeToggle = within(dialog).getByTestId('settings-default-mode-toggle');
-    const pdfPaperSizeToggle = within(dialog).getByTestId('settings-pdf-paper-size-toggle');
+    const panel = await screen.findByTestId('settings-panel');
+    const body = within(panel).getByTestId('settings-panel-body');
+    const aliasSnippet = within(panel).getByText(/^alias markdowner=/);
+    const fontFamilyRow = within(panel).getByTestId('settings-field-font-family');
+    const fontFamilyInput = within(panel).getByLabelText(/font family/i);
+    const defaultModeToggle = within(panel).getByTestId('settings-default-mode-toggle');
+    const pdfPaperSizeToggle = within(panel).getByTestId('settings-pdf-paper-size-toggle');
 
-    expect(dialog).toHaveClass('max-h-[calc(100dvh-3rem)]', 'overflow-hidden', 'p-0');
+    expect(panel).toHaveClass('flex', 'min-h-0', 'overflow-hidden');
     expect(body).toHaveClass('overflow-y-auto');
     expect(aliasSnippet).toHaveClass('whitespace-pre-wrap', 'break-all');
     expect(fontFamilyRow).toHaveClass('grid', 'gap-2');
@@ -3146,7 +3156,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const fontSizeInput = within(dialog).getByLabelText(/font size/i);
 
     fireEvent.change(fontSizeInput, { target: { value: '18' } });
@@ -3184,7 +3194,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const fontFamilyInput = within(dialog).getByLabelText(/font family/i);
 
     fireEvent.change(fontFamilyInput, { target: { value: 'Fira Code' } });
@@ -3376,7 +3386,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const wrapToggle = within(dialog).getByLabelText(/word wrap/i);
 
     fireEvent.click(wrapToggle);
@@ -3408,7 +3418,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const splitViewToggle = within(dialog).getByRole('radio', { name: /split view/i });
 
     fireEvent.click(splitViewToggle);
@@ -3440,7 +3450,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const focusModeToggle = within(dialog).getByLabelText(/focus mode/i);
 
     fireEvent.click(focusModeToggle);
@@ -3483,7 +3493,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const focusModeToggle = within(dialog).getByLabelText(/focus mode/i);
     fireEvent.click(focusModeToggle);
 
@@ -3512,7 +3522,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const typewriterModeToggle = within(dialog).getByLabelText(/typewriter mode/i);
 
     fireEvent.click(typewriterModeToggle);
@@ -3555,7 +3565,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const typewriterModeToggle = within(dialog).getByLabelText(/typewriter mode/i);
     fireEvent.click(typewriterModeToggle);
 
@@ -3584,7 +3594,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const letterToggle = within(dialog).getByRole('radio', { name: /letter/i });
 
     fireEvent.click(letterToggle);
@@ -3616,7 +3626,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const diagnosticsToggle = within(dialog).getByLabelText(/diagnostics logging/i);
 
     fireEvent.click(diagnosticsToggle);
@@ -3650,7 +3660,7 @@ describe('App recent documents', () => {
 
       fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-      const dialog = await screen.findByRole('dialog', { name: /settings/i });
+      const dialog = await screen.findByTestId('settings-panel');
       const diagnosticsToggle = within(dialog).getByLabelText(/diagnostics logging/i);
       fireEvent.click(diagnosticsToggle);
 
@@ -3689,7 +3699,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const assetFolderInput = within(dialog).getByLabelText(/asset folder/i);
 
     fireEvent.change(assetFolderInput, { target: { value: '' } });
@@ -3720,7 +3730,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const resetButton = within(dialog).getByRole('button', { name: /reset to defaults/i });
 
     fireEvent.click(resetButton);
@@ -3766,7 +3776,7 @@ describe('App recent documents', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const dialog = await screen.findByTestId('settings-panel');
     const resetButton = within(dialog).getByRole('button', { name: /reset to defaults/i });
 
     expect(resetButton).toHaveAttribute(

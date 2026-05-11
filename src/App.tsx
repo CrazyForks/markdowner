@@ -52,7 +52,7 @@ import { Tabs } from '@/shell/Tabs';
 import { QuickOpen, type QuickOpenItem } from '@/shell/QuickOpen';
 import { SideBar, type OutlineItem, type SideBarPanel } from '@/shell/SideBar';
 import { StatusBar } from '@/shell/StatusBar';
-import { SettingsDialog } from '@/shell/SettingsDialog';
+import { SettingsPanel } from '@/shell/SettingsPanel';
 
 import {
   type AppSnapshot,
@@ -116,8 +116,15 @@ type CloseTarget = 'window' | 'app';
 // One open tab. The active tab's path/name/source are also reflected in
 // the Rust-side AppSnapshot; tabs adds the rest of the open documents and
 // preserves their unsaved drafts across switches.
+//
+// `kind: 'settings'` is a special UI tab that renders SettingsPanel instead of
+// the editor surface. It never round-trips through Rust, so its path/source
+// fields stay empty.
+type DocumentTabKind = 'document' | 'settings';
+
 type DocumentTab = {
   id: string;
+  kind: DocumentTabKind;
   path: string | null;
   name: string;
   source: string;
@@ -125,6 +132,9 @@ type DocumentTab = {
   /** True when the tab references a file path that does not exist on disk. */
   missing: boolean;
 };
+
+const SETTINGS_TAB_ID = '__markdowner_settings__';
+const SETTINGS_TAB_NAME = 'Settings';
 
 type ThemeMode = 'system' | 'manual';
 type MarkdownSourceNode = {
@@ -673,7 +683,6 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(readSidebarState());
   const [sidebarWidth, setSidebarWidth] = useState<number>(readSidebarWidth());
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isDocumentStatsOpen, setIsDocumentStatsOpen] = useState(false);
@@ -703,6 +712,23 @@ export default function App() {
   // is mirrored through Rust's single-active-document model on switch.
   const [tabs, setTabs] = useState<DocumentTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  // Mirror tabs/activeTabId in refs so async callbacks (bootstrap.then,
+  // openDocument.then) can read the *current* values instead of stale
+  // closures — without this, a user opening Settings before bootstrap
+  // finishes loses the settings tab when upsertActiveTabFromSnapshot fires.
+  const tabsRef = useRef<DocumentTab[]>(tabs);
+  const activeTabIdRef = useRef<string | null>(activeTabId);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+  // Tracks the document tab that was active immediately before the settings
+  // tab was opened. Closing the settings tab restores this without
+  // round-tripping through Rust (the snapshot never changed while settings
+  // was on screen).
+  const preSettingsDocTabIdRef = useRef<string | null>(null);
 
   const generateTabId = () => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -711,21 +737,26 @@ export default function App() {
     return `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   };
 
-  // Find a tab matching the given path; null path means untitled.
+  // Find a tab matching the given path; null path means untitled. Only
+  // considers document tabs — the settings tab has path=null but is not a
+  // valid match for "find me the untitled document."
   const findTabByPath = (path: string | null): DocumentTab | undefined => {
     if (path === null) {
-      return tabs.find((tab) => tab.path === null);
+      return tabs.find((tab) => tab.kind === 'document' && tab.path === null);
     }
-    return tabs.find((tab) => tab.path === path);
+    return tabs.find((tab) => tab.kind === 'document' && tab.path === path);
   };
 
   // Stash the live editor draft into the active tab so a later switch back
-  // restores the user's in-flight edits.
+  // restores the user's in-flight edits. No-op when the active tab is a
+  // non-document surface (settings) since it has no editor draft to preserve.
   const stashActiveTabDraft = () => {
     const id = activeTabId;
     if (!id) return;
     setTabs((prev) =>
-      prev.map((tab) => (tab.id === id ? { ...tab, draft: localDraft } : tab)),
+      prev.map((tab) =>
+        tab.id === id && tab.kind === 'document' ? { ...tab, draft: localDraft } : tab,
+      ),
     );
   };
 
@@ -742,58 +773,72 @@ export default function App() {
     const name = next.activeDocumentName ?? 'Untitled';
     const source = next.activeDocumentSource ?? '';
     const reuseId = options.reuseTabId ?? null;
+    const current = tabsRef.current;
 
-    let newTabs = tabs;
+    let newTabs = current;
     let newActiveId: string | null = null;
 
     const replaceAt = (index: number) => {
-      newTabs = tabs.map((tab, i) =>
-        i === index ? { ...tab, path, name, source, draft: source, missing: false } : tab,
+      newTabs = current.map((tab, i) =>
+        i === index
+          ? { ...tab, kind: 'document', path, name, source, draft: source, missing: false }
+          : tab,
       );
       newActiveId = newTabs[index].id;
     };
 
     if (reuseId) {
-      const reusedAt = tabs.findIndex((tab) => tab.id === reuseId);
-      if (reusedAt >= 0) {
-        replaceAt(reusedAt);
-      }
+      const reusedAt = current.findIndex(
+        (tab) => tab.kind === 'document' && tab.id === reuseId,
+      );
+      if (reusedAt >= 0) replaceAt(reusedAt);
     }
 
     if (newActiveId === null && path !== null) {
-      const matchAt = tabs.findIndex((tab) => tab.path === path);
-      if (matchAt >= 0) {
-        replaceAt(matchAt);
-      }
+      const matchAt = current.findIndex(
+        (tab) => tab.kind === 'document' && tab.path === path,
+      );
+      if (matchAt >= 0) replaceAt(matchAt);
     }
 
     if (newActiveId === null && path === null) {
-      const untitledAt = tabs.findIndex((tab) => tab.path === null);
-      if (untitledAt >= 0) {
-        replaceAt(untitledAt);
-      }
+      const untitledAt = current.findIndex(
+        (tab) => tab.kind === 'document' && tab.path === null,
+      );
+      if (untitledAt >= 0) replaceAt(untitledAt);
     }
 
     if (newActiveId === null) {
       const newTab: DocumentTab = {
         id: generateTabId(),
+        kind: 'document',
         path,
         name,
         source,
         draft: source,
         missing: false,
       };
-      newTabs = [...tabs, newTab];
+      newTabs = [...current, newTab];
       newActiveId = newTab.id;
     }
 
+    tabsRef.current = newTabs;
+    // If the user has opened the Settings tab while this async path was in
+    // flight, don't yank focus away — just keep the doc tab in the tab strip.
+    const currentActive = activeTabIdRef.current;
+    const currentActiveIsSettings =
+      currentActive !== null &&
+      newTabs.some((tab) => tab.id === currentActive && tab.kind === 'settings');
+    const committedActiveId = currentActiveIsSettings ? currentActive : newActiveId;
+    activeTabIdRef.current = committedActiveId;
     startTransition(() => {
       setTabs(newTabs);
-      setActiveTabId(newActiveId);
+      setActiveTabId(committedActiveId);
     });
   };
 
-  // Update only the active tab's metadata (after save / save-as).
+  // Update only the active tab's metadata (after save / save-as). Settings
+  // tabs are never the target of a snapshot refresh.
   const refreshActiveTabFromSnapshot = (next: AppSnapshot) => {
     if (!activeTabId) return;
     const path = next.activeDocumentPath ?? null;
@@ -802,7 +847,7 @@ export default function App() {
     startTransition(() => {
       setTabs((prev) =>
         prev.map((tab) =>
-          tab.id === activeTabId
+          tab.id === activeTabId && tab.kind === 'document'
             ? { ...tab, path, name, source, draft: source, missing: false }
             : tab,
         ),
@@ -1065,13 +1110,16 @@ export default function App() {
   // content. For close/quit prompts we want a strict comparison against the
   // last loaded/saved baseline, mirroring Zed's behavior — "Save changes" only
   // appears when the live content actually differs from what's on disk.
-  const tabIsDirty = (tab: DocumentTab) =>
-    tab.id === activeTabId
+  const tabIsDirty = (tab: DocumentTab) => {
+    if (tab.kind !== 'document') return false;
+    return tab.id === activeTabId
       ? localDraft !== tab.source
       : tab.draft !== tab.source;
+  };
   const activeTab = activeTabId
     ? tabs.find((tab) => tab.id === activeTabId) ?? null
     : null;
+  const isSettingsTabActive = activeTab?.kind === 'settings';
   const hasActiveTabEdits = activeTab ? tabIsDirty(activeTab) : false;
   const hasAnyTabEdits = tabs.some(tabIsDirty);
   // Preserved for the existing Cmd+W close-confirmation surface (which prompts
@@ -1153,6 +1201,7 @@ export default function App() {
               const opened = await openDocument(path);
               restored.push({
                 id: generateTabId(),
+                kind: 'document',
                 path: opened.activeDocumentPath ?? path,
                 name: opened.activeDocumentName ?? displayFileName(path),
                 source: opened.activeDocumentSource ?? '',
@@ -1163,6 +1212,7 @@ export default function App() {
               // File is gone — keep the tab as a missing-file placeholder.
               restored.push({
                 id: generateTabId(),
+                kind: 'document',
                 path,
                 name: displayFileName(path),
                 source: '',
@@ -1547,6 +1597,7 @@ export default function App() {
         const next = await openDocument(path);
         const tab: DocumentTab = {
           id: generateTabId(),
+          kind: 'document',
           path: next.activeDocumentPath ?? path,
           name: next.activeDocumentName ?? path,
           source: next.activeDocumentSource ?? '',
@@ -1848,6 +1899,13 @@ export default function App() {
       await syncActiveDraft();
 
       try {
+        if (target.kind === 'settings') {
+          // Settings is a UI-only surface — stay on the current snapshot but
+          // hand the active-tab pointer to the settings tab so the editor
+          // area swaps to SettingsPanel.
+          setActiveTabId(target.id);
+          return;
+        }
         if (target.missing && target.path) {
           // Missing files: stay on the empty editor; do not call into Rust.
           setActiveTabId(target.id);
@@ -1896,11 +1954,31 @@ export default function App() {
   const handleCloseTab = useEffectEvent(async (targetId: string) => {
     const targetIndex = tabs.findIndex((tab) => tab.id === targetId);
     if (targetIndex < 0) return;
+    const target = tabs[targetIndex];
 
     const remaining = tabs.filter((tab) => tab.id !== targetId);
 
-    // Closing the last tab → fall through to window-close behavior so the
-    // existing dirty-confirmation dialog runs and the user can save first.
+    // Closing the settings tab is always a clean operation — it owns no
+    // document state and the Rust snapshot did not change while it was on
+    // screen, so we set activeTabId directly and never round-trip through
+    // openDocument (which would refetch the previously-active doc).
+    if (target.kind === 'settings') {
+      if (targetId === activeTabId) {
+        const restoreId = preSettingsDocTabIdRef.current;
+        const restoreTab = restoreId
+          ? remaining.find((tab) => tab.id === restoreId)
+          : null;
+        const fallback =
+          restoreTab ?? remaining[targetIndex] ?? remaining[targetIndex - 1] ?? remaining[0] ?? null;
+        setActiveTabId(fallback?.id ?? null);
+      }
+      preSettingsDocTabIdRef.current = null;
+      setTabs(remaining);
+      return;
+    }
+
+    // Closing the last document tab → fall through to window-close behavior so
+    // the existing dirty-confirmation dialog runs and the user can save first.
     if (remaining.length === 0) {
       await handleWindowCloseCommand();
       return;
@@ -1914,6 +1992,40 @@ export default function App() {
     } else {
       setTabs(remaining);
     }
+  });
+
+  // Open (or focus, or close) the Settings tab. Cmd+, and the gear icon both
+  // route through here — when the settings tab is already active it toggles
+  // closed, matching the old modal toggle behavior.
+  const toggleSettingsTab = useEffectEvent(async () => {
+    const existing = tabs.find((tab) => tab.kind === 'settings');
+    if (existing) {
+      if (existing.id === activeTabId) {
+        await handleCloseTab(existing.id);
+        return;
+      }
+      preSettingsDocTabIdRef.current = activeTabId;
+      setActiveTabId(existing.id);
+      return;
+    }
+
+    // Stash but do not sync — opening settings keeps the Rust active document
+    // exactly as-is so closing settings can restore it without re-opening.
+    stashActiveTabDraft();
+    preSettingsDocTabIdRef.current = activeTabId;
+    const settingsTab: DocumentTab = {
+      id: SETTINGS_TAB_ID,
+      kind: 'settings',
+      path: null,
+      name: SETTINGS_TAB_NAME,
+      source: '',
+      draft: '',
+      missing: false,
+    };
+    startTransition(() => {
+      setTabs((prev) => [...prev, settingsTab]);
+      setActiveTabId(SETTINGS_TAB_ID);
+    });
   });
 
   const handleNativeMenuCommand = useEffectEvent(async (command: string) => {
@@ -2072,7 +2184,7 @@ export default function App() {
 
       if (matchesShortcut(event, ',')) {
         event.preventDefault();
-        setIsSettingsOpen((prev) => !prev);
+        void toggleSettingsTab();
         return;
       }
 
@@ -2572,7 +2684,7 @@ export default function App() {
       category: 'Preferences',
       label: 'Open Settings',
       shortcut: '⌘,',
-      run: () => setIsSettingsOpen(true),
+      run: () => void toggleSettingsTab(),
     },
     {
       id: 'app.documentStats',
@@ -2648,7 +2760,7 @@ export default function App() {
           onSetMode={(mode) => void handleSetMode(mode)}
           onSetTheme={(theme) => void handleSetTheme(theme)}
           onFollowSystemTheme={() => void handleFollowSystemTheme()}
-          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenSettings={() => void toggleSettingsTab()}
         />
       </div>
       <div
@@ -2663,12 +2775,12 @@ export default function App() {
         }}
       >
         <ActivityBar
-          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenSettings={() => void toggleSettingsTab()}
           onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
           onOpenOutline={handleOpenOutlinePanel}
           onToggleSidebar={handleOpenFilesPanel}
           isSidebarOpen={isSidebarOpen && sidebarPanel === 'files'}
-          isSettingsOpen={isSettingsOpen}
+          isSettingsOpen={isSettingsTabActive}
           isQuickOpenOpen={isQuickOpenOpen}
           isOutlineOpen={isSidebarOpen && sidebarPanel === 'outline'}
         />
@@ -2721,9 +2833,12 @@ export default function App() {
         <Tabs
           items={tabs.map((tab, index) => ({
             id: tab.id,
+            kind: tab.kind,
             name: tab.name,
             isDirty:
-              tab.id === activeTabId
+              tab.kind === 'settings'
+                ? false
+                : tab.id === activeTabId
                 ? localDraft !== tab.source
                 : tab.draft !== tab.source,
             missing: tab.missing,
@@ -2734,6 +2849,10 @@ export default function App() {
           onSelectTab={(id) => void switchToTab(id)}
           onCloseTab={(id) => void handleCloseTab(id)}
         />
+      {isSettingsTabActive ? (
+        <SettingsPanel settings={settings} onSettingsChange={handleSettingsChange} />
+      ) : null}
+      <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', isSettingsTabActive && 'hidden')}>
       <EditorArea
         busy={busy}
         errorMessage={errorMessage}
@@ -2800,12 +2919,7 @@ export default function App() {
       />
       </div>
       </div>
-      <SettingsDialog
-        open={isSettingsOpen}
-        onOpenChange={setIsSettingsOpen}
-        settings={settings}
-        onSettingsChange={handleSettingsChange}
-      />
+      </div>
       <QuickOpen
         open={isQuickOpenOpen}
         onOpenChange={setIsQuickOpenOpen}
