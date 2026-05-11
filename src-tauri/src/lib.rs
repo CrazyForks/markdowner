@@ -143,9 +143,12 @@ impl DesktopBackend {
     }
 
     pub fn restore_session(&mut self) -> Result<(), String> {
+        let configured_startup_mode = self.runtime.workspace().mode();
         self.runtime
             .restore_session()
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        self.runtime.set_mode(configured_startup_mode);
+        Ok(())
     }
 
     pub fn snapshot(&self) -> AppSnapshot {
@@ -842,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn restored_session_mode_overrides_the_configured_startup_mode() {
+    fn configured_startup_mode_survives_session_restore() {
         let temp = tempdir().unwrap();
         let session_path = temp.path().join("workspace-session.json");
         fs::write(
@@ -865,7 +868,7 @@ mod tests {
         );
         backend.restore_session().unwrap();
 
-        assert_eq!(backend.snapshot().mode, markdowner_core::EditorMode::SplitView);
+        assert_eq!(backend.snapshot().mode, markdowner_core::EditorMode::Editor);
     }
 
     #[test]

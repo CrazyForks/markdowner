@@ -1189,7 +1189,7 @@ export default function App() {
           setSettings(loadedSettings);
         });
 
-        const next = await bootstrap();
+        let next = await bootstrap();
         if (cancelled) {
           return;
         }
@@ -1200,17 +1200,29 @@ export default function App() {
             try {
               const synced = await setTheme(osKind);
               if (!cancelled) {
-                applySnapshot(synced);
-                if (synced.activeDocumentSource !== null) {
-                  upsertActiveTabFromSnapshot(synced);
-                }
+                next = synced;
               }
-              return;
             } catch (error) {
               reportOperationError(error, 'Could not follow the system theme');
             }
           }
         }
+
+        if (
+          next.activeDocumentSource !== null &&
+          loadedSettings.defaultMode !== DEFAULT_SETTINGS.defaultMode &&
+          next.mode !== loadedSettings.defaultMode
+        ) {
+          try {
+            next = await setMode(loadedSettings.defaultMode);
+          } catch (error) {
+            reportOperationError(error, 'Could not apply the default startup mode');
+          }
+          if (cancelled) {
+            return;
+          }
+        }
+
         applySnapshot(next);
         if (next.activeDocumentSource !== null) {
           upsertActiveTabFromSnapshot(next);

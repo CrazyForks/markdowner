@@ -3209,6 +3209,46 @@ describe('App recent documents', () => {
     expect(surface.style.fontFamily).toContain('JetBrains Mono');
   });
 
+  it('applies the configured default startup mode after bootstrap', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          defaultMode: 'Editor',
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: '# Notes',
+        mode: 'Wysiwyg',
+      }),
+    );
+    setModeMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: '# Notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(setModeMock).toHaveBeenCalledWith('Editor');
+    });
+    expect(screen.getByRole('textbox', { name: /source editor/i })).toHaveValue('# Notes');
+  });
+
   it('persists font size changes from the Settings dialog through save_settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
