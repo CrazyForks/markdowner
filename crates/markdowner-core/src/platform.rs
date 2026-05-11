@@ -197,14 +197,22 @@ impl EditorRuntime {
         let Some(session_store) = self.session_store.clone() else {
             return Ok(());
         };
+        let existing_tabs = load_workspace_session(&session_store).ok();
+        let open_tabs = existing_tabs
+            .as_ref()
+            .map(|session| session.open_tabs.clone())
+            .unwrap_or_default();
+        let active_tab_path = existing_tabs
+            .as_ref()
+            .and_then(|session| session.active_tab_path.as_deref());
 
         match persist_workspace_session(
             &session_store,
             self.workspace.recent_documents(),
             self.workspace.mode(),
             self.workspace.theme(),
-            &[],
-            None,
+            &open_tabs,
+            active_tab_path,
         ) {
             Ok(()) => {
                 self.workspace.clear_error();

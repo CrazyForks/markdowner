@@ -446,6 +446,40 @@ describe('App core Markdown editing flow', () => {
     });
   });
 
+  it('retries startup tab restore when the native launch session appears late', async () => {
+    const restoredPath = '/tmp/project/late-startup.md';
+    const restoredSource = ['# Late startup', '', 'Loaded after setup finishes.'].join('\n');
+    loadOpenTabsMock
+      .mockResolvedValueOnce({ openTabs: [], activeTabPath: null })
+      .mockResolvedValueOnce({
+        openTabs: [restoredPath],
+        activeTabPath: restoredPath,
+      });
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'late-startup.md',
+        activeDocumentPath: restoredPath,
+        activeDocumentSource: restoredSource,
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(loadOpenTabsMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(await screen.findByRole('tab', { name: /late-startup\.md/i })).toBeInTheDocument();
+    expect(screen.getByText('Late startup')).toBeInTheDocument();
+    expect(saveOpenTabsMock).toHaveBeenCalledWith({
+      openTabs: [restoredPath],
+      activeTabPath: restoredPath,
+    });
+  });
+
   it('keeps Settings visible when opened while persisted Markdown tabs are restoring', async () => {
     const restoredPath = '/tmp/project/restored-while-settings.md';
     let resolveOpenTabs:

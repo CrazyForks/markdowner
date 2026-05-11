@@ -915,6 +915,40 @@ fn runtime_restores_last_theme_across_relaunches() {
 }
 
 #[test]
+fn runtime_preserves_open_tabs_when_persisting_mode_and_theme() {
+    let temp = tempdir().unwrap();
+    let session_path = temp.path().join("session.json");
+    let first = temp.path().join("first.md");
+    let second = temp.path().join("second.md");
+
+    markdowner_core::storage_test_helpers::persist_workspace_session_full(
+        &session_path,
+        &[first.clone(), second.clone()],
+        EditorMode::Wysiwyg,
+        &ThemeSelection::default(),
+        &[first.clone(), second.clone()],
+        Some(second.clone()),
+    )
+    .expect("persist tabs");
+
+    let mut runtime = EditorRuntime::default().with_session_store(session_path.clone());
+    runtime.restore_session().unwrap();
+
+    runtime.set_mode(EditorMode::SplitView);
+    runtime.set_theme(ThemeSelection::new(ThemeKind::BuiltInLight, None));
+
+    let reloaded = markdowner_core::storage_test_helpers::load_workspace_session(&session_path)
+        .expect("reload session");
+    assert_eq!(reloaded.open_tabs, vec![first, second.clone()]);
+    assert_eq!(reloaded.active_tab_path, Some(second));
+    assert_eq!(reloaded.mode, EditorMode::SplitView);
+    assert_eq!(
+        reloaded.theme,
+        ThemeSelection::new(ThemeKind::BuiltInLight, None)
+    );
+}
+
+#[test]
 fn runtime_imports_custom_css_theme_from_disk_and_restores_it_after_relaunch() {
     let temp = tempdir().unwrap();
     let document_path = temp.path().join("theme.md");

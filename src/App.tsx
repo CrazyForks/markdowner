@@ -110,6 +110,7 @@ const MENU_COMMAND_EVENT = 'markdowner://menu-command';
 const SNAPSHOT_UPDATE_EVENT = 'markdowner://update-snapshot';
 const MENU_COMMAND_CLOSE_WINDOW = 'close-window';
 const MENU_COMMAND_QUIT_APP = 'quit-app';
+const STARTUP_OPEN_TABS_RETRY_MS = 100;
 
 type CloseTarget = 'window' | 'app';
 
@@ -1233,8 +1234,19 @@ export default function App() {
         }
 
         try {
-          const persistedTabs = await loadOpenTabs();
+          let persistedTabs = await loadOpenTabs();
           if (cancelled) return;
+          if (persistedTabs.openTabs.length === 0) {
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, STARTUP_OPEN_TABS_RETRY_MS);
+            });
+            if (cancelled) return;
+            const retriedTabs = await loadOpenTabs();
+            if (cancelled) return;
+            if (retriedTabs.openTabs.length > 0) {
+              persistedTabs = retriedTabs;
+            }
+          }
           if (persistedTabs.openTabs.length === 0) {
             setStartupTabsReady(true);
             return;
@@ -1276,33 +1288,50 @@ export default function App() {
           const currentUiTabs = currentTabs.filter((tab) => tab.kind !== 'document');
           const currentDocumentPaths = new Set(currentDocumentTabs.map((tab) => tab.path));
           const restoredAdditions = restored.filter((tab) => !currentDocumentPaths.has(tab.path));
-          const mergedTabs = [...currentDocumentTabs, ...restoredAdditions, ...currentUiTabs];
+          let mergedTabs = [...currentDocumentTabs, ...restoredAdditions, ...currentUiTabs];
           const currentActiveStillExists =
             currentActiveId !== null && mergedTabs.some((tab) => tab.id === currentActiveId);
           const nextActiveId = currentActiveStillExists
             ? currentActiveId
             : target?.id ?? mergedTabs[0]?.id ?? null;
+          const nextActiveTab = nextActiveId
+            ? mergedTabs.find((tab) => tab.id === nextActiveId) ?? null
+            : null;
+          let nextSnapshot: AppSnapshot | null = null;
+          let nextLocalDraft: string | null = null;
+
+          if (nextActiveTab?.kind === 'document' && nextActiveTab.path && !nextActiveTab.missing) {
+            try {
+              nextSnapshot = await openDocument(nextActiveTab.path);
+              nextLocalDraft = nextSnapshot.activeDocumentSource ?? '';
+            } catch {
+              mergedTabs = mergedTabs.map((tab) =>
+                tab.id === nextActiveTab.id
+                  ? { ...tab, missing: true, source: '', draft: '' }
+                  : tab,
+              );
+              nextLocalDraft = '';
+            }
+          } else if (nextActiveTab?.kind === 'document' && nextActiveTab.missing) {
+            nextLocalDraft = '';
+          }
+
           tabsRef.current = mergedTabs;
           activeTabIdRef.current = nextActiveId;
           startTransition(() => {
+            if (nextSnapshot) {
+              setSnapshot(nextSnapshot);
+              setExternalChangeMessage(null);
+              setShowExternalChangeActions(false);
+              setExternalCompareSource(null);
+              setLocalDraft(nextLocalDraft ?? '');
+            } else if (nextLocalDraft !== null) {
+              setLocalDraft(nextLocalDraft);
+            }
             setTabs(mergedTabs);
             setActiveTabId(nextActiveId);
             setStartupTabsReady(true);
           });
-          // Drive the live editor to whichever tab we marked active.
-          if (target && target.path && !target.missing) {
-            try {
-              const opened = await openDocument(target.path);
-              if (!cancelled) {
-                applySnapshot(opened);
-              }
-            } catch {
-              // File vanished between the loop above and now — leave snapshot
-              // alone; the tab will already be rendered as missing.
-            }
-          } else if (target && target.missing) {
-            setLocalDraft('');
-          }
         } catch (error) {
           if (!cancelled) {
             reportOperationError(error, 'Could not restore previous tabs');

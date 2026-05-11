@@ -265,8 +265,22 @@ impl DesktopBackend {
         };
         let workspace = self.runtime.workspace();
         let recent: Vec<PathBuf> = workspace.recent_documents().to_vec();
-        let tabs: Vec<PathBuf> = open_tabs.iter().map(PathBuf::from).collect();
-        let active = active_tab_path.map(PathBuf::from);
+        let active_document_path = workspace
+            .active_document()
+            .and_then(|document| document.backing_path())
+            .map(Path::to_path_buf);
+        let (tabs, active): (Vec<PathBuf>, Option<PathBuf>) =
+            if open_tabs.is_empty() && active_tab_path.is_none() {
+                match active_document_path {
+                    Some(path) => (vec![path.clone()], Some(path)),
+                    None => (Vec::new(), None),
+                }
+            } else {
+                (
+                    open_tabs.iter().map(PathBuf::from).collect(),
+                    active_tab_path.map(PathBuf::from),
+                )
+            };
         markdowner_core::storage::persist_workspace_session(
             &session_path,
             &recent,
@@ -434,6 +448,19 @@ fn session_store_path(app_handle: &AppHandle) -> Option<PathBuf> {
         .app_config_dir()
         .ok()
         .map(|path| path.join("workspace-session.json"))
+}
+
+fn open_startup_path(backend: &mut DesktopBackend, path: &Path) -> Result<(), String> {
+    if path.is_file() {
+        backend.open_document(path)?;
+        let path_string = path.to_string_lossy().into_owned();
+        let open_tabs = vec![path_string.clone()];
+        backend.save_open_tabs(&open_tabs, Some(path_string))?;
+    } else if path.is_dir() {
+        backend.open_workspace(path)?;
+    }
+
+    Ok(())
 }
 
 fn with_backend<T>(
@@ -622,11 +649,7 @@ pub fn run() {
                     let path = Path::new(path_str);
                     let state = app.state::<DesktopAppState>();
                     if let Ok(mut backend) = state.0.lock() {
-                        if path.is_file() {
-                            let _ = backend.open_document(path);
-                        } else if path.is_dir() {
-                            let _ = backend.open_workspace(path);
-                        }
+                        let _ = open_startup_path(&mut backend, path);
                         let _ = window.emit("markdowner://update-snapshot", backend.snapshot());
                     }
                 }
@@ -657,11 +680,7 @@ pub fn run() {
                     if let Some(arg_data) = matches.args.get("path") {
                         if let Some(val) = arg_data.value.as_str() {
                             let path = Path::new(val);
-                            if path.is_file() {
-                                let _ = backend.open_document(path);
-                            } else if path.is_dir() {
-                                let _ = backend.open_workspace(path);
-                            }
+                            let _ = open_startup_path(backend, path);
                         }
                     }
                 }
@@ -714,7 +733,7 @@ mod tests {
         MENU_COMMAND_OPEN_DOCUMENT, MENU_COMMAND_OPEN_WORKSPACE, MENU_COMMAND_QUIT_APP,
         MENU_COMMAND_SAVE_ACTIVE_DOCUMENT, MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS,
         MENU_COMMAND_SET_MODE_SPLITVIEW, MENU_FILE_TITLE, MENU_VIEW_TITLE, VIEW_MENU_COMMANDS,
-        menu_command_from_id,
+        menu_command_from_id, open_startup_path,
     };
 
     #[test]
@@ -1007,6 +1026,59 @@ mod tests {
             vec!["/tmp/x.md".to_string(), "/tmp/y.md".to_string()],
         );
         assert_eq!(payload.active_tab_path, Some("/tmp/x.md".to_string()));
+    }
+
+    #[test]
+    fn startup_file_open_persists_active_tab_for_frontend_restore() {
+        let temp = tempdir().unwrap();
+        let session_path = temp.path().join("workspace-session.json");
+        let document_path = temp.path().join("launched.md");
+        fs::write(&document_path, "# Launched\n\nOpened from the shell.").unwrap();
+        let mut backend = DesktopBackend::new(Some(session_path));
+
+        open_startup_path(&mut backend, &document_path).unwrap();
+
+        let snapshot = backend.snapshot();
+        assert_eq!(
+            snapshot.active_document_path.as_deref(),
+            Some(document_path.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            snapshot.active_document_source.as_deref(),
+            Some("# Launched\n\nOpened from the shell.")
+        );
+
+        let payload = backend.load_open_tabs().unwrap();
+        assert_eq!(
+            payload.open_tabs,
+            vec![document_path.to_string_lossy().into_owned()]
+        );
+        assert_eq!(
+            payload.active_tab_path,
+            Some(document_path.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn empty_tab_save_does_not_clobber_startup_active_document() {
+        let temp = tempdir().unwrap();
+        let session_path = temp.path().join("workspace-session.json");
+        let document_path = temp.path().join("startup-race.md");
+        fs::write(&document_path, "# Startup race").unwrap();
+        let mut backend = DesktopBackend::new(Some(session_path));
+        open_startup_path(&mut backend, &document_path).unwrap();
+
+        backend.save_open_tabs(&[], None).unwrap();
+
+        let payload = backend.load_open_tabs().unwrap();
+        assert_eq!(
+            payload.open_tabs,
+            vec![document_path.to_string_lossy().into_owned()]
+        );
+        assert_eq!(
+            payload.active_tab_path,
+            Some(document_path.to_string_lossy().into_owned())
+        );
     }
 
     #[test]
