@@ -52,6 +52,42 @@ mkdir -p "$2"'
 printf "xattr %s\n" "$*" >>"${COMMAND_LOG}"'
   write_stub "${bin_dir}/open" '#!/usr/bin/env bash
 printf "open %s\n" "$1" >>"${COMMAND_LOG}"'
+  write_stub "${bin_dir}/cargo" '#!/usr/bin/env bash
+printf "cargo %s\n" "$*" >>"${COMMAND_LOG}"'
+  write_stub "${bin_dir}/pnpm" '#!/usr/bin/env bash
+printf "pnpm CARGO_TARGET_DIR=%s args=%s\n" "${CARGO_TARGET_DIR:-}" "$*" >>"${COMMAND_LOG}"
+if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
+  echo "missing CARGO_TARGET_DIR" >&2
+  exit 3
+fi
+mkdir -p "${CARGO_TARGET_DIR}/release/bundle/macos/Markdowner.app"'
+}
+
+test_build_uses_isolated_cargo_target_dir() {
+  local temp_dir install_path log stdout stderr script isolated_target
+
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "${temp_dir}"' RETURN
+  install_path="${temp_dir}/Applications"
+  log="${temp_dir}/commands.log"
+  stdout="${temp_dir}/stdout"
+  stderr="${temp_dir}/stderr"
+  script="${temp_dir}/project/scripts/build-and-install.sh"
+  isolated_target="${temp_dir}/project/target/tauri-build-and-install"
+
+  make_test_project "${temp_dir}"
+  rm -rf "${temp_dir}/project/target/release"
+  make_stubs "${temp_dir}/bin"
+  mkdir -p "${install_path}"
+  touch "${log}"
+
+  PATH="${temp_dir}/bin:${PATH}" \
+    COMMAND_LOG="${log}" \
+    MARKDOWNER_INSTALL_PATH="${install_path}" \
+    "${script}" >"${stdout}" 2>"${stderr}"
+
+  assert_file_contains "${log}" "pnpm CARGO_TARGET_DIR=${isolated_target} args=tauri build"
+  assert_file_contains "${log}" "ditto ${isolated_target}/release/bundle/macos/Markdowner.app ${install_path}/Markdowner.app"
 }
 
 test_help_lists_open_flag() {
@@ -122,6 +158,7 @@ test_no_open_does_not_launch_installed_bundle() {
 }
 
 test_help_lists_open_flag
+test_build_uses_isolated_cargo_target_dir
 test_open_flag_launches_installed_bundle
 test_no_open_does_not_launch_installed_bundle
 

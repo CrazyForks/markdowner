@@ -17,6 +17,7 @@ MODE="release"
 INSTALL_PATH="${MARKDOWNER_INSTALL_PATH:-/Applications}"
 DO_BUILD=1
 OPEN_AFTER_INSTALL=0
+DEFAULT_CARGO_TARGET_DIR="${PROJECT_ROOT}/target/tauri-build-and-install"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -34,6 +35,20 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${DO_BUILD}" -eq 1 && -z "${CARGO_TARGET_DIR:-}" ]]; then
+  export CARGO_TARGET_DIR="${DEFAULT_CARGO_TARGET_DIR}"
+fi
+
+if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+  if [[ "${CARGO_TARGET_DIR}" = /* ]]; then
+    CARGO_TARGET_ROOT="${CARGO_TARGET_DIR}"
+  else
+    CARGO_TARGET_ROOT="${PROJECT_ROOT}/${CARGO_TARGET_DIR}"
+  fi
+else
+  CARGO_TARGET_ROOT="${PROJECT_ROOT}/target"
+fi
 
 # macOS-only: bundle target in tauri.conf.json is "app" (.app bundle)
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -65,9 +80,9 @@ fi
 
 # Resolve source bundle
 if [[ "${MODE}" == "debug" ]]; then
-  APP_BUNDLE="${PROJECT_ROOT}/target/debug/bundle/macos/Markdowner.app"
+  APP_BUNDLE="${CARGO_TARGET_ROOT}/debug/bundle/macos/Markdowner.app"
 else
-  APP_BUNDLE="${PROJECT_ROOT}/target/release/bundle/macos/Markdowner.app"
+  APP_BUNDLE="${CARGO_TARGET_ROOT}/release/bundle/macos/Markdowner.app"
 fi
 
 if [[ ! -d "${APP_BUNDLE}" ]]; then
