@@ -91,9 +91,23 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
+const tiptapMockState = vi.hoisted(() => ({
+  editor: null as any,
+  lastOptions: null as any,
+}));
+
 vi.mock('@tiptap/react', () => ({
-  EditorContent: () => null,
-  useEditor: () => null,
+  EditorContent: ({ editor }: { editor: any }) => (
+    <div
+      data-testid="mock-tiptap-editor"
+      data-selection-from={editor?.lastSelection?.from ?? ''}
+      data-selection-to={editor?.lastSelection?.to ?? ''}
+    />
+  ),
+  useEditor: (options: any) => {
+    tiptapMockState.lastOptions = options;
+    return tiptapMockState.editor;
+  },
 }));
 
 const LINE_WRAPPING_SENTINEL = '__line_wrapping__';
@@ -193,6 +207,85 @@ function captureRuntimeErrors() {
   };
 }
 
+interface MockTiptapTextSegment {
+  text: string;
+  from: number;
+}
+
+function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegment[]) {
+  const mutableSegments = segments.map((segment) => ({ ...segment }));
+  const editor: any = {
+    markdown,
+    lastSelection: null,
+  };
+
+  const rebuildDoc = () => ({
+    descendants: (callback: (node: any, position: number) => void) => {
+      mutableSegments.forEach((segment) => {
+        callback({ isText: true, text: segment.text }, segment.from);
+      });
+    },
+  });
+
+  const replaceRange = (from: number, to: number, text: string) => {
+    const startIndex = mutableSegments.findIndex(
+      (segment) => from >= segment.from && from <= segment.from + segment.text.length,
+    );
+    const endIndex = mutableSegments.findIndex(
+      (segment) => to >= segment.from && to <= segment.from + segment.text.length,
+    );
+    if (startIndex < 0 || endIndex < 0 || startIndex !== endIndex) {
+      return;
+    }
+
+    const segment = mutableSegments[startIndex];
+    const startOffset = from - segment.from;
+    const endOffset = to - segment.from;
+    const nextText = `${segment.text.slice(0, startOffset)}${text}${segment.text.slice(endOffset)}`;
+    const delta = nextText.length - segment.text.length;
+    segment.text = nextText;
+    for (let index = startIndex + 1; index < mutableSegments.length; index += 1) {
+      mutableSegments[index].from += delta;
+    }
+    editor.markdown = mutableSegments.map((item) => item.text).join('\n');
+    editor.state.doc = rebuildDoc();
+  };
+
+  const transaction = {
+    insertText: vi.fn((text: string, from: number, to: number) => {
+      replaceRange(from, to, text);
+      return transaction;
+    }),
+    scrollIntoView: vi.fn(() => transaction),
+  };
+
+  editor.state = {
+    doc: rebuildDoc(),
+    selection: { head: segments[0]?.from ?? 0 },
+    tr: transaction,
+  };
+  editor.view = {
+    state: editor.state,
+    dispatch: vi.fn(),
+    focus: vi.fn(),
+    coordsAtPos: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
+  };
+  editor.commands = {
+    setContent: vi.fn((content: string) => {
+      editor.markdown = content;
+      return true;
+    }),
+    setTextSelection: vi.fn((selection: { from: number; to: number }) => {
+      editor.lastSelection = selection;
+      editor.state.selection = { head: selection.to };
+      return true;
+    }),
+  };
+  editor.getMarkdown = vi.fn(() => editor.markdown);
+
+  return editor;
+}
+
 describe('App recent documents', () => {
   afterEach(() => {
     cleanup();
@@ -225,6 +318,8 @@ describe('App recent documents', () => {
     listenMock.mockReset();
     hasActiveDocumentExternalChangesMock.mockReset();
     invokeMock.mockReset();
+    tiptapMockState.editor = null;
+    tiptapMockState.lastOptions = null;
     closeRequestedHandler = undefined;
     menuCommandHandler = undefined;
     updateSnapshotHandler = undefined;
@@ -2310,7 +2405,13 @@ describe('App recent documents', () => {
     });
   });
 
-  it('keeps WYSIWYG replacement disabled until a source-backed mode is active', async () => {
+  it('selects WYSIWYG find matches through Tiptap text positions', async () => {
+    const editor = createMockTiptapEditor('# Alpha\n\nBeta alpha\nAlpha', [
+      { text: 'Alpha', from: 1 },
+      { text: 'Beta alpha', from: 8 },
+      { text: 'Alpha', from: 20 },
+    ]);
+    tiptapMockState.editor = editor;
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'notes.md',
@@ -2326,7 +2427,7 @@ describe('App recent documents', () => {
 
     await screen.findByRole('tab', { name: /notes\.md/i });
 
-    fireEvent.keyDown(window, { key: 'h', ctrlKey: true });
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
 
     const search = await screen.findByRole('search', { name: /find and replace/i });
     const findInput = within(search).getByRole('textbox', { name: /find text/i });
@@ -2334,13 +2435,81 @@ describe('App recent documents', () => {
     fireEvent.change(findInput, { target: { value: 'alpha' } });
 
     await waitFor(() => {
+      expect(within(search).getByText('1 of 3')).toBeInTheDocument();
+      expect(editor.commands.setTextSelection).toHaveBeenLastCalledWith({ from: 1, to: 6 });
+    });
+
+    fireEvent.click(within(search).getByRole('button', { name: /next match/i }));
+
+    await waitFor(() => {
+      expect(within(search).getByText('2 of 3')).toBeInTheDocument();
+      expect(editor.commands.setTextSelection).toHaveBeenLastCalledWith({ from: 13, to: 18 });
+    });
+  });
+
+  it('replaces all WYSIWYG RTL matches through a ProseMirror text transaction', async () => {
+    const editor = createMockTiptapEditor('مرحبا beta مرحبا', [
+      { text: 'مرحبا beta مرحبا', from: 1 },
+    ]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'rtl.md',
+        activeDocumentPath: '/tmp/project/rtl.md',
+        activeDocumentSource: 'مرحبا beta مرحبا',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /rtl\.md/i });
+
+    fireEvent.keyDown(window, { key: 'h', ctrlKey: true });
+
+    const search = await screen.findByRole('search', { name: /find and replace/i });
+    const findInput = within(search).getByRole('textbox', { name: /find text/i });
+    const replaceInput = within(search).getByRole('textbox', { name: /replace text/i });
+
+    fireEvent.change(findInput, { target: { value: 'مرحبا' } });
+    fireEvent.change(replaceInput, { target: { value: 'أهلا' } });
+
+    await waitFor(() => {
       expect(within(search).getByText('1 of 2')).toBeInTheDocument();
     });
-    expect(
-      within(search).getByText(/switch to editor or split view to replace/i),
-    ).toBeInTheDocument();
-    expect(within(search).getByRole('button', { name: /^replace$/i })).toBeDisabled();
-    expect(within(search).getByRole('button', { name: /^replace all$/i })).toBeDisabled();
+
+    fireEvent.click(within(search).getByRole('button', { name: /^replace all$/i }));
+
+    await waitFor(() => {
+      expect(editor.state.tr.insertText).toHaveBeenCalledWith('أهلا', 12, 17);
+      expect(editor.state.tr.insertText).toHaveBeenCalledWith('أهلا', 1, 6);
+      expect(editor.view.dispatch).toHaveBeenCalled();
+      expect(screen.getByTestId('mock-tiptap-editor')).toHaveAttribute('data-selection-from', '1');
+      expect(within(search).getByText('No matches')).toBeInTheDocument();
+    });
+  });
+
+  it('does not open Find from an IME-composing command shortcut', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'ime.md',
+        activeDocumentPath: '/tmp/project/ime.md',
+        activeDocumentSource: 'IME composing text',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /ime\.md/i });
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true, isComposing: true });
+
+    expect(screen.queryByRole('search', { name: /find and replace/i })).not.toBeInTheDocument();
   });
 
   it('renders friendly mode labels in the app menu and status bar', async () => {

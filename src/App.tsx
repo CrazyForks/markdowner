@@ -99,6 +99,13 @@ import {
   MARKDOWN_CONTENT_SCOPE_CLASS,
   scopeImportedStylesheet,
 } from './lib/themeScope';
+import {
+  findWysiwygTextMatches,
+  isWysiwygFindMatch,
+  replaceWysiwygTextMatch,
+  replaceWysiwygTextMatches,
+  selectWysiwygFindMatch,
+} from './lib/wysiwygFind';
 
 const EMPTY_SNAPSHOT: AppSnapshot = {
   rootDir: null,
@@ -1189,15 +1196,68 @@ export default function App() {
     }
   }, [activeDocumentOpen, currentMode]);
 
-  const findResult = useMemo(
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        link: {
+          openOnClick: false,
+        },
+      }),
+      Image,
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Markdown.configure({
+        markedOptions: {
+          gfm: true,
+          breaks: false,
+        },
+      }),
+    ],
+    content: localDraft || '',
+    contentType: 'markdown',
+    editorProps: {
+      attributes: {
+        class: `editor-surface tiptap-surface ${MARKDOWN_CONTENT_SCOPE_CLASS}`,
+      },
+    },
+    onUpdate: ({ editor: nextEditor }) => {
+      if (currentMode === 'Wysiwyg') {
+        setLocalDraft(nextEditor.getMarkdown());
+      }
+      if (settings.typewriterModeEnabled && currentMode === 'Wysiwyg') {
+        window.requestAnimationFrame(() => centerTiptapEditorLine(nextEditor));
+      }
+    },
+    onSelectionUpdate: ({ editor: nextEditor }) => {
+      if (settings.typewriterModeEnabled && currentMode === 'Wysiwyg') {
+        window.requestAnimationFrame(() => centerTiptapEditorLine(nextEditor));
+      }
+    },
+    immediatelyRender: false,
+  });
+
+  const sourceFindResult = useMemo(
     () => findTextMatches(localDraft, findQuery, findOptions),
     [findOptions, findQuery, localDraft],
   );
+  const wysiwygFindResult = useMemo(
+    () =>
+      currentMode === 'Wysiwyg'
+        ? findWysiwygTextMatches(editor, findQuery, findOptions)
+        : null,
+    [currentMode, editor, findOptions, findQuery, localDraft],
+  );
+  const findResult = wysiwygFindResult ?? sourceFindResult;
   const findMatches = findResult.matches;
   const findMatchCount = findMatches.length;
   const activeFindMatch =
     findMatchCount > 0 ? findMatches[Math.min(activeFindMatchIndex, findMatchCount - 1)] : undefined;
-  const canReplaceFindMatch = activeDocumentOpen && currentMode !== 'Wysiwyg';
+  const canReplaceFindMatch =
+    activeDocumentOpen && (currentMode !== 'Wysiwyg' || Boolean(editor));
   const activeFindMatchNumber = findMatchCount > 0
     ? Math.min(activeFindMatchIndex, findMatchCount - 1) + 1
     : 0;
@@ -1209,10 +1269,17 @@ export default function App() {
   }, [activeFindMatchIndex, findMatchCount]);
 
   useEffect(() => {
-    if (!isFindReplaceOpen || !activeDocumentOpen || currentMode === 'Wysiwyg') {
+    if (!isFindReplaceOpen || !activeDocumentOpen) {
       return;
     }
     if (!activeFindMatch) {
+      return;
+    }
+
+    if (currentMode === 'Wysiwyg') {
+      if (editor && isWysiwygFindMatch(activeFindMatch)) {
+        selectWysiwygFindMatch(editor, activeFindMatch);
+      }
       return;
     }
 
@@ -1221,6 +1288,7 @@ export default function App() {
     activeDocumentOpen,
     activeFindMatch,
     currentMode,
+    editor,
     isFindReplaceOpen,
   ]);
 
@@ -1264,12 +1332,35 @@ export default function App() {
       return;
     }
 
+    if (currentMode === 'Wysiwyg') {
+      if (editor && isWysiwygFindMatch(activeFindMatch)) {
+        const didReplace = replaceWysiwygTextMatch(editor, activeFindMatch, findReplacement);
+        if (didReplace && typeof editor.getMarkdown === 'function') {
+          setLocalDraft(editor.getMarkdown());
+        }
+        setActiveFindMatchIndex((current) => Math.max(0, Math.min(current, findMatchCount - 2)));
+      }
+      return;
+    }
+
     setLocalDraft((current) => replaceSingleMatch(current, activeFindMatch, findReplacement));
     setActiveFindMatchIndex((current) => Math.max(0, Math.min(current, findMatchCount - 2)));
   };
 
   const handleReplaceAllFindMatches = () => {
     if (!canReplaceFindMatch || findMatchCount === 0) {
+      return;
+    }
+
+    if (currentMode === 'Wysiwyg') {
+      if (editor) {
+        const wysiwygMatches = findMatches.filter(isWysiwygFindMatch);
+        const didReplace = replaceWysiwygTextMatches(editor, wysiwygMatches, findReplacement);
+        if (didReplace && typeof editor.getMarkdown === 'function') {
+          setLocalDraft(editor.getMarkdown());
+        }
+        setActiveFindMatchIndex(0);
+      }
       return;
     }
 
@@ -1630,50 +1721,6 @@ export default function App() {
       window.clearTimeout(timeout);
     };
   }, [localDraft, snapshot.activeDocumentPath, snapshot.activeDocumentSource, snapshot.mode]);
-
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        link: {
-          openOnClick: false,
-        },
-      }),
-      Image,
-      Table.configure({ resizable: true }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Markdown.configure({
-        markedOptions: {
-          gfm: true,
-          breaks: false,
-        },
-      }),
-    ],
-    content: localDraft || '',
-    contentType: 'markdown',
-    editorProps: {
-      attributes: {
-        class: `editor-surface tiptap-surface ${MARKDOWN_CONTENT_SCOPE_CLASS}`,
-      },
-    },
-    onUpdate: ({ editor: nextEditor }) => {
-      if (currentMode === 'Wysiwyg') {
-        setLocalDraft(nextEditor.getMarkdown());
-      }
-      if (settings.typewriterModeEnabled && currentMode === 'Wysiwyg') {
-        window.requestAnimationFrame(() => centerTiptapEditorLine(nextEditor));
-      }
-    },
-    onSelectionUpdate: ({ editor: nextEditor }) => {
-      if (settings.typewriterModeEnabled && currentMode === 'Wysiwyg') {
-        window.requestAnimationFrame(() => centerTiptapEditorLine(nextEditor));
-      }
-    },
-    immediatelyRender: false,
-  });
 
   useEffect(() => {
     if (!editor) {
@@ -2385,6 +2432,9 @@ export default function App() {
   useEffect(() => {
     const handleKeyboardShortcut = (event: KeyboardEvent) => {
       if (busy) {
+        return;
+      }
+      if (event.isComposing || event.key === 'Process') {
         return;
       }
 

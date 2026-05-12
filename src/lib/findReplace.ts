@@ -117,7 +117,7 @@ export function findTextMatches(
     : findLiteralMatches(source, query, options);
 }
 
-function replacementTextForMatch(match: FindMatch, replacement: string) {
+export function replacementTextForMatch(match: FindMatch, replacement: string) {
   if (!match.regex) {
     return replacement;
   }
