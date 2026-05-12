@@ -718,6 +718,7 @@ export default function App() {
     regex: false,
   });
   const [activeFindMatchIndex, setActiveFindMatchIndex] = useState(0);
+  const [shellAnnouncement, setShellAnnouncement] = useState('');
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [debouncedLocalDraft, setDebouncedLocalDraft] = useState(localDraft);
   const [cursorPosition, setCursorPosition] = useState<{ line: number; column: number }>({
@@ -729,6 +730,9 @@ export default function App() {
   const splitSourceScrollRef = useRef<HTMLDivElement | null>(null);
   const splitPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const modeRequestIdRef = useRef(0);
+  const liveRegionTimerRef = useRef<number | null>(null);
+  const lastAnnouncedModeRef = useRef<EditorMode | null>(null);
+  const lastAnnouncedTabIdRef = useRef<string | null>(null);
   const chordPrefixActiveRef = useRef(false);
   const chordPrefixTimerRef = useRef<number | null>(null);
   const clearChordPrefix = () => {
@@ -739,6 +743,25 @@ export default function App() {
     }
   };
   const activeDocumentOpen = snapshot.activeDocumentSource !== null;
+
+  const announceShell = (message: string) => {
+    if (liveRegionTimerRef.current !== null) {
+      window.clearTimeout(liveRegionTimerRef.current);
+    }
+    setShellAnnouncement('');
+    liveRegionTimerRef.current = window.setTimeout(() => {
+      setShellAnnouncement(message);
+      liveRegionTimerRef.current = null;
+    }, 10);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (liveRegionTimerRef.current !== null) {
+        window.clearTimeout(liveRegionTimerRef.current);
+      }
+    };
+  }, []);
 
   // Tab state lives entirely in the frontend. The active tab's path/source
   // is mirrored through Rust's single-active-document model on switch.
@@ -985,6 +1008,9 @@ export default function App() {
     setIsSidebarOpen((current) => {
       const next = !current;
       writeSidebarState(next);
+      announceShell(
+        next ? `${sidebarPanel === 'outline' ? 'Outline' : 'Files'} sidebar shown` : 'Sidebar hidden',
+      );
       return next;
     });
   });
@@ -994,6 +1020,7 @@ export default function App() {
     setIsSidebarOpen((current) => {
       const next = current && sidebarPanel === 'files' ? !current : true;
       writeSidebarState(next);
+      announceShell(next ? 'Files sidebar shown' : 'Sidebar hidden');
       return next;
     });
   });
@@ -1002,6 +1029,7 @@ export default function App() {
     setSidebarPanel('outline');
     setIsSidebarOpen(true);
     writeSidebarState(true);
+    announceShell('Outline sidebar shown');
   });
 
   const handleSelectOutlineItem = useEffectEvent((item: OutlineItem) => {
@@ -1141,6 +1169,24 @@ export default function App() {
   }, [isResizingSidebar, sidebarWidth]);
 
   const currentMode = snapshot.mode;
+
+  useEffect(() => {
+    if (!activeDocumentOpen) {
+      lastAnnouncedModeRef.current = currentMode;
+      return;
+    }
+
+    if (lastAnnouncedModeRef.current === null) {
+      lastAnnouncedModeRef.current = currentMode;
+      return;
+    }
+
+    if (lastAnnouncedModeRef.current !== currentMode) {
+      lastAnnouncedModeRef.current = currentMode;
+      announceShell(`Mode: ${formatEditorMode(currentMode)}`);
+    }
+  }, [activeDocumentOpen, currentMode]);
+
   const findResult = useMemo(
     () => findTextMatches(localDraft, findQuery, findOptions),
     [findOptions, findQuery, localDraft],
@@ -1243,6 +1289,19 @@ export default function App() {
   const activeTab = activeTabId
     ? tabs.find((tab) => tab.id === activeTabId) ?? null
     : null;
+
+  useEffect(() => {
+    if (!activeTab) {
+      lastAnnouncedTabIdRef.current = null;
+      return;
+    }
+
+    if (lastAnnouncedTabIdRef.current !== activeTab.id) {
+      lastAnnouncedTabIdRef.current = activeTab.id;
+      announceShell(`Active tab: ${activeTab.name}`);
+    }
+  }, [activeTab?.id, activeTab?.name]);
+
   const isSettingsTabActive = activeTab?.kind === 'settings';
   const hasActiveTabEdits = activeTab ? tabIsDirty(activeTab) : false;
   const hasAnyTabEdits = tabs.some(tabIsDirty);
@@ -2990,6 +3049,16 @@ export default function App() {
       className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground"
       data-diagnostics-enabled={String(settings.diagnosticsEnabled)}
     >
+      <div
+        data-testid="shell-live-region"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        dir="auto"
+        className="sr-only"
+      >
+        {shellAnnouncement}
+      </div>
       <div
         data-testid="app-titlebar"
         className="flex h-[35px] shrink-0 items-center border-b border-border/60 bg-background"

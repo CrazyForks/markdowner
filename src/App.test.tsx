@@ -2783,6 +2783,103 @@ describe('App recent documents', () => {
     expect(screen.queryByRole('dialog', { name: /command palette/i })).toBeNull();
   });
 
+  it('announces mode changes through a hidden polite live region', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: '# Notes',
+        mode: 'Editor',
+      }),
+    );
+    setModeMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: '# Notes',
+        mode: 'SplitView',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('textbox', { name: /source editor/i });
+
+    const liveRegion = screen.getByTestId('shell-live-region');
+    expect(liveRegion).toHaveAttribute('aria-live', 'polite');
+    expect(liveRegion).toHaveAttribute('aria-atomic', 'true');
+    expect(liveRegion).toHaveAttribute('dir', 'auto');
+    expect(liveRegion).toHaveClass('sr-only');
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+
+    await waitFor(() => {
+      expect(liveRegion).toHaveTextContent('Mode: Split View');
+    });
+  });
+
+  it('announces sidebar panel visibility changes without visible UI text', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('button', { name: /^new file$/i });
+    const liveRegion = screen.getByTestId('shell-live-region');
+    const explorerButton = screen.getByRole('button', { name: /explorer/i });
+
+    fireEvent.click(explorerButton);
+
+    await waitFor(() => {
+      expect(liveRegion).toHaveTextContent('Files sidebar shown');
+    });
+
+    fireEvent.click(explorerButton);
+
+    await waitFor(() => {
+      expect(liveRegion).toHaveTextContent('Sidebar hidden');
+    });
+  });
+
+  it('announces tab changes with RTL-capable text direction', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'alpha.md',
+        activeDocumentPath: '/tmp/project/alpha.md',
+        activeDocumentSource: '# Alpha',
+        mode: 'Editor',
+      }),
+    );
+    openDialogMock.mockResolvedValue('/tmp/project/ملاحظات.md');
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'ملاحظات.md',
+        activeDocumentPath: '/tmp/project/ملاحظات.md',
+        activeDocumentSource: '# Notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /alpha\.md/i });
+    const liveRegion = screen.getByTestId('shell-live-region');
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+
+    await screen.findByRole('tab', { name: /ملاحظات\.md/i });
+    await waitFor(() => {
+      expect(liveRegion).toHaveAttribute('dir', 'auto');
+      expect(liveRegion).toHaveTextContent('Active tab: ملاحظات.md');
+    });
+  });
+
   it('toggles Word Wrap from the Command Palette and persists it through save_settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
