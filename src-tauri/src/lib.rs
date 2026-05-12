@@ -29,6 +29,8 @@ const MENU_COMMAND_QUIT_APP: &str = "quit-app";
 const MENU_COMMAND_SET_MODE_WYSIWYG: &str = "mode-wysiwyg";
 const MENU_COMMAND_SET_MODE_EDITOR: &str = "mode-editor";
 const MENU_COMMAND_SET_MODE_SPLITVIEW: &str = "mode-splitview";
+#[cfg(target_os = "macos")]
+const MENU_MACOS_APP_ID: &str = "app";
 const MENU_FILE_TITLE: &str = "File";
 const MENU_VIEW_TITLE: &str = "View";
 const MENU_RECENT_ID: &str = "open-recent";
@@ -101,6 +103,30 @@ const VIEW_MENU_COMMANDS: &[MenuCommandDescriptor] = &[
         accelerator: None,
     },
 ];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TopLevelMenuSection {
+    #[cfg(target_os = "macos")]
+    NativeApp,
+    File,
+    View,
+}
+
+fn top_level_menu_sections() -> &'static [TopLevelMenuSection] {
+    #[cfg(target_os = "macos")]
+    {
+        &[
+            TopLevelMenuSection::NativeApp,
+            TopLevelMenuSection::File,
+            TopLevelMenuSection::View,
+        ]
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        &[TopLevelMenuSection::File, TopLevelMenuSection::View]
+    }
+}
 
 #[derive(Debug, Default, Clone, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -398,6 +424,34 @@ fn build_recent_menu<R: Runtime>(
     recent_menu_builder.build()
 }
 
+#[cfg(target_os = "macos")]
+fn build_native_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Submenu<R>> {
+    let package_info = app.package_info();
+    let config = app.config();
+    let about_metadata = tauri::menu::AboutMetadata {
+        name: Some(package_info.name.clone()),
+        version: Some(package_info.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        authors: config
+            .bundle
+            .publisher
+            .clone()
+            .map(|publisher| vec![publisher]),
+        ..Default::default()
+    };
+
+    SubmenuBuilder::with_id(app, MENU_MACOS_APP_ID, package_info.name.clone())
+        .about(Some(about_metadata))
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .separator()
+        .quit()
+        .build()
+}
+
 fn build_app_menu<R: Runtime>(
     app: &AppHandle<R>,
     recent_documents: &[String],
@@ -418,10 +472,24 @@ fn build_app_menu<R: Runtime>(
     }
     let view_menu = view_menu_builder.build()?;
 
-    MenuBuilder::new(app)
-        .item(&file_menu)
-        .item(&view_menu)
-        .build()
+    let mut menu_builder = MenuBuilder::new(app);
+    for section in top_level_menu_sections() {
+        match section {
+            #[cfg(target_os = "macos")]
+            TopLevelMenuSection::NativeApp => {
+                let native_app_menu = build_native_app_menu(app)?;
+                menu_builder = menu_builder.item(&native_app_menu);
+            }
+            TopLevelMenuSection::File => {
+                menu_builder = menu_builder.item(&file_menu);
+            }
+            TopLevelMenuSection::View => {
+                menu_builder = menu_builder.item(&view_menu);
+            }
+        }
+    }
+
+    menu_builder.build()
 }
 
 fn menu_command_from_id(id: &str) -> Option<String> {
@@ -812,8 +880,8 @@ mod tests {
         DesktopBackend, FILE_MENU_COMMANDS, MENU_COMMAND_CLOSE_WINDOW, MENU_COMMAND_NEW_DOCUMENT,
         MENU_COMMAND_OPEN_DOCUMENT, MENU_COMMAND_OPEN_WORKSPACE, MENU_COMMAND_QUIT_APP,
         MENU_COMMAND_SAVE_ACTIVE_DOCUMENT, MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS,
-        MENU_COMMAND_SET_MODE_SPLITVIEW, MENU_FILE_TITLE, MENU_VIEW_TITLE, VIEW_MENU_COMMANDS,
-        menu_command_from_id, open_startup_path,
+        MENU_COMMAND_SET_MODE_SPLITVIEW, MENU_FILE_TITLE, MENU_VIEW_TITLE, TopLevelMenuSection,
+        VIEW_MENU_COMMANDS, menu_command_from_id, open_startup_path, top_level_menu_sections,
     };
 
     #[test]
@@ -1011,6 +1079,19 @@ mod tests {
                 .map(|descriptor| descriptor.label)
                 .collect::<Vec<_>>(),
             vec!["Editor (⌘K ⌘E)", "WYSIWYG (⌘K ⌘W)", "Split-view (⌘K ⌘S)"]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_menu_keeps_file_as_a_top_level_menu_on_macos() {
+        assert_eq!(
+            top_level_menu_sections(),
+            &[
+                TopLevelMenuSection::NativeApp,
+                TopLevelMenuSection::File,
+                TopLevelMenuSection::View,
+            ]
         );
     }
 
