@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/build.mjs",
+    "build:debug": "pnpm build debug",
+    "build:install": "pnpm build install",
+    "build:install:open": "pnpm build install open",
+    "build:install:debug": "pnpm build debug install",
+    "build:install:debug:open": "pnpm build debug install open",
     "test": "vitest run && bash scripts/build-and-install.test.sh",
     "preview": "vite preview",
     "tauri": "tauri"

@@ -155,9 +155,37 @@ pnpm tauri build --debug
 target/debug/markdowner-desktop
 ```
 
-## 편의 스크립트 (macOS)
+## 빌드와 설치 명령 (macOS)
 
-빌드와 실행/설치 흐름을 묶어 둔 헬퍼 스크립트가 두 개 있습니다.
+일반 프런트엔드 프로덕션 빌드는 그대로 `pnpm build` 를 사용합니다. Tauri 번들 빌드, 로컬 설치, 설치 후 실행 흐름이 필요할 때는 build 하위 명령을 붙입니다.
+
+```bash
+pnpm build                         # 타입 체크와 프런트엔드 빌드
+pnpm build debug                   # Tauri 디버그 빌드
+pnpm build install                 # Tauri 릴리즈 빌드 후 /Applications 에 설치
+pnpm build install open            # 설치 후 설치된 앱 실행
+pnpm build debug install open      # 디버그 빌드, 설치, 실행
+pnpm build:install:open            # 설치 + 실행 package-script alias
+```
+
+설치 옵션:
+
+```bash
+MARKDOWNER_INSTALL_PATH=~/Applications pnpm build install
+pnpm build install -- --path ~/Applications
+pnpm build install -- --no-build   # 이미 빌드된 번들을 설치만 수행
+pnpm build install -- --open       # "open" 의 flag 형태
+```
+
+동작:
+
+- 하위 명령 없는 `pnpm build` 는 Tauri `beforeBuildCommand` 에서 사용하는 프런트엔드 빌드를 실행합니다
+- `install` 은 macOS 전용입니다 (`src-tauri/tauri.conf.json` 의 bundle target 이 `app` 입니다)
+- 기본 설치 경로는 `/Applications` 이며, `MARKDOWNER_INSTALL_PATH` 또는 `--path <DIR>` 로 변경할 수 있습니다
+- 설치 경로에 쓰기 권한이 없을 때만 자동으로 `sudo` 를 사용합니다
+- 대상 위치에 기존 `Markdowner.app` 이 있으면 제거한 뒤 `ditto` 로 복사하고, 로컬 빌드 번들이 Gatekeeper 경고 없이 실행되도록 `com.apple.quarantine` 속성을 제거합니다
+- `open` 또는 `--open` 을 주면 복사 후 설치된 번들을 실행합니다
+- `scripts/build-and-install.sh` 는 `pnpm build install` 을 감싼 호환용 wrapper 로 남겨두었습니다
 
 ### `scripts/build-and-run.sh`
 
@@ -175,25 +203,6 @@ scripts/build-and-run.sh --no-run  # 빌드만 수행, 실행하지 않음
 - `node_modules` 가 없으면 `pnpm install` 을 실행합니다
 - `pnpm tauri build` (또는 `pnpm tauri build --debug`) 를 실행합니다
 - macOS 에서는 `target/{release,debug}/bundle/macos/Markdowner.app` 을 `open` 으로 실행하고, 그 외 플랫폼에서는 `target/{release,debug}/markdowner-desktop` 바이너리를 직접 실행합니다
-
-### `scripts/build-and-install.sh`
-
-Tauri 앱을 빌드하고 결과 `.app` 번들을 지정한 디렉토리에 설치합니다.
-
-```bash
-scripts/build-and-install.sh                    # 릴리즈 빌드 후 /Applications 에 설치
-scripts/build-and-install.sh --path ~/Applications
-scripts/build-and-install.sh --debug            # 디버그 빌드
-scripts/build-and-install.sh --no-build         # 이미 빌드된 번들을 설치만 수행
-```
-
-동작:
-
-- macOS 전용입니다 (`src-tauri/tauri.conf.json` 의 bundle target 이 `app` 입니다)
-- 기본 설치 경로는 `/Applications` 이며, `--path <DIR>` 로 변경할 수 있습니다 (예: `~/Applications`)
-- 설치 경로에 쓰기 권한이 없을 때만 자동으로 `sudo` 를 사용합니다
-- 대상 위치에 기존 `Markdowner.app` 이 있으면 제거한 뒤 `ditto` 로 복사하고, 로컬 빌드 번들이 Gatekeeper 경고 없이 실행되도록 `com.apple.quarantine` 속성을 제거합니다
-- `--no-build` 를 주면 다시 빌드하지 않고, 이미 빌드된 번들만 설치합니다
 
 ## 현재 앱 검증 방법
 

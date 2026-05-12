@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_SCRIPT="${PROJECT_ROOT}/scripts/build-and-install.sh"
+SOURCE_BUILD_SCRIPT="${PROJECT_ROOT}/scripts/build.mjs"
+SOURCE_PACKAGE_JSON="${PROJECT_ROOT}/package.json"
+REAL_PNPM="$(command -v pnpm || true)"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -35,8 +38,18 @@ make_test_project() {
 
   mkdir -p "${root}/project/scripts"
   cp -f "${SOURCE_SCRIPT}" "${root}/project/scripts/build-and-install.sh"
+  cp -f "${SOURCE_BUILD_SCRIPT}" "${root}/project/scripts/build.mjs"
   chmod +x "${root}/project/scripts/build-and-install.sh"
   mkdir -p "${root}/project/target/release/bundle/macos/Markdowner.app"
+}
+
+make_pnpm_test_project() {
+  local root="$1"
+
+  mkdir -p "${root}/project/scripts"
+  cp -f "${SOURCE_PACKAGE_JSON}" "${root}/project/package.json"
+  cp -f "${SOURCE_BUILD_SCRIPT}" "${root}/project/scripts/build.mjs"
+  mkdir -p "${root}/project/node_modules"
 }
 
 make_stubs() {
@@ -56,11 +69,28 @@ printf "open %s\n" "$1" >>"${COMMAND_LOG}"'
 printf "cargo %s\n" "$*" >>"${COMMAND_LOG}"'
   write_stub "${bin_dir}/pnpm" '#!/usr/bin/env bash
 printf "pnpm CARGO_TARGET_DIR=%s args=%s\n" "${CARGO_TARGET_DIR:-}" "$*" >>"${COMMAND_LOG}"
-if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
-  echo "missing CARGO_TARGET_DIR" >&2
-  exit 3
+if [[ "${1:-}" == "tauri" && "${2:-}" == "build" ]]; then
+  if [[ "${3:-}" == "--debug" ]]; then
+    mkdir -p "${CARGO_TARGET_DIR:-target}/debug/bundle/macos/Markdowner.app"
+  else
+    if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
+      echo "missing CARGO_TARGET_DIR" >&2
+      exit 3
+    fi
+    mkdir -p "${CARGO_TARGET_DIR}/release/bundle/macos/Markdowner.app"
+  fi
 fi
-mkdir -p "${CARGO_TARGET_DIR}/release/bundle/macos/Markdowner.app"'
+if [[ "${1:-}" == "install" ]]; then
+  mkdir -p node_modules
+fi'
+}
+
+run_pnpm() {
+  if [[ -z "${REAL_PNPM}" ]]; then
+    fail "pnpm is required for pnpm script tests"
+  fi
+
+  "${REAL_PNPM}" "$@"
 }
 
 test_build_uses_isolated_cargo_target_dir() {
@@ -73,9 +103,9 @@ test_build_uses_isolated_cargo_target_dir() {
   stdout="${temp_dir}/stdout"
   stderr="${temp_dir}/stderr"
   script="${temp_dir}/project/scripts/build-and-install.sh"
-  isolated_target="${temp_dir}/project/target/tauri-build-and-install"
 
   make_test_project "${temp_dir}"
+  isolated_target="$(cd "${temp_dir}/project" && pwd -P)/target/tauri-build-and-install"
   rm -rf "${temp_dir}/project/target/release"
   make_stubs "${temp_dir}/bin"
   mkdir -p "${install_path}"
@@ -105,7 +135,7 @@ test_help_lists_open_flag() {
 }
 
 test_open_flag_launches_installed_bundle() {
-  local temp_dir install_path log stdout stderr script
+  local temp_dir install_path log stdout stderr script project_root
 
   temp_dir="$(mktemp -d)"
   trap 'rm -rf "${temp_dir}"' RETURN
@@ -116,6 +146,7 @@ test_open_flag_launches_installed_bundle() {
   script="${temp_dir}/project/scripts/build-and-install.sh"
 
   make_test_project "${temp_dir}"
+  project_root="$(cd "${temp_dir}/project" && pwd -P)"
   make_stubs "${temp_dir}/bin"
   mkdir -p "${install_path}"
   touch "${log}"
@@ -125,7 +156,7 @@ test_open_flag_launches_installed_bundle() {
     MARKDOWNER_INSTALL_PATH="${install_path}" \
     "${script}" --no-build --open >"${stdout}" 2>"${stderr}"
 
-  assert_file_contains "${log}" "ditto ${temp_dir}/project/target/release/bundle/macos/Markdowner.app ${install_path}/Markdowner.app"
+  assert_file_contains "${log}" "ditto ${project_root}/target/release/bundle/macos/Markdowner.app ${install_path}/Markdowner.app"
   assert_file_contains "${log}" "open ${install_path}/Markdowner.app"
   assert_file_contains "${stdout}" "==> Opening ${install_path}/Markdowner.app"
 }
@@ -157,6 +188,120 @@ test_no_open_does_not_launch_installed_bundle() {
   fi
 }
 
+test_package_exposes_build_aliases() {
+  node --input-type=module <<'NODE'
+import fs from 'node:fs';
+
+const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const scripts = packageJson.scripts ?? {};
+const expected = {
+  build: 'node scripts/build.mjs',
+  'build:debug': 'pnpm build debug',
+  'build:install': 'pnpm build install',
+  'build:install:open': 'pnpm build install open',
+};
+
+for (const [name, command] of Object.entries(expected)) {
+  if (scripts[name] !== command) {
+    console.error(`Expected package script ${name} to be ${JSON.stringify(command)}, got ${JSON.stringify(scripts[name])}`);
+    process.exit(1);
+  }
+}
+NODE
+}
+
+test_pnpm_build_without_args_runs_frontend_build() {
+  local temp_dir log stdout stderr
+
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "${temp_dir}"' RETURN
+  log="${temp_dir}/commands.log"
+  stdout="${temp_dir}/stdout"
+  stderr="${temp_dir}/stderr"
+
+  make_pnpm_test_project "${temp_dir}"
+  make_stubs "${temp_dir}/bin"
+  touch "${log}"
+
+  PATH="${temp_dir}/bin:${PATH}" \
+    COMMAND_LOG="${log}" \
+    run_pnpm --dir "${temp_dir}/project" build >"${stdout}" 2>"${stderr}"
+
+  assert_file_contains "${log}" "pnpm CARGO_TARGET_DIR= args=exec tsc"
+  assert_file_contains "${log}" "pnpm CARGO_TARGET_DIR= args=exec vite build"
+}
+
+test_pnpm_build_accepts_double_dash_before_flags() {
+  local temp_dir stdout stderr
+
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "${temp_dir}"' RETURN
+  stdout="${temp_dir}/stdout"
+  stderr="${temp_dir}/stderr"
+
+  make_pnpm_test_project "${temp_dir}"
+
+  run_pnpm --dir "${temp_dir}/project" build -- --help >"${stdout}" 2>"${stderr}"
+
+  assert_file_contains "${stdout}" "pnpm build install [open]"
+}
+
+test_pnpm_build_debug_invokes_tauri_debug_build() {
+  local temp_dir log stdout stderr
+
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "${temp_dir}"' RETURN
+  log="${temp_dir}/commands.log"
+  stdout="${temp_dir}/stdout"
+  stderr="${temp_dir}/stderr"
+
+  make_pnpm_test_project "${temp_dir}"
+  make_stubs "${temp_dir}/bin"
+  touch "${log}"
+
+  PATH="${temp_dir}/bin:${PATH}" \
+    COMMAND_LOG="${log}" \
+    run_pnpm --dir "${temp_dir}/project" build debug >"${stdout}" 2>"${stderr}"
+
+  assert_file_contains "${log}" "pnpm CARGO_TARGET_DIR= args=tauri build --debug"
+  if grep -Fq -- "ditto " "${log}"; then
+    sed -n '1,160p' "${log}" >&2
+    fail "expected debug build without install to skip ditto"
+  fi
+}
+
+test_pnpm_build_install_open_launches_installed_bundle() {
+  local temp_dir install_path isolated_target log stdout stderr
+
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "${temp_dir}"' RETURN
+  install_path="${temp_dir}/Applications"
+  log="${temp_dir}/commands.log"
+  stdout="${temp_dir}/stdout"
+  stderr="${temp_dir}/stderr"
+
+  make_pnpm_test_project "${temp_dir}"
+  isolated_target="$(cd "${temp_dir}/project" && pwd -P)/target/tauri-build-and-install"
+  make_stubs "${temp_dir}/bin"
+  mkdir -p "${install_path}"
+  touch "${log}"
+
+  PATH="${temp_dir}/bin:${PATH}" \
+    COMMAND_LOG="${log}" \
+    MARKDOWNER_INSTALL_PATH="${install_path}" \
+    run_pnpm --dir "${temp_dir}/project" build install open >"${stdout}" 2>"${stderr}"
+
+  assert_file_contains "${log}" "pnpm CARGO_TARGET_DIR=${isolated_target} args=tauri build"
+  assert_file_contains "${log}" "ditto ${isolated_target}/release/bundle/macos/Markdowner.app ${install_path}/Markdowner.app"
+  assert_file_contains "${log}" "open ${install_path}/Markdowner.app"
+  assert_file_contains "${stdout}" "==> Opening ${install_path}/Markdowner.app"
+}
+
+test_package_exposes_build_aliases
+test_pnpm_build_without_args_runs_frontend_build
+test_pnpm_build_accepts_double_dash_before_flags
+test_pnpm_build_debug_invokes_tauri_debug_build
+test_pnpm_build_install_open_launches_installed_bundle
 test_help_lists_open_flag
 test_build_uses_isolated_cargo_target_dir
 test_open_flag_launches_installed_bundle
