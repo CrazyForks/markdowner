@@ -4,13 +4,13 @@ import { Button } from '@/components/ui/button';
 
 export interface ActivityBarProps {
   onOpenSettings?: () => void;
-  onOpenQuickOpen?: () => void;
+  onOpenSearch?: () => void;
   onOpenOutline?: () => void;
   className?: string;
   onToggleSidebar?: () => void;
   isSidebarOpen?: boolean;
   isSettingsOpen?: boolean;
-  isQuickOpenOpen?: boolean;
+  isSearchOpen?: boolean;
   isOutlineOpen?: boolean;
 }
 
@@ -19,10 +19,10 @@ export function ActivityBar({
   onToggleSidebar,
   isSidebarOpen,
   onOpenSettings,
-  onOpenQuickOpen,
+  onOpenSearch,
   onOpenOutline,
   isSettingsOpen,
-  isQuickOpenOpen,
+  isSearchOpen,
   isOutlineOpen,
 }: ActivityBarProps) {
   const activeClass = 'bg-accent text-accent-foreground';
@@ -50,12 +50,12 @@ export function ActivityBar({
         <Button
           variant="ghost"
           size="icon"
-          className={cn('w-8 h-8 rounded-md', isQuickOpenOpen ? activeClass : inactiveClass)}
-          title="Quick Open (Cmd+P)"
-          aria-label="Quick Open (Cmd+P)"
-          aria-keyshortcuts="Meta+P Control+P"
-          aria-pressed={Boolean(isQuickOpenOpen)}
-          onClick={onOpenQuickOpen}
+          className={cn('w-8 h-8 rounded-md', isSearchOpen ? activeClass : inactiveClass)}
+          title="Search (Cmd+Shift+F)"
+          aria-label="Search (Cmd+Shift+F)"
+          aria-keyshortcuts="Meta+Shift+F Control+Shift+F"
+          aria-pressed={Boolean(isSearchOpen)}
+          onClick={onOpenSearch}
         >
           <Search className="w-5 h-5" />
         </Button>
@@ -71,7 +71,7 @@ export function ActivityBar({
           <ListTree className="w-5 h-5" />
         </Button>
       </div>
-      <div className="mt-auto flex flex-col gap-2 w-full px-2 mb-2">
+      <div className="mt-auto flex flex-col gap-2 w-full px-2 mb-0.5">
         <Button
           variant="ghost"
           size="icon"

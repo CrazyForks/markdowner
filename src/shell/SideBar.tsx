@@ -1,10 +1,13 @@
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Button } from '@/components/ui/button';
+import { CaseSensitive, Regex, WholeWord } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ReactNode } from 'react';
+import type { FindReplaceOptions } from '@/lib/findReplace';
+import { ReactNode, useEffect, useRef } from 'react';
 
-export type SideBarPanel = 'files' | 'outline';
+export type SideBarPanel = 'files' | 'search' | 'outline';
 
 export interface OutlineItem {
   id: string;
@@ -14,6 +17,20 @@ export interface OutlineItem {
   titleEnd: number;
   selectionStart: number;
   selectionEnd: number;
+}
+
+export interface SearchResultMatch {
+  line: number;
+  column: number;
+  preview: string;
+  matchStart: number;
+  matchEnd: number;
+  absoluteOffset: number;
+}
+
+export interface SearchResultFile {
+  path: string;
+  matches: SearchResultMatch[];
 }
 
 export interface SideBarProps {
@@ -35,6 +52,17 @@ export interface SideBarProps {
   outlineFontSize: number;
   outlineRowSpacing: number;
   onSelectOutlineItem?: (item: OutlineItem) => void;
+  searchQuery: string;
+  searchOptions: FindReplaceOptions;
+  searchResults: SearchResultFile[];
+  searchBusy: boolean;
+  searchError: string | null;
+  searchHasRun: boolean;
+  searchAutoFocusToken: number;
+  onSearchQueryChange: (value: string) => void;
+  onSearchOptionsChange: (options: FindReplaceOptions) => void;
+  onRunSearch: () => void;
+  onSelectSearchMatch: (file: SearchResultFile, match: SearchResultMatch) => void;
 }
 
 export function SideBar({
@@ -56,9 +84,30 @@ export function SideBar({
   outlineFontSize,
   outlineRowSpacing,
   onSelectOutlineItem,
+  searchQuery,
+  searchOptions,
+  searchResults,
+  searchBusy,
+  searchError,
+  searchHasRun,
+  searchAutoFocusToken,
+  onSearchQueryChange,
+  onSearchOptionsChange,
+  onRunSearch,
+  onSelectSearchMatch,
 }: SideBarProps) {
   const showOutline = panel === 'outline';
+  const showSearch = panel === 'search';
   const outlinePaddingY = Math.max(2, outlineRowSpacing + 2);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !showSearch) return;
+    searchInputRef.current?.focus();
+    searchInputRef.current?.select();
+  }, [isOpen, showSearch, searchAutoFocusToken]);
+
+  const totalMatches = searchResults.reduce((sum, file) => sum + file.matches.length, 0);
 
   return (
     <aside
@@ -104,6 +153,153 @@ export function SideBar({
               </div>
             </ScrollArea>
           )}
+        </section>
+      ) : showSearch ? (
+        <section
+          data-testid="sidebar-search-panel"
+          className="flex min-h-0 flex-col gap-2"
+        >
+          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Search
+          </div>
+          <Input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(event) => onSearchQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                onRunSearch();
+              }
+            }}
+            placeholder="Search across workspace"
+            aria-label="Search across workspace"
+            data-testid="sidebar-search-input"
+          />
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant={searchOptions.caseSensitive ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              aria-label="Match case"
+              aria-pressed={searchOptions.caseSensitive}
+              title="Match case"
+              onClick={() =>
+                onSearchOptionsChange({
+                  ...searchOptions,
+                  caseSensitive: !searchOptions.caseSensitive,
+                })
+              }
+            >
+              <CaseSensitive className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant={searchOptions.wholeWord ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              aria-label="Whole word"
+              aria-pressed={searchOptions.wholeWord}
+              title="Whole word"
+              onClick={() =>
+                onSearchOptionsChange({
+                  ...searchOptions,
+                  wholeWord: !searchOptions.wholeWord,
+                })
+              }
+            >
+              <WholeWord className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant={searchOptions.regex ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              aria-label="Use regular expression"
+              aria-pressed={searchOptions.regex}
+              title="Use regular expression"
+              onClick={() =>
+                onSearchOptionsChange({
+                  ...searchOptions,
+                  regex: !searchOptions.regex,
+                })
+              }
+            >
+              <Regex className="size-4" />
+            </Button>
+          </div>
+          {searchError ? (
+            <p
+              role="alert"
+              data-testid="sidebar-search-error"
+              className="text-xs text-destructive"
+            >
+              {searchError}
+            </p>
+          ) : null}
+          {searchBusy ? (
+            <p className="text-xs text-muted-foreground">Searching…</p>
+          ) : searchHasRun ? (
+            totalMatches === 0 ? (
+              <p
+                data-testid="sidebar-search-empty"
+                className="text-xs text-muted-foreground"
+              >
+                No results
+              </p>
+            ) : (
+              <p
+                data-testid="sidebar-search-summary"
+                className="text-xs text-muted-foreground"
+              >
+                {totalMatches} {totalMatches === 1 ? 'result' : 'results'} in {searchResults.length}{' '}
+                {searchResults.length === 1 ? 'file' : 'files'}
+              </p>
+            )
+          ) : (
+            <p className="text-xs text-muted-foreground">Press Enter to search</p>
+          )}
+          {searchResults.length > 0 ? (
+            <ScrollArea className="max-h-[520px] pr-1">
+              <div className="flex flex-col gap-3">
+                {searchResults.map((file) => (
+                  <div key={file.path} className="flex flex-col gap-1">
+                    <button
+                      type="button"
+                      className="flex flex-col items-start gap-0 truncate rounded-md px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                      title={file.path}
+                      onClick={() => onSelectSearchMatch(file, file.matches[0])}
+                    >
+                      <span className="truncate text-xs font-semibold">
+                        {displayFileName(file.path)}
+                      </span>
+                      <span className="w-full truncate text-[10px] text-muted-foreground">
+                        {displayWorkspacePath(file.path, rootDir)}
+                      </span>
+                    </button>
+                    <div className="flex flex-col gap-0.5 pl-2">
+                      {file.matches.map((match, idx) => (
+                        <button
+                          key={`${file.path}-${match.absoluteOffset}-${idx}`}
+                          type="button"
+                          data-testid="sidebar-search-match"
+                          className="flex items-baseline gap-2 rounded px-2 py-0.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                          onClick={() => onSelectSearchMatch(file, match)}
+                          title={`Line ${match.line}`}
+                        >
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {match.line}
+                          </span>
+                          <span className="min-w-0 truncate">
+                            {renderPreviewWithHighlight(match)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : null}
         </section>
       ) : (
         <>
@@ -177,5 +373,21 @@ export function SideBar({
         </>
       )}
     </aside>
+  );
+}
+
+function renderPreviewWithHighlight(match: SearchResultMatch) {
+  const { preview, matchStart, matchEnd } = match;
+  const safeStart = Math.max(0, Math.min(matchStart, preview.length));
+  const safeEnd = Math.max(safeStart, Math.min(matchEnd, preview.length));
+  const before = preview.slice(0, safeStart);
+  const hit = preview.slice(safeStart, safeEnd);
+  const after = preview.slice(safeEnd);
+  return (
+    <>
+      <span className="text-muted-foreground">{before}</span>
+      <mark className="rounded bg-yellow-500/20 px-0.5 text-foreground">{hit}</mark>
+      <span className="text-muted-foreground">{after}</span>
+    </>
   );
 }

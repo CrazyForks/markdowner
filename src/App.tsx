@@ -50,7 +50,13 @@ import { EditorArea } from '@/shell/EditorArea';
 import { FindReplaceBar } from '@/shell/FindReplaceBar';
 import { Tabs } from '@/shell/Tabs';
 import { QuickOpen, type QuickOpenItem } from '@/shell/QuickOpen';
-import { SideBar, type OutlineItem, type SideBarPanel } from '@/shell/SideBar';
+import {
+  SideBar,
+  type OutlineItem,
+  type SearchResultFile,
+  type SearchResultMatch,
+  type SideBarPanel,
+} from '@/shell/SideBar';
 import { StatusBar } from '@/shell/StatusBar';
 import { SettingsPanel } from '@/shell/SettingsPanel';
 
@@ -75,6 +81,7 @@ import {
   quitApp,
   loadOpenTabs,
   saveOpenTabs,
+  searchWorkspace,
 } from './lib/desktop';
 import {
   findTextMatches,
@@ -90,6 +97,7 @@ import {
   OUTLINE_ROW_SPACING_MAX,
   OUTLINE_ROW_SPACING_MIN,
   type Settings,
+  installCliLauncher,
   loadSettings,
   recordDiagnosticsEvent,
   saveSettings,
@@ -742,6 +750,18 @@ export default function App() {
     regex: false,
   });
   const [activeFindMatchIndex, setActiveFindMatchIndex] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOptions, setSearchOptions] = useState<FindReplaceOptions>({
+    caseSensitive: false,
+    wholeWord: false,
+    regex: false,
+  });
+  const [searchResults, setSearchResults] = useState<SearchResultFile[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchHasRun, setSearchHasRun] = useState(false);
+  const [searchFocusToken, setSearchFocusToken] = useState(0);
+  const searchRequestIdRef = useRef(0);
   const [shellAnnouncement, setShellAnnouncement] = useState('');
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [debouncedLocalDraft, setDebouncedLocalDraft] = useState(localDraft);
@@ -1067,6 +1087,86 @@ export default function App() {
     writeSidebarState(true);
     announceShell('Outline sidebar shown');
   });
+
+  const handleOpenSearchPanel = useEffectEvent(() => {
+    const wasAlreadyVisible = isSidebarOpen && sidebarPanel === 'search';
+    setSidebarPanel('search');
+    setIsSidebarOpen(true);
+    writeSidebarState(true);
+    setSearchFocusToken((value) => value + 1);
+    announceShell(wasAlreadyVisible ? 'Search panel focused' : 'Search sidebar shown');
+  });
+
+  const handleSearchQueryChange = (value: string) => {
+    setSearchQuery(value);
+    if (value.length === 0) {
+      setSearchResults([]);
+      setSearchError(null);
+      setSearchHasRun(false);
+    }
+  };
+
+  const handleSearchOptionsChange = (next: FindReplaceOptions) => {
+    setSearchOptions(next);
+  };
+
+  const handleRunWorkspaceSearch = useEffectEvent(async () => {
+    const trimmed = searchQuery.trim();
+    if (trimmed.length === 0) {
+      setSearchResults([]);
+      setSearchError(null);
+      setSearchHasRun(false);
+      return;
+    }
+
+    const requestId = searchRequestIdRef.current + 1;
+    searchRequestIdRef.current = requestId;
+    setSearchBusy(true);
+    setSearchError(null);
+
+    try {
+      const paths = snapshot.workspaceDocuments;
+      const result = await searchWorkspace(searchQuery, searchOptions, paths);
+      if (searchRequestIdRef.current !== requestId) return;
+      setSearchResults(result.files);
+      setSearchHasRun(true);
+    } catch (error) {
+      if (searchRequestIdRef.current !== requestId) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setSearchError(message || 'Search failed');
+      setSearchResults([]);
+      setSearchHasRun(true);
+    } finally {
+      if (searchRequestIdRef.current === requestId) {
+        setSearchBusy(false);
+      }
+    }
+  });
+
+  const handleSelectSearchMatch = useEffectEvent(
+    async (file: SearchResultFile, match: SearchResultMatch | undefined) => {
+      const targetMatch = match ?? file.matches[0];
+      const existing = findTabByPath(file.path);
+      if (existing) {
+        await switchToTab(existing.id);
+      } else {
+        await withBusy(async () => {
+          stashActiveTabDraft();
+          await syncActiveDraftBestEffort();
+          const next = await openWorkspaceDocument(file.path);
+          applySnapshot(next);
+          upsertActiveTabFromSnapshot(next);
+        });
+      }
+      if (targetMatch) {
+        const offset = targetMatch.absoluteOffset;
+        const end = offset + (targetMatch.matchEnd - targetMatch.matchStart);
+        window.setTimeout(() => {
+          focusSourceSelection(offset, end);
+        }, 16);
+      }
+    },
+  );
 
   const handleSelectOutlineItem = useEffectEvent((item: OutlineItem) => {
     if (currentMode === 'Wysiwyg') {
@@ -2630,9 +2730,19 @@ export default function App() {
         return;
       }
 
+      if (matchesShortcut(event, 'f', { shift: true })) {
+        event.preventDefault();
+        handleOpenSearchPanel();
+        return;
+      }
+
       if (matchesShortcut(event, 'f')) {
         event.preventDefault();
-        openFindReplace(false);
+        if (activeDocumentOpen) {
+          openFindReplace(false);
+        } else {
+          handleOpenSearchPanel();
+        }
         return;
       }
 
@@ -2777,12 +2887,6 @@ export default function App() {
         if (target && target.id !== activeTabId) {
           void switchToTab(target.id);
         }
-        return;
-      }
-
-      if (matchesShortcut(event, 'f', { shift: true })) {
-        event.preventDefault();
-        handleSettingsChange({ ...settings, focusModeEnabled: !settings.focusModeEnabled });
         return;
       }
 
@@ -3135,6 +3239,21 @@ export default function App() {
       shortcut: '⌘P',
       run: () => setIsQuickOpenOpen(true),
     },
+    {
+      id: 'view.searchInFiles',
+      category: 'View',
+      label: 'Search: Find in Files',
+      shortcut: '⌘⇧F',
+      run: () => handleOpenSearchPanel(),
+    },
+    {
+      id: 'view.findInFile',
+      category: 'View',
+      label: 'Find in Current File',
+      shortcut: '⌘F',
+      disabled: !activeDocumentOpen,
+      run: () => openFindReplace(false),
+    },
     ...EDITOR_MODE_OPTIONS.map((option) => ({
       id: `view.mode.${option.mode}`,
       category: 'View',
@@ -3146,7 +3265,6 @@ export default function App() {
       id: 'preferences.toggleFocusMode',
       category: 'Preferences',
       label: settings.focusModeEnabled ? 'Disable Focus Mode' : 'Enable Focus Mode',
-      shortcut: '⌘⇧F',
       run: () => handleSettingsChange({ ...settings, focusModeEnabled: !settings.focusModeEnabled }),
     },
     {
@@ -3175,6 +3293,25 @@ export default function App() {
       label: 'Open Settings',
       shortcut: '⌘,',
       run: () => void toggleSettingsTab(),
+    },
+    {
+      id: 'app.installCliLauncher',
+      category: 'Preferences',
+      label: 'Install Markdowner in PATH',
+      run: () => {
+        void (async () => {
+          try {
+            const result = await installCliLauncher();
+            announceShell(
+              result.alreadyInstalled
+                ? `Markdowner CLI already installed in ${result.shellConfigPath}`
+                : `Installed Markdowner CLI in ${result.shellConfigPath}`,
+            );
+          } catch (error) {
+            reportOperationError(error, 'Could not install Markdowner CLI launcher');
+          }
+        })();
+      },
     },
     {
       id: 'app.documentStats',
@@ -3276,12 +3413,12 @@ export default function App() {
       >
         <ActivityBar
           onOpenSettings={() => void toggleSettingsTab()}
-          onOpenQuickOpen={() => setIsQuickOpenOpen(true)}
+          onOpenSearch={handleOpenSearchPanel}
           onOpenOutline={handleOpenOutlinePanel}
           onToggleSidebar={handleOpenFilesPanel}
           isSidebarOpen={isSidebarOpen && sidebarPanel === 'files'}
           isSettingsOpen={isSettingsTabActive}
-          isQuickOpenOpen={isQuickOpenOpen}
+          isSearchOpen={isSidebarOpen && sidebarPanel === 'search'}
           isOutlineOpen={isSidebarOpen && sidebarPanel === 'outline'}
         />
         <SideBar
@@ -3315,6 +3452,17 @@ export default function App() {
             ),
           )}
           onSelectOutlineItem={handleSelectOutlineItem}
+          searchQuery={searchQuery}
+          searchOptions={searchOptions}
+          searchResults={searchResults}
+          searchBusy={searchBusy}
+          searchError={searchError}
+          searchHasRun={searchHasRun}
+          searchAutoFocusToken={searchFocusToken}
+          onSearchQueryChange={handleSearchQueryChange}
+          onSearchOptionsChange={handleSearchOptionsChange}
+          onRunSearch={() => void handleRunWorkspaceSearch()}
+          onSelectSearchMatch={(file, match) => void handleSelectSearchMatch(file, match)}
         />
         <div
           role="separator"
