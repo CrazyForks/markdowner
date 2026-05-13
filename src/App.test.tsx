@@ -496,7 +496,7 @@ describe('App recent documents', () => {
       within(toolbar).getByRole('button', { name: /^explorer \(cmd\+shift\+b\)$/i }),
     ).toBeInTheDocument();
     expect(
-      within(toolbar).getByRole('button', { name: /^quick open \(cmd\+p\)$/i }),
+      within(toolbar).getByRole('button', { name: /^search \(cmd\+shift\+f\)$/i }),
     ).toBeInTheDocument();
     expect(
       within(toolbar).getByRole('button', { name: /^outline$/i }),
@@ -534,7 +534,7 @@ describe('App recent documents', () => {
       fireEvent.click(openWorkspaceButton);
       await waitFor(() => expect(openDialogMock).toHaveBeenCalledTimes(2));
 
-      fireEvent.click(screen.getByRole('button', { name: /^quick open \(cmd\+p\)$/i }));
+      fireEvent.keyDown(window, { key: 'p', metaKey: true });
       const quickOpenDialog = await screen.findByRole('dialog', { name: /quick open/i });
       const quickOpenInput = within(quickOpenDialog).getByRole('textbox', {
         name: /quick open file search/i,
@@ -633,7 +633,7 @@ describe('App recent documents', () => {
       const agendaHeading = await screen.findByRole('button', { name: /^agenda$/i });
       fireEvent.click(agendaHeading);
 
-      fireEvent.click(screen.getByRole('button', { name: /^quick open \(cmd\+p\)$/i }));
+      fireEvent.keyDown(window, { key: 'p', metaKey: true });
       const quickOpenDialog = await screen.findByRole('dialog', { name: /quick open/i });
       fireEvent.change(
         within(quickOpenDialog).getByRole('textbox', {
@@ -1599,7 +1599,7 @@ describe('App recent documents', () => {
     expect(splitToggle).toHaveAttribute('aria-keyshortcuts', 'Meta+K Meta+S');
   });
 
-  it('exposes aria-keyshortcuts on the ActivityBar Explorer/Quick Open/Settings buttons', async () => {
+  it('exposes aria-keyshortcuts on the ActivityBar Explorer/Search/Settings buttons', async () => {
     bootstrapMock.mockResolvedValue(baseSnapshot());
 
     const { default: App } = await import('./App');
@@ -1609,15 +1609,15 @@ describe('App recent documents', () => {
     const explorerButton = await waitFor(() =>
       within(view.container).getByRole('button', { name: /^explorer \(cmd\+shift\+b\)$/i }),
     );
-    const quickOpenButton = within(view.container).getByRole('button', {
-      name: /^quick open \(cmd\+p\)$/i,
+    const searchButton = within(view.container).getByRole('button', {
+      name: /^search \(cmd\+shift\+f\)$/i,
     });
     const settingsButton = within(view.container).getByRole('button', {
       name: /^settings \(cmd\+,\)$/i,
     });
 
     expect(explorerButton).toHaveAttribute('aria-keyshortcuts', 'Meta+Shift+B Control+Shift+B');
-    expect(quickOpenButton).toHaveAttribute('aria-keyshortcuts', 'Meta+P Control+P');
+    expect(searchButton).toHaveAttribute('aria-keyshortcuts', 'Meta+Shift+F Control+Shift+F');
     expect(settingsButton).toHaveAttribute('aria-keyshortcuts', 'Meta+, Control+,');
   });
 
@@ -2883,7 +2883,7 @@ describe('App recent documents', () => {
     expect(headers[1]).toHaveTextContent(/recent files/i);
   });
 
-  it('opens the Quick Open dialog when the Activity Bar Search button is clicked', async () => {
+  it('opens the Search sidebar panel when the Activity Bar Search button is clicked', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         rootDir: '/tmp/project',
@@ -2895,10 +2895,11 @@ describe('App recent documents', () => {
 
     render(<App />);
 
-    const searchButton = await screen.findByRole('button', { name: /quick open \(cmd\+p\)/i });
+    const searchButton = await screen.findByRole('button', { name: /search \(cmd\+shift\+f\)/i });
     fireEvent.click(searchButton);
 
-    await screen.findByRole('dialog', { name: /quick open/i });
+    await screen.findByTestId('sidebar-search-panel');
+    expect(searchButton).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('opens Quick Open without mounting the shared Radix dialog overlay', async () => {
@@ -2928,21 +2929,21 @@ describe('App recent documents', () => {
     expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
   });
 
-  it('marks the Activity Bar Search button as pressed while the Quick Open dialog is open', async () => {
+  it('marks the Activity Bar Search button as pressed while the Search sidebar panel is open', async () => {
     bootstrapMock.mockResolvedValue(baseSnapshot());
 
     const { default: App } = await import('./App');
 
     render(<App />);
 
-    const searchButton = await screen.findByRole('button', { name: /quick open \(cmd\+p\)/i });
+    const searchButton = await screen.findByRole('button', { name: /search \(cmd\+shift\+f\)/i });
     const settingsButton = await screen.findByRole('button', { name: /settings \(cmd\+,\)/i });
 
     expect(searchButton).toHaveAttribute('aria-pressed', 'false');
     expect(settingsButton).toHaveAttribute('aria-pressed', 'false');
 
     fireEvent.click(searchButton);
-    await screen.findByRole('dialog', { name: /quick open/i });
+    await screen.findByTestId('sidebar-search-panel');
 
     expect(searchButton).toHaveAttribute('aria-pressed', 'true');
     expect(settingsButton).toHaveAttribute('aria-pressed', 'false');
@@ -2955,7 +2956,7 @@ describe('App recent documents', () => {
 
     render(<App />);
 
-    const searchButton = await screen.findByRole('button', { name: /quick open \(cmd\+p\)/i });
+    const searchButton = await screen.findByRole('button', { name: /search \(cmd\+shift\+f\)/i });
     const settingsButton = await screen.findByRole('button', { name: /settings \(cmd\+,\)/i });
 
     fireEvent.click(settingsButton);
@@ -3069,6 +3070,7 @@ describe('App recent documents', () => {
   });
 
   it('announces sidebar panel visibility changes without visible UI text', async () => {
+    window.localStorage.removeItem('markdowner.sidebarOpen');
     bootstrapMock.mockResolvedValue(baseSnapshot());
 
     const { default: App } = await import('./App');
@@ -3077,7 +3079,7 @@ describe('App recent documents', () => {
 
     await screen.findByRole('button', { name: /^new file$/i });
     const liveRegion = screen.getByTestId('shell-live-region');
-    const explorerButton = screen.getByRole('button', { name: /explorer/i });
+    const explorerButton = screen.getByRole('button', { name: /^explorer/i });
 
     fireEvent.click(explorerButton);
 
