@@ -2095,6 +2095,7 @@ name = "markdowner-desktop"
 version = "0.1.0"
 dependencies = [
  "markdowner-core",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

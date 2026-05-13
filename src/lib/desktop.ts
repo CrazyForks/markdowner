@@ -82,6 +82,42 @@ export async function quitApp() {
   return invoke<void>('quit_app');
 }
 
+export interface WorkspaceSearchOptions {
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+}
+
+export interface WorkspaceSearchMatch {
+  line: number;
+  column: number;
+  preview: string;
+  matchStart: number;
+  matchEnd: number;
+  absoluteOffset: number;
+}
+
+export interface WorkspaceSearchFile {
+  path: string;
+  matches: WorkspaceSearchMatch[];
+}
+
+export interface WorkspaceSearchResult {
+  files: WorkspaceSearchFile[];
+}
+
+export async function searchWorkspace(
+  query: string,
+  options: WorkspaceSearchOptions,
+  paths: string[],
+): Promise<WorkspaceSearchResult> {
+  return invoke<WorkspaceSearchResult>('search_workspace', {
+    query,
+    options,
+    paths,
+  });
+}
+
 export interface OpenTabsPayload {
   openTabs: string[];
   activeTabPath: string | null;
