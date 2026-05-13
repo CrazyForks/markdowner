@@ -2386,6 +2386,8 @@ describe('App recent documents', () => {
     expect(findInput).toHaveFocus();
 
     fireEvent.change(findInput, { target: { value: 'alpha' } });
+    expect(within(search).getByText(/press enter to search/i)).toBeInTheDocument();
+    fireEvent.keyDown(findInput, { key: 'Enter' });
 
     await waitFor(() => {
       expect(within(search).getByText('1 of 3')).toBeInTheDocument();
@@ -2426,6 +2428,7 @@ describe('App recent documents', () => {
 
     fireEvent.click(within(search).getByRole('button', { name: /use regular expression/i }));
     fireEvent.change(findInput, { target: { value: 'todo (\\d+)' } });
+    fireEvent.keyDown(findInput, { key: 'Enter' });
     fireEvent.change(replaceInput, { target: { value: 'done $1' } });
 
     await waitFor(() => {
@@ -2468,6 +2471,7 @@ describe('App recent documents', () => {
     const findInput = within(search).getByRole('textbox', { name: /find text/i });
 
     fireEvent.change(findInput, { target: { value: 'alpha' } });
+    fireEvent.keyDown(findInput, { key: 'Enter' });
 
     await waitFor(() => {
       expect(within(search).getByText('1 of 3')).toBeInTheDocument();
@@ -2509,6 +2513,7 @@ describe('App recent documents', () => {
     const replaceInput = within(search).getByRole('textbox', { name: /replace text/i });
 
     fireEvent.change(findInput, { target: { value: 'مرحبا' } });
+    fireEvent.keyDown(findInput, { key: 'Enter' });
     fireEvent.change(replaceInput, { target: { value: 'أهلا' } });
 
     await waitFor(() => {
@@ -2523,6 +2528,44 @@ describe('App recent documents', () => {
       expect(editor.view.dispatch).toHaveBeenCalled();
       expect(screen.getByTestId('mock-tiptap-editor')).toHaveAttribute('data-selection-from', '1');
       expect(within(search).getByText('No matches')).toBeInTheDocument();
+    });
+  });
+
+  it('defers source find search until Enter is pressed', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: '# Alpha\n\nBeta alpha\nAlpha',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByRole('textbox', { name: /source editor/i });
+    const initialSelectionStart = (sourceEditor as HTMLTextAreaElement).selectionStart;
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+
+    const search = await screen.findByRole('search', { name: /find and replace/i });
+    const findInput = within(search).getByRole('textbox', { name: /find text/i });
+
+    fireEvent.change(findInput, { target: { value: 'alpha' } });
+
+    // Typing alone does not run the search: the prompt asks for Enter and the
+    // editor selection has not moved to a match.
+    expect(within(search).getByText(/press enter to search/i)).toBeInTheDocument();
+    expect(within(search).queryByText(/of /i)).toBeNull();
+    expect((sourceEditor as HTMLTextAreaElement).selectionStart).toBe(initialSelectionStart);
+
+    fireEvent.keyDown(findInput, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(within(search).getByText('1 of 3')).toBeInTheDocument();
+      expect((sourceEditor as HTMLTextAreaElement).selectionStart).toBe(2);
     });
   });
 

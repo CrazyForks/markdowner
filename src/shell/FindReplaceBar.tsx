@@ -8,7 +8,7 @@ import {
   WholeWord,
   X,
 } from 'lucide-react';
-import { type KeyboardEvent, useEffect, useRef } from 'react';
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -55,20 +55,33 @@ export function FindReplaceBar({
   onClose,
 }: FindReplaceBarProps) {
   const findInputRef = useRef<HTMLInputElement | null>(null);
+  // Buffer the find input locally so live typing does not re-run the search on
+  // every keystroke. The committed query (parent state) only advances when the
+  // user presses Enter.
+  const [inputValue, setInputValue] = useState(query);
   const hasMatches = matchCount > 0;
-  const replaceDisabled = !hasMatches || !canReplace;
+  const hasPendingQuery = inputValue !== query;
+  const replaceDisabled = !hasMatches || !canReplace || hasPendingQuery;
   const matchStatus = error
     ? error
-    : query.length === 0
-      ? 'No query'
-      : hasMatches
-        ? `${activeMatchNumber} of ${matchCount}`
-        : 'No matches';
+    : hasPendingQuery
+      ? 'Press Enter to search'
+      : query.length === 0
+        ? 'No query'
+        : hasMatches
+          ? `${activeMatchNumber} of ${matchCount}`
+          : 'No matches';
 
   useEffect(() => {
     findInputRef.current?.focus();
     findInputRef.current?.select();
   }, []);
+
+  // Re-sync local input when the committed query changes from outside (e.g.
+  // bar reopens with a previously-stored query).
+  useEffect(() => {
+    setInputValue(query);
+  }, [query]);
 
   const toggleOption = (key: keyof FindReplaceOptions) => {
     onOptionsChange({ ...options, [key]: !options[key] });
@@ -83,6 +96,10 @@ export function FindReplaceBar({
     }
     if (event.key === 'Enter') {
       event.preventDefault();
+      if (hasPendingQuery) {
+        onQueryChange(inputValue);
+        return;
+      }
       if (event.shiftKey) {
         onPreviousMatch();
       } else {
@@ -106,8 +123,8 @@ export function FindReplaceBar({
         <Input
           id="markdowner-find-text"
           ref={findInputRef}
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
+          value={inputValue}
+          onChange={(event) => setInputValue(event.target.value)}
           placeholder="Find"
           className="h-7 min-w-0 flex-1 text-sm"
           aria-invalid={error ? true : undefined}
