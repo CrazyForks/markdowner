@@ -1088,13 +1088,26 @@ export default function App() {
     announceShell('Outline sidebar shown');
   });
 
-  const handleOpenSearchPanel = useEffectEvent(() => {
+  const handleToggleSearchPanel = useEffectEvent(() => {
+    setSidebarPanel('search');
+    setIsSidebarOpen((current) => {
+      const next = current && sidebarPanel === 'search' ? !current : true;
+      writeSidebarState(next);
+      announceShell(next ? 'Search sidebar shown' : 'Sidebar hidden');
+      return next;
+    });
+    setSearchFocusToken((value) => value + 1);
+  });
+
+  const handleFocusSearchPanel = useEffectEvent(() => {
     const wasAlreadyVisible = isSidebarOpen && sidebarPanel === 'search';
     setSidebarPanel('search');
     setIsSidebarOpen(true);
     writeSidebarState(true);
     setSearchFocusToken((value) => value + 1);
-    announceShell(wasAlreadyVisible ? 'Search panel focused' : 'Search sidebar shown');
+    if (!wasAlreadyVisible) {
+      announceShell('Search sidebar shown');
+    }
   });
 
   const handleSearchQueryChange = (value: string) => {
@@ -2732,7 +2745,7 @@ export default function App() {
 
       if (matchesShortcut(event, 'f', { shift: true })) {
         event.preventDefault();
-        handleOpenSearchPanel();
+        handleFocusSearchPanel();
         return;
       }
 
@@ -2741,7 +2754,7 @@ export default function App() {
         if (activeDocumentOpen) {
           openFindReplace(false);
         } else {
-          handleOpenSearchPanel();
+          handleFocusSearchPanel();
         }
         return;
       }
@@ -3244,7 +3257,7 @@ export default function App() {
       category: 'View',
       label: 'Search: Find in Files',
       shortcut: '⌘⇧F',
-      run: () => handleOpenSearchPanel(),
+      run: () => handleFocusSearchPanel(),
     },
     {
       id: 'view.findInFile',
@@ -3413,7 +3426,7 @@ export default function App() {
       >
         <ActivityBar
           onOpenSettings={() => void toggleSettingsTab()}
-          onOpenSearch={handleOpenSearchPanel}
+          onOpenSearch={handleToggleSearchPanel}
           onOpenOutline={handleOpenOutlinePanel}
           onToggleSidebar={handleOpenFilesPanel}
           isSidebarOpen={isSidebarOpen && sidebarPanel === 'files'}
