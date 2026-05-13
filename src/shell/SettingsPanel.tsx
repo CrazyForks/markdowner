@@ -32,6 +32,8 @@ const toggleFieldClass =
   'grid gap-2 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center sm:gap-4';
 const toggleGroupClass = 'h-auto w-full min-w-0 flex-wrap justify-start';
 const toggleItemClass = 'min-w-0 flex-1 basis-[5.75rem] sm:flex-none sm:basis-auto';
+const sectionBodyClass = 'flex flex-col gap-4';
+const sectionGroupClass = 'flex flex-col gap-3';
 
 export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps) {
   const [aliasCopied, setAliasCopied] = useState(false);
@@ -113,20 +115,20 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
       </header>
       <div
         data-testid="settings-panel-body"
-        className="mx-auto grid w-full max-w-2xl flex-1 gap-4 overflow-y-auto px-6 py-6"
+        className={`mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-6 py-6 ${sectionBodyClass}`}
       >
-        <div data-testid="settings-cli-launcher" className="grid min-w-0 gap-2">
+        <div data-testid="settings-cli-launcher" className="flex min-w-0 flex-col gap-2">
           <h4 className="text-sm font-medium leading-none">CLI Launcher</h4>
           <p className="text-sm text-muted-foreground">
             Install the markdowner command in your shell config or copy the alias manually.
           </p>
           <div
             data-testid="settings-cli-controls"
-            className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-start"
+            className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center"
           >
             <div
               data-testid="settings-cli-alias-copy"
-              className="min-w-0 overflow-hidden rounded bg-muted p-2"
+              className="min-w-0 flex-1 overflow-hidden rounded bg-muted px-2 py-1.5"
             >
               <code
                 data-testid="settings-cli-alias-command"
@@ -135,29 +137,31 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
                 {CLI_ALIAS_COMMAND}
               </code>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleCopyAlias}
-              aria-label="Copy CLI alias command"
-              title={aliasCopied ? 'Copied!' : 'Copy alias command'}
-              className="w-full sm:w-auto"
-            >
-              {aliasCopied ? <Check /> : <Copy />}
-              Copy
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleInstallCliLauncher}
-              disabled={cliLauncherInstalling}
-              aria-label="Install CLI Launcher"
-              className="w-full sm:w-auto"
-            >
-              <Terminal />
-              {cliLauncherInstalling ? 'Installing' : 'Install'}
-            </Button>
+            <div className="flex shrink-0 gap-2 sm:flex-row">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleCopyAlias}
+                aria-label="Copy CLI alias command"
+                title={aliasCopied ? 'Copied!' : 'Copy alias command'}
+                className="flex-1 sm:flex-none"
+              >
+                {aliasCopied ? <Check /> : <Copy />}
+                Copy
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleInstallCliLauncher}
+                disabled={cliLauncherInstalling}
+                aria-label="Install CLI Launcher"
+                className="flex-1 sm:flex-none"
+              >
+                <Terminal />
+                {cliLauncherInstalling ? 'Installing' : 'Install'}
+              </Button>
+            </div>
           </div>
           <p
             data-testid="settings-cli-launcher-status"
@@ -168,7 +172,7 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
           </p>
         </div>
         <Separator />
-        <div className="grid gap-3">
+        <div className={sectionGroupClass}>
           <h4 className="text-sm font-medium leading-none">Editor Preferences</h4>
 
           <div className={switchFieldClass}>

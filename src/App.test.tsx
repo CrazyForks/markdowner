@@ -3744,12 +3744,12 @@ describe('App recent documents', () => {
     const pdfPaperSizeToggle = within(panel).getByTestId('settings-pdf-paper-size-toggle');
 
     expect(panel).toHaveClass('flex', 'min-h-0', 'overflow-hidden');
-    expect(body).toHaveClass('overflow-y-auto');
-    expect(cliLauncher).toHaveClass('min-w-0');
-    expect(cliControls).toHaveClass('grid', 'min-w-0');
+    expect(body).toHaveClass('flex', 'flex-col', 'overflow-y-auto');
+    expect(cliLauncher).toHaveClass('flex', 'flex-col', 'min-w-0');
+    expect(cliControls).toHaveClass('flex', 'min-w-0');
     expect(aliasSnippet).toHaveClass('block', 'min-w-0', 'whitespace-pre-wrap', 'break-all');
-    expect(copyAliasButton).toHaveClass('w-full');
-    expect(installLauncherButton).toHaveClass('w-full');
+    expect(copyAliasButton).toHaveClass('flex-1');
+    expect(installLauncherButton).toHaveClass('flex-1');
     expect(fontFamilyRow).toHaveClass('grid', 'gap-2');
     expect(fontFamilyInput).toHaveClass('w-full', 'min-w-0');
     expect(defaultModeToggle).toHaveClass('h-auto', 'w-full', 'flex-wrap');
