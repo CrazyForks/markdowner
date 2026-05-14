@@ -96,23 +96,24 @@ const FILE_MENU_COMMANDS: &[MenuCommandDescriptor] = &[
     },
 ];
 
-// View mode shortcuts use a chord (Cmd+K Cmd+E/W/S) handled in the frontend.
+// View mode shortcuts use a chord (Cmd+K Cmd+E/W/S) plus an Alt+digit
+// alternative — both are handled in the frontend keydown listener.
 // macOS NSMenu cannot display chord accelerators, so we surface the chord in
 // the label instead and leave the accelerator unset.
 const VIEW_MENU_COMMANDS: &[MenuCommandDescriptor] = &[
     MenuCommandDescriptor {
-        id: MENU_COMMAND_SET_MODE_EDITOR,
-        label: "Editor (⌘K ⌘E)",
+        id: MENU_COMMAND_SET_MODE_WYSIWYG,
+        label: "WYSIWYG (⌥1 · ⌘K ⌘W)",
         accelerator: None,
     },
     MenuCommandDescriptor {
-        id: MENU_COMMAND_SET_MODE_WYSIWYG,
-        label: "WYSIWYG (⌘K ⌘W)",
+        id: MENU_COMMAND_SET_MODE_EDITOR,
+        label: "Editor (⌥2 · ⌘K ⌘E)",
         accelerator: None,
     },
     MenuCommandDescriptor {
         id: MENU_COMMAND_SET_MODE_SPLITVIEW,
-        label: "Split-view (⌘K ⌘S)",
+        label: "Split-view (⌥3 · ⌘K ⌘S)",
         accelerator: None,
     },
 ];
@@ -1511,8 +1512,8 @@ mod tests {
                 .map(|descriptor| descriptor.id)
                 .collect::<Vec<_>>(),
             vec![
-                super::MENU_COMMAND_SET_MODE_EDITOR,
                 super::MENU_COMMAND_SET_MODE_WYSIWYG,
+                super::MENU_COMMAND_SET_MODE_EDITOR,
                 MENU_COMMAND_SET_MODE_SPLITVIEW,
             ]
         );
@@ -1528,7 +1529,11 @@ mod tests {
                 .iter()
                 .map(|descriptor| descriptor.label)
                 .collect::<Vec<_>>(),
-            vec!["Editor (⌘K ⌘E)", "WYSIWYG (⌘K ⌘W)", "Split-view (⌘K ⌘S)"]
+            vec![
+                "WYSIWYG (⌥1 · ⌘K ⌘W)",
+                "Editor (⌥2 · ⌘K ⌘E)",
+                "Split-view (⌥3 · ⌘K ⌘S)",
+            ]
         );
     }
 
