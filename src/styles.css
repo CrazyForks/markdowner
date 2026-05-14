@@ -134,6 +134,19 @@
 
 /* Markdown surfaces (TipTap WYSIWYG / preview) */
 @layer components {
+  .explorer-sidebar {
+    @apply gap-0 overflow-hidden p-0 text-[13px];
+  }
+  .explorer-section {
+    @apply min-w-0;
+  }
+  .explorer-section-header {
+    @apply flex h-6 items-center gap-1 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground;
+  }
+  .explorer-tree-row {
+    @apply min-h-6 px-2 leading-none outline-none focus-visible:ring-2 focus-visible:ring-ring/50;
+  }
+
   .markdown-surface {
     @apply text-foreground leading-relaxed;
   }
@@ -218,6 +231,55 @@
   }
   .markdown-surface ul[data-type="taskList"] li > label {
     @apply mt-1;
+  }
+
+  .notion-wysiwyg-surface {
+    @apply bg-background px-5 py-6;
+  }
+  .notion-editor-shell {
+    @apply mx-auto flex min-h-full w-full max-w-[860px] flex-col;
+  }
+  .notion-page-header {
+    @apply mx-auto w-full max-w-[760px] pb-4 pt-8;
+  }
+  .notion-page-icon {
+    @apply mb-4 flex size-12 items-center justify-center rounded-md bg-muted text-2xl font-semibold text-muted-foreground;
+  }
+  .markdown-surface .notion-page-title {
+    @apply my-0 text-[40px] font-bold leading-tight tracking-normal text-foreground;
+  }
+  .notion-editor-content {
+    @apply mx-auto w-full max-w-[760px] pb-24;
+  }
+  .notion-editor-content .ProseMirror {
+    @apply min-h-[55vh] px-0 py-2 text-[17px] leading-7 outline-none;
+  }
+  .notion-editor-content .ProseMirror > * {
+    @apply relative my-1 rounded-sm px-1 transition-colors;
+  }
+  .notion-editor-content .ProseMirror > *:hover {
+    @apply bg-muted/35;
+  }
+  .notion-editor-content .ProseMirror h1,
+  .notion-editor-content .ProseMirror h2,
+  .notion-editor-content .ProseMirror h3 {
+    @apply mt-6 mb-2 px-1 tracking-normal;
+  }
+  .notion-editor-content .ProseMirror p {
+    @apply my-1 min-h-7 px-1;
+  }
+  .notion-editor-content .ProseMirror ul,
+  .notion-editor-content .ProseMirror ol {
+    @apply my-1 pl-7;
+  }
+  .notion-editor-content .ProseMirror blockquote {
+    @apply my-3 border-l-[3px] border-muted-foreground/40 pl-4 text-muted-foreground;
+  }
+  .notion-editor-content .ProseMirror pre {
+    @apply my-3 rounded-md border border-border bg-muted/70 p-4;
+  }
+  .notion-editor-content .ProseMirror table {
+    @apply my-3 overflow-hidden rounded-md border border-border;
   }
 }
 

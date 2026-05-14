@@ -41,4 +41,15 @@ describe('EditorArea mode switch', () => {
     const surface = screen.getByTestId('editor-surface-source');
     expect(surface.className).toContain('editor-pane-source');
   });
+
+  it('wraps WYSIWYG content in a Notion-like page surface with the active document title', () => {
+    render(<EditorArea {...baseProps} currentMode="Wysiwyg" activeDocumentName="project-plan.md" />);
+
+    const shell = screen.getByTestId('notion-editor-shell');
+
+    expect(shell).toBeInTheDocument();
+    expect(shell).toHaveClass('notion-editor-shell');
+    expect(screen.getByRole('heading', { name: 'project-plan' })).toBeInTheDocument();
+    expect(screen.getByTestId('wysiwyg-marker').parentElement).toHaveClass('notion-editor-content');
+  });
 });

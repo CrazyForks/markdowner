@@ -2,7 +2,17 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
-import { CaseSensitive, Regex, WholeWord } from 'lucide-react';
+import {
+  CaseSensitive,
+  ChevronDown,
+  FilePlus,
+  FileText,
+  FolderOpen,
+  ListCollapse,
+  Regex,
+  WholeWord,
+  X,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FindReplaceOptions } from '@/lib/findReplace';
 import { ReactNode, useEffect, useRef } from 'react';
@@ -33,17 +43,34 @@ export interface SearchResultFile {
   matches: SearchResultMatch[];
 }
 
+export interface OpenEditorItem {
+  id: string;
+  name: string;
+  path: string | null;
+  isActive: boolean;
+  isDirty: boolean;
+  missing: boolean;
+}
+
 export interface SideBarProps {
   panel: SideBarPanel;
   isOpen: boolean;
   busy: boolean;
+  workspaceName: string | null;
   workspaceFilter: string;
   onWorkspaceFilterChange: (value: string) => void;
   workspaceTreeLength: number;
   filteredWorkspaceTreeLength: number;
+  openEditors: OpenEditorItem[];
   recentDocuments: string[];
   activeDocumentPath: string | null;
   rootDir: string | null;
+  onNewDocument?: () => void;
+  onOpenDocument?: () => void;
+  onOpenWorkspace?: () => void;
+  onCollapseWorkspaceFolders?: () => void;
+  onSelectOpenEditor: (id: string) => void;
+  onCloseOpenEditor: (id: string) => void;
   onOpenRecentDocument: (path: string) => void;
   renderWorkspaceTreeNodes: () => ReactNode;
   displayFileName: (path: string) => string;
@@ -69,13 +96,21 @@ export function SideBar({
   panel,
   isOpen,
   busy,
+  workspaceName,
   workspaceFilter,
   onWorkspaceFilterChange,
   workspaceTreeLength,
   filteredWorkspaceTreeLength,
+  openEditors,
   recentDocuments,
   activeDocumentPath,
   rootDir,
+  onNewDocument,
+  onOpenDocument,
+  onOpenWorkspace,
+  onCollapseWorkspaceFolders,
+  onSelectOpenEditor,
+  onCloseOpenEditor,
   onOpenRecentDocument,
   renderWorkspaceTreeNodes,
   displayFileName,
@@ -100,6 +135,7 @@ export function SideBar({
   const showSearch = panel === 'search';
   const outlinePaddingY = Math.max(2, outlineRowSpacing + 2);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const workspaceSectionTitle = workspaceName ? workspaceName.toUpperCase() : 'NO FOLDER OPENED';
 
   useEffect(() => {
     if (!isOpen || !showSearch) return;
@@ -111,8 +147,10 @@ export function SideBar({
 
   return (
     <aside
+      aria-label={showOutline ? 'Outline' : showSearch ? 'Search' : 'Explorer'}
       className={cn(
-        'flex min-h-0 flex-col gap-5 overflow-y-auto border-r border-border bg-sidebar p-5 text-sidebar-foreground transition-opacity duration-300 ease-in-out',
+        'flex min-h-0 flex-col overflow-y-auto border-r border-border bg-sidebar text-sidebar-foreground transition-opacity duration-300 ease-in-out',
+        showOutline || showSearch ? 'gap-5 p-5' : 'explorer-sidebar',
         !isOpen && 'opacity-0 invisible overflow-hidden p-0 border-r-0',
       )}
     >
@@ -302,10 +340,120 @@ export function SideBar({
           ) : null}
         </section>
       ) : (
-        <>
-          <section className="flex min-h-0 flex-col gap-2">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Files
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex h-9 shrink-0 items-center justify-between px-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground">
+              EXPLORER
+            </div>
+            <div className="flex items-center gap-0.5">
+              {onNewDocument ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="New File in Explorer"
+                  title="New File"
+                  disabled={busy}
+                  onClick={onNewDocument}
+                  className="h-6 w-6 rounded"
+                >
+                  <FilePlus className="size-3.5" />
+                </Button>
+              ) : null}
+              {onOpenDocument ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Open File"
+                  title="Open File"
+                  disabled={busy}
+                  onClick={onOpenDocument}
+                  className="h-6 w-6 rounded"
+                >
+                  <FileText className="size-3.5" />
+                </Button>
+              ) : null}
+              {onOpenWorkspace ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Open Workspace"
+                  title="Open Workspace"
+                  disabled={busy}
+                  onClick={onOpenWorkspace}
+                  className="h-6 w-6 rounded"
+                >
+                  <FolderOpen className="size-3.5" />
+                </Button>
+              ) : null}
+              {onCollapseWorkspaceFolders ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Collapse All"
+                  title="Collapse All"
+                  disabled={busy || workspaceTreeLength === 0}
+                  onClick={onCollapseWorkspaceFolders}
+                  className="h-6 w-6 rounded"
+                >
+                  <ListCollapse className="size-3.5" />
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          <section className="explorer-section border-t border-sidebar-border/70">
+            <div className="explorer-section-header">
+              <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">OPEN EDITORS</span>
+            </div>
+            <div data-testid="explorer-open-editors" className="flex flex-col py-1">
+              {openEditors.length === 0 ? (
+                <p className="px-5 py-1.5 text-xs text-muted-foreground">No open editors</p>
+              ) : (
+                openEditors.map((item) => (
+                  <div
+                    key={item.id}
+                    className={cn(
+                      'group flex min-h-6 items-center gap-1.5 px-2 text-xs',
+                      item.isActive && 'bg-accent text-accent-foreground',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
+                      aria-label="Switch to open editor"
+                      title={item.path ?? item.name}
+                      onClick={() => onSelectOpenEditor(item.id)}
+                    >
+                      <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <span className={cn('truncate', item.missing && 'line-through opacity-70')}>
+                        {item.name}
+                      </span>
+                      {item.isDirty ? <span aria-label="Unsaved changes">•</span> : null}
+                    </button>
+                    <button
+                      type="button"
+                      className="flex size-5 shrink-0 items-center justify-center rounded opacity-0 hover:bg-muted group-hover:opacity-100"
+                      aria-label="Close open editor"
+                      title={`Close ${item.name}`}
+                      onClick={() => onCloseOpenEditor(item.id)}
+                    >
+                      <X className="size-3" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="explorer-section flex min-h-0 flex-1 flex-col border-t border-sidebar-border/70">
+            <div className="explorer-section-header">
+              <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">{workspaceSectionTitle}</span>
             </div>
             {workspaceTreeLength === 0 ? (
               <p className="text-xs text-muted-foreground">
@@ -317,15 +465,16 @@ export function SideBar({
                   type="text"
                   value={workspaceFilter}
                   onChange={(event) => onWorkspaceFilterChange(event.target.value)}
-                  placeholder="Search this workspace"
+                  placeholder="Filter files"
                   disabled={busy}
                   aria-label="Filter files"
+                  className="mx-3 mb-1 h-7 w-[calc(100%-1.5rem)] rounded-sm text-xs"
                 />
                 {filteredWorkspaceTreeLength === 0 ? (
-                  <p className="text-xs text-muted-foreground">No files match this filter.</p>
+                  <p className="px-3 text-xs text-muted-foreground">No files match this filter.</p>
                 ) : (
-                  <ScrollArea className="max-h-[360px] pr-2">
-                    <div className="flex flex-col gap-1">
+                  <ScrollArea className="min-h-0 flex-1">
+                    <div data-testid="explorer-workspace-tree" className="flex flex-col py-1">
                       {renderWorkspaceTreeNodes()}
                     </div>
                   </ScrollArea>
@@ -336,14 +485,15 @@ export function SideBar({
 
           <Separator />
 
-          <section className="flex flex-col gap-2">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Recent
+          <section className="explorer-section flex shrink-0 flex-col border-t border-sidebar-border/70">
+            <div className="explorer-section-header">
+              <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">RECENT</span>
             </div>
             {recentDocuments.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Recent documents will appear here.</p>
+              <p className="px-5 py-1.5 text-xs text-muted-foreground">Recent documents will appear here.</p>
             ) : (
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col py-1">
                 {recentDocuments.slice(0, 5).map((path) => {
                   const isActive = path === activeDocumentPath;
                   return (
@@ -351,26 +501,25 @@ export function SideBar({
                       key={path}
                       type="button"
                       className={cn(
-                        'flex w-full flex-col items-start gap-1 rounded-md border border-transparent px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50',
-                        isActive && 'border-border bg-accent text-accent-foreground',
+                        'explorer-tree-row flex w-full items-center gap-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50',
+                        isActive && 'bg-accent text-accent-foreground',
                       )}
                       onClick={() => onOpenRecentDocument(path)}
                       disabled={busy}
                       title={path}
                     >
-                      <span className="w-full font-medium leading-snug break-all">
+                      <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <span className="min-w-0 flex-1 truncate">
                         {displayFileName(path)}
                       </span>
-                      <span className="w-full text-xs leading-snug text-muted-foreground break-all">
-                        {displayWorkspacePath(path, rootDir)}
-                      </span>
+                      <span className="sr-only" aria-hidden="true">{displayWorkspacePath(path, rootDir)}</span>
                     </button>
                   );
                 })}
               </div>
             )}
           </section>
-        </>
+        </div>
       )}
     </aside>
   );

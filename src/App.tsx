@@ -17,6 +17,7 @@ import { Markdown } from '@tiptap/markdown';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
+import { ChevronDown, ChevronRight, FileText, FolderOpen } from 'lucide-react';
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
@@ -1060,17 +1061,6 @@ export default function App() {
     void getCurrentWindow().startDragging();
   };
 
-  const handleToggleSidebar = useEffectEvent(() => {
-    setIsSidebarOpen((current) => {
-      const next = !current;
-      writeSidebarState(next);
-      announceShell(
-        next ? `${sidebarPanel === 'outline' ? 'Outline' : 'Files'} sidebar shown` : 'Sidebar hidden',
-      );
-      return next;
-    });
-  });
-
   const handleOpenFilesPanel = useEffectEvent(() => {
     setSidebarPanel('files');
     setIsSidebarOpen((current) => {
@@ -1079,6 +1069,16 @@ export default function App() {
       announceShell(next ? 'Files sidebar shown' : 'Sidebar hidden');
       return next;
     });
+  });
+
+  const handleShowExplorerPanel = useEffectEvent(() => {
+    const wasVisible = isSidebarOpen && sidebarPanel === 'files';
+    setSidebarPanel('files');
+    setIsSidebarOpen(true);
+    writeSidebarState(true);
+    if (!wasVisible) {
+      announceShell('Files sidebar shown');
+    }
   });
 
   const handleOpenOutlinePanel = useEffectEvent(() => {
@@ -2429,6 +2429,12 @@ export default function App() {
     );
   };
 
+  const handleCollapseWorkspaceFolders = () => {
+    const nextFolderKeys = new Set<string>();
+    collectWorkspaceFolderKeys(workspaceTree, nextFolderKeys);
+    setCollapsedFolderKeys(Array.from(nextFolderKeys));
+  };
+
   // Switch to an existing tab. Stashes the outgoing tab's draft, drives Rust's
   // active document to the target's path (or a fresh untitled), then restores
   // the target tab's previously stashed draft as the live editor content.
@@ -2625,21 +2631,24 @@ export default function App() {
       const collapsed = !filteringWorkspace && collapsedFolderKeys.includes(node.key);
 
       return (
-        <div key={node.key} className="flex flex-col gap-1">
+        <div key={node.key} className="flex flex-col">
           <button
             type="button"
-            className="flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+            className="explorer-tree-row flex w-full items-center gap-1.5 text-left text-xs text-sidebar-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             aria-expanded={!collapsed}
             onClick={() => handleToggleWorkspaceFolder(node.key)}
-            style={{ paddingLeft: `${depth * 14}px` }}
+            style={{ paddingLeft: `${4 + depth * 12}px` }}
           >
-            <span className="inline-block w-3 text-center" aria-hidden="true">
-              {collapsed ? '▸' : '▾'}
-            </span>
+            {collapsed ? (
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            ) : (
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            )}
+            <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span className="truncate">{node.name}</span>
           </button>
           {!collapsed ? (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col">
               {node.children.map((child) => renderWorkspaceTreeNode(child, depth + 1))}
             </div>
           ) : null}
@@ -2654,14 +2663,15 @@ export default function App() {
         key={node.key}
         type="button"
         className={cn(
-          'flex w-full flex-col items-start gap-0.5 rounded-md border border-transparent px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
-          isActive && 'border-border bg-accent text-accent-foreground',
+          'explorer-tree-row flex w-full items-center gap-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground',
+          isActive && 'bg-accent text-accent-foreground',
         )}
         onClick={() => handleOpenWorkspaceDocument(node.path)}
-        style={{ paddingLeft: `${12 + depth * 14}px` }}
+        style={{ paddingLeft: `${24 + depth * 12}px` }}
       >
-        <span className="truncate font-medium">{node.name}</span>
-        <span className="truncate text-xs text-muted-foreground">{node.relativePath}</span>
+        <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="truncate">{node.name}</span>
+        <span className="sr-only" aria-hidden="true">{node.relativePath}</span>
       </button>
     );
   };
@@ -2726,9 +2736,9 @@ export default function App() {
         return;
       }
 
-      if (matchesShortcut(event, 'b', { shift: true })) {
+      if (matchesShortcut(event, 'e', { shift: true })) {
         event.preventDefault();
-        handleToggleSidebar();
+        handleShowExplorerPanel();
         return;
       }
 
@@ -3247,9 +3257,9 @@ export default function App() {
     {
       id: 'view.toggleSidebar',
       category: 'View',
-      label: isSidebarOpen ? 'Hide Sidebar' : 'Show Sidebar',
-      shortcut: '⌘B',
-      run: () => handleToggleSidebar(),
+      label: 'Show Explorer',
+      shortcut: '⌘⇧E',
+      run: () => handleShowExplorerPanel(),
     },
     {
       id: 'view.quickOpen',
@@ -3444,13 +3454,33 @@ export default function App() {
           panel={sidebarPanel}
           isOpen={isSidebarOpen}
           busy={busy}
+          workspaceName={snapshot.rootDir ? displayFileName(snapshot.rootDir) : null}
           workspaceFilter={workspaceFilter}
           onWorkspaceFilterChange={setWorkspaceFilter}
           workspaceTreeLength={workspaceTree.length}
           filteredWorkspaceTreeLength={filteredWorkspaceTree.length}
+          openEditors={tabs.map((tab) => ({
+            id: tab.id,
+            name: tab.name,
+            path: tab.path,
+            isActive: tab.id === activeTabId,
+            isDirty:
+              tab.kind === 'settings'
+                ? false
+                : tab.id === activeTabId
+                ? localDraft !== tab.source
+                : tab.draft !== tab.source,
+            missing: tab.missing,
+          }))}
           recentDocuments={snapshot.recentDocuments}
           activeDocumentPath={snapshot.activeDocumentPath}
           rootDir={snapshot.rootDir}
+          onNewDocument={() => void handleNewDocument()}
+          onOpenDocument={() => void handleOpenDocument()}
+          onOpenWorkspace={() => void handleOpenWorkspace()}
+          onCollapseWorkspaceFolders={handleCollapseWorkspaceFolders}
+          onSelectOpenEditor={(id) => void switchToTab(id)}
+          onCloseOpenEditor={(id) => void handleCloseTab(id)}
           onOpenRecentDocument={handleOpenRecentDocument}
           renderWorkspaceTreeNodes={() => filteredWorkspaceTree.map((node) => renderWorkspaceTreeNode(node))}
           displayFileName={displayFileName}

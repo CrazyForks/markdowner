@@ -493,7 +493,7 @@ describe('App recent documents', () => {
 
     expect(toolbar).toHaveAttribute('aria-orientation', 'vertical');
     expect(
-      within(toolbar).getByRole('button', { name: /^explorer \(cmd\+shift\+b\)$/i }),
+      within(toolbar).getByRole('button', { name: /^explorer \(cmd\+shift\+e\)$/i }),
     ).toBeInTheDocument();
     expect(
       within(toolbar).getByRole('button', { name: /^search \(cmd\+shift\+f\)$/i }),
@@ -966,6 +966,42 @@ describe('App recent documents', () => {
     expect(screen.getByRole('button', { name: /api\.md/i })).toBeInTheDocument();
   });
 
+  it('renders a VS Code-like Explorer sidebar with open editors and workspace sections', async () => {
+    window.localStorage.setItem('markdowner.sidebarOpen', 'true');
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'draft.md',
+        rootDir: '/tmp/project',
+        workspaceDocuments: [
+          '/tmp/project/README.md',
+          '/tmp/project/guides/draft.md',
+          '/tmp/project/guides/reference/api.md',
+        ],
+        activeDocumentPath: '/tmp/project/guides/draft.md',
+        activeDocumentSource: '# Draft',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const explorer = await screen.findByRole('complementary', { name: /explorer/i });
+
+    expect(within(explorer).getByText('EXPLORER')).toBeInTheDocument();
+    expect(within(explorer).getByText('OPEN EDITORS')).toBeInTheDocument();
+    expect(await within(explorer).findByText('PROJECT')).toBeInTheDocument();
+    expect(within(explorer).getByTestId('explorer-open-editors')).toHaveTextContent('draft.md');
+    expect(within(explorer).getByRole('button', { name: /new file/i })).toBeInTheDocument();
+    expect(within(explorer).getByRole('button', { name: /open workspace/i })).toBeInTheDocument();
+    expect(within(explorer).getByRole('button', { name: /collapse all/i })).toBeInTheDocument();
+    const workspaceTree = within(explorer).getByTestId('explorer-workspace-tree');
+    expect(within(workspaceTree).getByRole('button', { name: /guides/i })).toHaveClass('explorer-tree-row');
+    expect(within(workspaceTree).getByRole('button', { name: /draft\.md/i })).toHaveClass('explorer-tree-row');
+
+    window.localStorage.removeItem('markdowner.sidebarOpen');
+  });
+
   it('collapses and re-expands workspace folders from the sidebar', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
@@ -1061,8 +1097,8 @@ describe('App recent documents', () => {
 
     render(<App />);
 
-    // 3 from before + 1 from the new tab strip
-    expect(await screen.findAllByText('draft.md')).toHaveLength(4);
+    // Sidebar workspace/recent rows, Explorer open editors, and the tab strip.
+    expect(await screen.findAllByText('draft.md')).toHaveLength(5);
     expect(screen.getAllByText('guides/draft.md')).toHaveLength(3);
   });
 
@@ -1607,7 +1643,7 @@ describe('App recent documents', () => {
     const view = render(<App />);
 
     const explorerButton = await waitFor(() =>
-      within(view.container).getByRole('button', { name: /^explorer \(cmd\+shift\+b\)$/i }),
+      within(view.container).getByRole('button', { name: /^explorer \(cmd\+shift\+e\)$/i }),
     );
     const searchButton = within(view.container).getByRole('button', {
       name: /^search \(cmd\+shift\+f\)$/i,
@@ -1616,7 +1652,7 @@ describe('App recent documents', () => {
       name: /^settings \(cmd\+,\)$/i,
     });
 
-    expect(explorerButton).toHaveAttribute('aria-keyshortcuts', 'Meta+Shift+B Control+Shift+B');
+    expect(explorerButton).toHaveAttribute('aria-keyshortcuts', 'Meta+Shift+E Control+Shift+E');
     expect(searchButton).toHaveAttribute('aria-keyshortcuts', 'Meta+Shift+F Control+Shift+F');
     expect(settingsButton).toHaveAttribute('aria-keyshortcuts', 'Meta+, Control+,');
   });
@@ -3104,8 +3140,8 @@ describe('App recent documents', () => {
 
     const explorerButton = await screen.findByRole('button', { name: /^explorer/i });
 
-    expect(explorerButton).toHaveAttribute('title', 'Explorer (Cmd+Shift+B)');
-    expect(explorerButton).toHaveAttribute('aria-keyshortcuts', 'Meta+Shift+B Control+Shift+B');
+    expect(explorerButton).toHaveAttribute('title', 'Explorer (Cmd+Shift+E)');
+    expect(explorerButton).toHaveAttribute('aria-keyshortcuts', 'Meta+Shift+E Control+Shift+E');
 
     const event = new KeyboardEvent('keydown', {
       key: 'b',
@@ -3120,7 +3156,7 @@ describe('App recent documents', () => {
     expect(window.localStorage.getItem('markdowner.sidebarOpen')).toBeNull();
   });
 
-  it('toggles the sidebar with Cmd+Shift+B', async () => {
+  it('opens the Explorer sidebar with Cmd+Shift+E', async () => {
     window.localStorage.removeItem('markdowner.sidebarOpen');
     bootstrapMock.mockResolvedValue(baseSnapshot());
 
@@ -3130,7 +3166,7 @@ describe('App recent documents', () => {
 
     const explorerButton = await screen.findByRole('button', { name: /^explorer/i });
     const event = new KeyboardEvent('keydown', {
-      key: 'b',
+      key: 'e',
       metaKey: true,
       shiftKey: true,
       bubbles: true,

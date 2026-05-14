@@ -48,6 +48,12 @@ export interface EditorAreaProps {
   typewriterModeEnabled?: boolean;
 }
 
+function formatNotionPageTitle(name: string | null) {
+  const trimmed = name?.trim();
+  if (!trimmed) return 'Untitled';
+  return trimmed.replace(/\.(md|markdown|mdown|mkd)$/i, '') || trimmed;
+}
+
 export function EditorArea({
   busy,
   errorMessage,
@@ -94,6 +100,7 @@ export function EditorArea({
     focusModeEnabled && 'editor-focus-mode',
     typewriterModeEnabled && 'editor-typewriter-mode',
   );
+  const notionPageTitle = formatNotionPageTitle(activeDocumentName);
   return (
     <main className="relative flex h-full min-h-0 min-w-0 flex-col">
       {findReplaceBar}
@@ -280,7 +287,7 @@ export function EditorArea({
           data-testid="editor-surface-wysiwyg"
           {...editorModeAttributes}
           className={cn(
-            'editor-pane editor-pane-wysiwyg markdown-surface min-h-0 overflow-auto px-8 py-6',
+            'editor-pane editor-pane-wysiwyg markdown-surface notion-wysiwyg-surface min-h-0 overflow-auto',
             editorModeClassName,
             !(activeDocumentOpen && currentMode === 'Wysiwyg') && 'hidden',
             activeDocumentOpen && currentMode === 'Wysiwyg' && 'flex-1',
@@ -288,7 +295,22 @@ export function EditorArea({
           style={editorSurfaceStyle}
           aria-hidden={!(activeDocumentOpen && currentMode === 'Wysiwyg')}
         >
-          {editorContent}
+          {activeDocumentOpen ? (
+            <div
+              data-testid="notion-editor-shell"
+              className="notion-editor-shell"
+            >
+              <header className="notion-page-header">
+                <div className="notion-page-icon" aria-hidden="true">
+                  #
+                </div>
+                <h1 className="notion-page-title">{notionPageTitle}</h1>
+              </header>
+              <div className="notion-editor-content">
+                {editorContent}
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
     </main>
