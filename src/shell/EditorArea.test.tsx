@@ -15,7 +15,6 @@ const baseProps = {
   onCompareExternalChanges: () => {},
   onHideComparison: () => {},
   localDraft: 'hi',
-  activeDocumentName: 'a.md',
   editorContent: <div data-testid="wysiwyg-marker" />,
   sourceEditor: <div data-testid="source-marker" />,
   splitViewPreview: <div data-testid="preview-marker" />,
@@ -42,14 +41,14 @@ describe('EditorArea mode switch', () => {
     expect(surface.className).toContain('editor-pane-source');
   });
 
-  it('wraps WYSIWYG content in a Notion-like page surface with the active document title', () => {
-    render(<EditorArea {...baseProps} currentMode="Wysiwyg" activeDocumentName="project-plan.md" />);
+  it('wraps WYSIWYG content in a Notion-like page surface without a static title header', () => {
+    render(<EditorArea {...baseProps} currentMode="Wysiwyg" />);
 
     const shell = screen.getByTestId('notion-editor-shell');
 
     expect(shell).toBeInTheDocument();
     expect(shell).toHaveClass('notion-editor-shell');
-    expect(screen.getByRole('heading', { name: 'project-plan' })).toBeInTheDocument();
+    expect(shell.querySelector('.notion-page-header')).toBeNull();
     expect(screen.getByTestId('wysiwyg-marker').parentElement).toHaveClass('notion-editor-content');
   });
 });

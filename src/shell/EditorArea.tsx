@@ -32,7 +32,6 @@ export interface EditorAreaProps {
   onOpenDocument?: () => void;
   onOpenWorkspace?: () => void;
   localDraft: string;
-  activeDocumentName: string | null;
   findReplaceBar?: ReactNode;
   editorContent: ReactNode;
   sourceEditor: ReactNode;
@@ -46,12 +45,6 @@ export interface EditorAreaProps {
   fontFamily?: string;
   focusModeEnabled?: boolean;
   typewriterModeEnabled?: boolean;
-}
-
-function formatNotionPageTitle(name: string | null) {
-  const trimmed = name?.trim();
-  if (!trimmed) return 'Untitled';
-  return trimmed.replace(/\.(md|markdown|mdown|mkd)$/i, '') || trimmed;
 }
 
 export function EditorArea({
@@ -70,7 +63,6 @@ export function EditorArea({
   onOpenDocument,
   onOpenWorkspace,
   localDraft,
-  activeDocumentName,
   findReplaceBar,
   editorContent,
   sourceEditor,
@@ -100,7 +92,6 @@ export function EditorArea({
     focusModeEnabled && 'editor-focus-mode',
     typewriterModeEnabled && 'editor-typewriter-mode',
   );
-  const notionPageTitle = formatNotionPageTitle(activeDocumentName);
   return (
     <main className="relative flex h-full min-h-0 min-w-0 flex-col">
       {findReplaceBar}
@@ -300,9 +291,6 @@ export function EditorArea({
               data-testid="notion-editor-shell"
               className="notion-editor-shell"
             >
-              <header className="notion-page-header">
-                <h1 className="notion-page-title">{notionPageTitle}</h1>
-              </header>
               <div className="notion-editor-content">
                 {editorContent}
               </div>

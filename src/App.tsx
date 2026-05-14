@@ -3602,7 +3602,6 @@ export default function App() {
         onOpenDocument={() => void handleOpenDocument()}
         onOpenWorkspace={() => void handleOpenWorkspace()}
         localDraft={localDraft}
-        activeDocumentName={snapshot.activeDocumentName}
         findReplaceBar={
           isFindReplaceOpen ? (
             <FindReplaceBar
