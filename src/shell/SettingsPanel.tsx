@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, Terminal, Trash2 } from 'lucide-react';
+import { Terminal, Trash2 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
-  CLI_ALIAS_COMMAND,
   CLI_BINARY_INSTALL_PATH,
   DEFAULT_SETTINGS,
   EDITOR_WRAP_COLUMN_MAX,
@@ -18,7 +17,6 @@ import {
   OUTLINE_ROW_SPACING_MIN,
   cliBinaryStatus,
   installCliBinary,
-  installCliLauncher,
   uninstallCliBinary,
   type CliBinaryStatus,
   type Settings,
@@ -43,11 +41,6 @@ const sectionBodyClass = 'flex flex-col gap-4';
 const sectionGroupClass = 'flex flex-col gap-3';
 
 export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps) {
-  const [aliasCopied, setAliasCopied] = useState(false);
-  const [cliLauncherInstalling, setCliLauncherInstalling] = useState(false);
-  const [cliLauncherMessage, setCliLauncherMessage] = useState('');
-  const [cliLauncherError, setCliLauncherError] = useState(false);
-
   const [cliBinary, setCliBinary] = useState<CliBinaryStatus>({
     installPath: CLI_BINARY_INSTALL_PATH,
     targetExecutable: '',
@@ -133,40 +126,6 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
     onSettingsChange({ ...settings, [key]: value });
   };
 
-  const handleCopyAlias = async () => {
-    try {
-      await navigator.clipboard.writeText(CLI_ALIAS_COMMAND);
-      setAliasCopied(true);
-      setCliLauncherError(false);
-      setCliLauncherMessage('Copied to clipboard');
-      window.setTimeout(() => setAliasCopied(false), 1600);
-    } catch (error) {
-      console.error('Failed to copy CLI alias:', error);
-      setCliLauncherError(true);
-      setCliLauncherMessage('Could not copy alias command');
-    }
-  };
-
-  const handleInstallCliLauncher = async () => {
-    setCliLauncherInstalling(true);
-    setCliLauncherError(false);
-    setCliLauncherMessage('');
-    try {
-      const result = await installCliLauncher();
-      setCliLauncherMessage(
-        result.alreadyInstalled
-          ? `Already installed in ${result.shellConfigPath}`
-          : `Installed in ${result.shellConfigPath}`,
-      );
-    } catch (error) {
-      console.error('Failed to install CLI launcher:', error);
-      setCliLauncherError(true);
-      setCliLauncherMessage('Could not install CLI launcher');
-    } finally {
-      setCliLauncherInstalling(false);
-    }
-  };
-
   const handleBoundedNumberChange = <K extends keyof Settings>(
     key: K,
     rawValue: string,
@@ -205,63 +164,6 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
         data-testid="settings-panel-body"
         className={`mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-6 py-6 ${sectionBodyClass}`}
       >
-        <div data-testid="settings-cli-launcher" className="flex min-w-0 flex-col gap-2">
-          <h4 className="text-sm font-medium leading-none">CLI Launcher</h4>
-          <p className="text-sm text-muted-foreground">
-            Install the markdowner command in your shell config or copy the alias manually.
-          </p>
-          <div
-            data-testid="settings-cli-controls"
-            className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center"
-          >
-            <div
-              data-testid="settings-cli-alias-copy"
-              className="min-w-0 flex-1 overflow-hidden rounded bg-muted px-2 py-1.5"
-            >
-              <code
-                data-testid="settings-cli-alias-command"
-                className="block min-w-0 whitespace-pre-wrap break-all font-mono text-xs leading-5"
-              >
-                {CLI_ALIAS_COMMAND}
-              </code>
-            </div>
-            <div className="flex shrink-0 gap-2 sm:flex-row">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleCopyAlias}
-                aria-label="Copy CLI alias command"
-                title={aliasCopied ? 'Copied!' : 'Copy alias command'}
-                className="flex-1 sm:flex-none"
-              >
-                {aliasCopied ? <Check /> : <Copy />}
-                Copy
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleInstallCliLauncher}
-                disabled={cliLauncherInstalling}
-                aria-label="Install CLI Launcher"
-                className="flex-1 sm:flex-none"
-              >
-                <Terminal />
-                {cliLauncherInstalling ? 'Installing' : 'Install'}
-              </Button>
-            </div>
-          </div>
-          <p
-            data-testid="settings-cli-launcher-status"
-            aria-live="polite"
-            className={`min-h-5 text-xs ${cliLauncherError ? 'text-destructive' : 'text-muted-foreground'}`}
-          >
-            {cliLauncherMessage}
-          </p>
-        </div>
-
-        <Separator />
-
         <div data-testid="settings-cli-binary" className="flex min-w-0 flex-col gap-2">
           <div className="flex items-center justify-between gap-3">
             <h4 className="text-sm font-medium leading-none">CLI Binary (mdner)</h4>
