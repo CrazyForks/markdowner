@@ -1083,6 +1083,43 @@ export default function App() {
     }
   });
 
+  /** Move keyboard focus into the Explorer sidebar (VS Code "Show Explorer" parity). */
+  const focusExplorerTree = () => {
+    // Defer one frame so the sidebar fade-in completes and the tree is visible.
+    requestAnimationFrame(() => {
+      const root = document.querySelector<HTMLElement>('[data-explorer-root]');
+      if (!root) return;
+      const firstTreeButton = root.querySelector<HTMLButtonElement>(
+        '[data-testid="explorer-workspace-tree"] button',
+      );
+      if (firstTreeButton) {
+        firstTreeButton.focus();
+        return;
+      }
+      const firstOpenEditor = root.querySelector<HTMLButtonElement>(
+        '[data-testid="explorer-open-editors"] button',
+      );
+      if (firstOpenEditor) {
+        firstOpenEditor.focus();
+        return;
+      }
+      root.querySelector<HTMLInputElement>('[data-explorer-filter]')?.focus();
+    });
+  };
+
+  /** Focus the Files filter input (VS Code Cmd+F in Explorer parity). */
+  const focusExplorerFilter = () => {
+    requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLInputElement>(
+        '[data-explorer-root] [data-explorer-filter]',
+      );
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  };
+
   const handleOpenOutlinePanel = useEffectEvent(() => {
     setSidebarPanel('outline');
     setIsSidebarOpen(true);
@@ -2769,6 +2806,13 @@ export default function App() {
 
       if (matchesShortcut(event, 'f')) {
         event.preventDefault();
+        // VS Code parity: when focus is inside the Explorer, Cmd+F filters
+        // the file tree by name instead of opening the document find widget.
+        const activeElement = document.activeElement as HTMLElement | null;
+        if (activeElement?.closest('[data-explorer-root]')) {
+          focusExplorerFilter();
+          return;
+        }
         if (activeDocumentOpen) {
           openFindReplace(false);
         } else {
@@ -2909,11 +2953,20 @@ export default function App() {
         return;
       }
 
-      // Cmd+1..9 → tab index 0..8, Cmd+0 → tab index 9. 11+ tabs have no
-      // shortcut; the keypress is still consumed so it doesn't fall through.
-      if (event.key.length === 1 && /[0-9]/.test(event.key) && usesCommandModifier(event) && !event.shiftKey && !event.altKey) {
+      // Cmd+0 → focus the Explorer sidebar (VS Code: "Show Explorer"). The
+      // 10th tab can still be reached with Cmd+Shift+] cycling.
+      if (event.key === '0' && usesCommandModifier(event) && !event.shiftKey && !event.altKey) {
         event.preventDefault();
-        const tabIndex = event.key === '0' ? 9 : Number.parseInt(event.key, 10) - 1;
+        handleShowExplorerPanel();
+        focusExplorerTree();
+        return;
+      }
+
+      // Cmd+1..9 → tab index 0..8. 10+ tabs have no shortcut; the keypress is
+      // still consumed so it doesn't fall through.
+      if (event.key.length === 1 && /[1-9]/.test(event.key) && usesCommandModifier(event) && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        const tabIndex = Number.parseInt(event.key, 10) - 1;
         const target = tabs[tabIndex];
         if (target && target.id !== activeTabId) {
           void switchToTab(target.id);

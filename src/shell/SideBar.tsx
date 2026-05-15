@@ -148,6 +148,7 @@ export function SideBar({
   return (
     <aside
       aria-label={showOutline ? 'Outline' : showSearch ? 'Search' : 'Explorer'}
+      data-explorer-root={showOutline || showSearch ? undefined : ''}
       className={cn(
         'flex min-h-0 flex-col overflow-y-auto border-r border-border bg-sidebar text-sidebar-foreground transition-opacity duration-300 ease-in-out',
         showOutline || showSearch ? 'gap-5 p-5' : 'explorer-sidebar',
@@ -468,6 +469,7 @@ export function SideBar({
                   placeholder="Filter files"
                   disabled={busy}
                   aria-label="Filter files"
+                  data-explorer-filter=""
                   className="mx-3 mb-1 h-7 w-[calc(100%-1.5rem)] rounded-sm text-xs"
                 />
                 {filteredWorkspaceTreeLength === 0 ? (
