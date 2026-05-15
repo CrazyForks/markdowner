@@ -37,7 +37,7 @@ Partially complete:
 
 Not implemented yet:
 
-- In-document Find & Replace
+- In-document Find &amp; Replace
 - Slash command menu
 - KaTeX math and Mermaid diagram rendering
 - HTML/PDF/Print export
