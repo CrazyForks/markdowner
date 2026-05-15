@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import {
-  BetweenHorizontalEnd,
-  BetweenHorizontalStart,
-  BetweenVerticalEnd,
-  BetweenVerticalStart,
+  PanelBottomDashed,
+  PanelLeftDashed,
+  PanelRightDashed,
   PanelTop,
+  PanelTopDashed,
   TableProperties,
   Trash2,
 } from 'lucide-react';
@@ -32,6 +32,47 @@ type TableCommand =
   | 'toggleHeaderRow';
 
 const TOOLBAR_OFFSET_PX = 10;
+const TABLE_DRAG_SELECTION_THRESHOLD_PX = 4;
+
+type RecordLike = Record<string, unknown>;
+
+interface TableCellSelection {
+  from?: unknown;
+  $anchorCell?: RecordLike;
+  $headCell?: RecordLike;
+}
+
+interface PendingTableMouseDrag {
+  startX: number;
+  startY: number;
+  dragging: boolean;
+}
+
+function isRecordLike(value: unknown): value is RecordLike {
+  return typeof value === 'object' && value !== null;
+}
+
+function isTableCellSelection(selection: unknown): selection is TableCellSelection {
+  if (!isRecordLike(selection)) return false;
+  return isRecordLike(selection.$anchorCell) && isRecordLike(selection.$headCell);
+}
+
+function getCellTextSelectionPosition(selection: TableCellSelection): number | null {
+  const headCellPosition = selection.$headCell?.pos;
+  if (typeof headCellPosition === 'number' && Number.isFinite(headCellPosition)) {
+    return headCellPosition + 1;
+  }
+
+  if (typeof selection.from === 'number' && Number.isFinite(selection.from)) {
+    return selection.from;
+  }
+
+  return null;
+}
+
+function isTableCellTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('td, th'));
+}
 
 export function TableToolbar({ editor, enabled = true }: Props) {
   const [visible, setVisible] = useState(false);
@@ -42,6 +83,7 @@ export function TableToolbar({ editor, enabled = true }: Props) {
     if (!editor || !editor.isActive('table')) return null;
     const { state, view } = editor;
     if (!view.hasFocus()) return null;
+    if (isTableCellSelection(state.selection)) return null;
 
     const { from, to } = state.selection;
     const startCoords = view.coordsAtPos(from);
@@ -108,6 +150,101 @@ export function TableToolbar({ editor, enabled = true }: Props) {
     };
   }, [editor, enabled, computePosition]);
 
+  useEffect(() => {
+    if (!editor || !enabled) return;
+
+    const editorDom = editor.view?.dom;
+    if (!(editorDom instanceof HTMLElement)) return;
+
+    const ownerDocument = editorDom.ownerDocument;
+    let pendingDrag: PendingTableMouseDrag | null = null;
+    let settleFrame: number | null = null;
+
+    const clearAccidentalCellSelection = () => {
+      if (settleFrame !== null) cancelAnimationFrame(settleFrame);
+
+      settleFrame = requestAnimationFrame(() => {
+        settleFrame = null;
+        const selection = editor.state.selection;
+        if (!isTableCellSelection(selection)) return;
+
+        const textPosition = getCellTextSelectionPosition(selection);
+        if (textPosition === null) return;
+
+        editor.commands.setTextSelection(textPosition);
+        if (typeof editor.view.focus === 'function') {
+          editor.view.focus();
+        }
+      });
+    };
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0 || event.ctrlKey || event.metaKey) return;
+      if (!isTableCellTarget(event.target)) return;
+
+      pendingDrag = {
+        startX: event.clientX,
+        startY: event.clientY,
+        dragging: false,
+      };
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!pendingDrag) return;
+      if (event.buttons !== 0 && (event.buttons & 1) === 0) {
+        pendingDrag = null;
+        return;
+      }
+
+      const distance = Math.hypot(
+        event.clientX - pendingDrag.startX,
+        event.clientY - pendingDrag.startY,
+      );
+
+      if (distance < TABLE_DRAG_SELECTION_THRESHOLD_PX) {
+        event.stopPropagation();
+        return;
+      }
+
+      pendingDrag.dragging = true;
+      setVisible(false);
+    };
+
+    const handleMouseUp = () => {
+      if (!pendingDrag) return;
+
+      const wasDragging = pendingDrag.dragging;
+      pendingDrag = null;
+
+      if (!wasDragging) {
+        clearAccidentalCellSelection();
+      }
+    };
+
+    const handleCancel = () => {
+      pendingDrag = null;
+    };
+
+    editorDom.addEventListener('mousedown', handleMouseDown, true);
+    editorDom.addEventListener('mousemove', handleMouseMove, true);
+    editorDom.addEventListener('mouseup', handleMouseUp, true);
+    editorDom.addEventListener('dragstart', handleCancel, true);
+    ownerDocument.addEventListener('mousemove', handleMouseMove, true);
+    ownerDocument.addEventListener('mouseup', handleMouseUp, true);
+    ownerDocument.addEventListener('dragstart', handleCancel, true);
+
+    return () => {
+      if (settleFrame !== null) cancelAnimationFrame(settleFrame);
+      editorDom.removeEventListener('mousedown', handleMouseDown, true);
+      editorDom.removeEventListener('mousemove', handleMouseMove, true);
+      editorDom.removeEventListener('mouseup', handleMouseUp, true);
+      editorDom.removeEventListener('dragstart', handleCancel, true);
+      ownerDocument.removeEventListener('mousemove', handleMouseMove, true);
+      ownerDocument.removeEventListener('mouseup', handleMouseUp, true);
+      ownerDocument.removeEventListener('dragstart', handleCancel, true);
+    };
+  }, [editor, enabled]);
+
   const runCommand = (command: TableCommand) => {
     if (!editor) return;
     const chain = editor.chain().focus();
@@ -160,13 +297,13 @@ export function TableToolbar({ editor, enabled = true }: Props) {
         label="Add column before"
         onClick={() => runCommand('addColumnBefore')}
       >
-        <BetweenHorizontalStart className="size-4" />
+        <PanelLeftDashed className="size-4" />
       </TableToolbarButton>
       <TableToolbarButton
         label="Add column after"
         onClick={() => runCommand('addColumnAfter')}
       >
-        <BetweenHorizontalEnd className="size-4" />
+        <PanelRightDashed className="size-4" />
       </TableToolbarButton>
       <TableToolbarButton
         label="Delete column"
@@ -180,13 +317,13 @@ export function TableToolbar({ editor, enabled = true }: Props) {
         label="Add row before"
         onClick={() => runCommand('addRowBefore')}
       >
-        <BetweenVerticalStart className="size-4" />
+        <PanelTopDashed className="size-4" />
       </TableToolbarButton>
       <TableToolbarButton
         label="Add row after"
         onClick={() => runCommand('addRowAfter')}
       >
-        <BetweenVerticalEnd className="size-4" />
+        <PanelBottomDashed className="size-4" />
       </TableToolbarButton>
       <TableToolbarButton
         label="Delete row"

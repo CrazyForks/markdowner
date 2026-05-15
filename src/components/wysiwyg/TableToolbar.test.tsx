@@ -26,6 +26,17 @@ function createTableEditor({ inTable = true } = {}) {
   const handlers = new Map<string, Set<() => void>>();
   const calls: CommandName[] = [];
   const dom = document.createElement('div');
+  const table = document.createElement('table');
+  const tbody = document.createElement('tbody');
+  const row = document.createElement('tr');
+  const cell = document.createElement('td');
+
+  cell.textContent = 'Cell';
+  row.appendChild(cell);
+  tbody.appendChild(row);
+  table.appendChild(tbody);
+  dom.appendChild(table);
+
   const chain: Record<string, any> = {
     focus: vi.fn(() => chain),
     run: vi.fn(() => true),
@@ -59,10 +70,15 @@ function createTableEditor({ inTable = true } = {}) {
         empty: true,
       },
     },
+    commands: {
+      setTextSelection: vi.fn(),
+    },
+    tableCell: cell,
     view: {
       dom,
       hasFocus: () => true,
       coordsAtPos: () => ({ top: 88, bottom: 110, left: 120, right: 220 }),
+      focus: vi.fn(),
     },
     isActive: vi.fn((name: string) => name === 'table' && inTable),
     on: vi.fn((name: string, handler: () => void) => {
@@ -101,6 +117,102 @@ describe('TableToolbar', () => {
     fireEvent.click(within(toolbar).getByRole('button', { name: /add row after/i }));
 
     expect(editor.calls).toEqual(['addColumnAfter', 'addRowAfter']);
+  });
+
+  it('uses directional panel icons for row and column insert actions', async () => {
+    const editor = createTableEditor();
+
+    render(<TableToolbar editor={editor} />);
+
+    act(() => {
+      editor.emit('selectionUpdate');
+    });
+
+    const toolbar = await screen.findByRole('toolbar', { name: /table editing/i });
+
+    expect(
+      within(toolbar)
+        .getByRole('button', { name: /add column before/i })
+        .querySelector('.lucide-panel-left-dashed'),
+    ).not.toBeNull();
+    expect(
+      within(toolbar)
+        .getByRole('button', { name: /add column after/i })
+        .querySelector('.lucide-panel-right-dashed'),
+    ).not.toBeNull();
+    expect(
+      within(toolbar)
+        .getByRole('button', { name: /add row before/i })
+        .querySelector('.lucide-panel-top-dashed'),
+    ).not.toBeNull();
+    expect(
+      within(toolbar)
+        .getByRole('button', { name: /add row after/i })
+        .querySelector('.lucide-panel-bottom-dashed'),
+    ).not.toBeNull();
+  });
+
+  it('does not show the row and column popup while a table cell drag selection is active', async () => {
+    const editor = createTableEditor();
+
+    editor.state.selection = {
+      from: 5,
+      to: 12,
+      empty: false,
+      $anchorCell: { pos: 5 },
+      $headCell: { pos: 12 },
+    };
+
+    render(<TableToolbar editor={editor} />);
+
+    act(() => {
+      editor.emit('selectionUpdate');
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('toolbar', { name: /table editing/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it('suppresses tiny table mousemoves until the user actually drags', () => {
+    const editor = createTableEditor();
+    const rootMouseMove = vi.fn();
+
+    document.addEventListener('mousemove', rootMouseMove);
+    document.body.appendChild(editor.view.dom);
+    render(<TableToolbar editor={editor} />);
+
+    try {
+      fireEvent.mouseDown(editor.tableCell, { button: 0, clientX: 100, clientY: 100 });
+      fireEvent.mouseMove(editor.tableCell, { buttons: 1, clientX: 102, clientY: 101 });
+      expect(rootMouseMove).not.toHaveBeenCalled();
+
+      fireEvent.mouseMove(editor.tableCell, { buttons: 1, clientX: 112, clientY: 100 });
+      expect(rootMouseMove).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('mousemove', rootMouseMove);
+      editor.view.dom.remove();
+    }
+  });
+
+  it('converts accidental click-only cell selections back to text selection', async () => {
+    const editor = createTableEditor();
+
+    render(<TableToolbar editor={editor} />);
+
+    fireEvent.mouseDown(editor.tableCell, { button: 0, clientX: 48, clientY: 48 });
+    editor.state.selection = {
+      from: 12,
+      to: 12,
+      empty: false,
+      $anchorCell: { pos: 11 },
+      $headCell: { pos: 11 },
+    };
+    fireEvent.mouseUp(editor.tableCell, { button: 0, clientX: 48, clientY: 48 });
+
+    await waitFor(() => {
+      expect(editor.commands.setTextSelection).toHaveBeenCalledWith(12);
+    });
   });
 
   it('stays hidden when the WYSIWYG selection is outside a table', async () => {
