@@ -563,6 +563,23 @@ function buildWorkspaceTree(paths: string[], rootDir: string | null): WorkspaceT
   return root;
 }
 
+// VS Code-style subsequence ("full fuzzy") match: every character of
+// `needle` must appear in `haystack` in the same order, not necessarily
+// adjacent. Returns true for an empty query so callers treat "no filter"
+// naturally.
+function fuzzyMatch(haystack: string, needle: string): boolean {
+  if (needle.length === 0) return true;
+  if (needle.length > haystack.length) return false;
+  let cursor = 0;
+  for (let i = 0; i < haystack.length; i += 1) {
+    if (haystack.charCodeAt(i) === needle.charCodeAt(cursor)) {
+      cursor += 1;
+      if (cursor === needle.length) return true;
+    }
+  }
+  return false;
+}
+
 function filterWorkspaceTree(nodes: WorkspaceTreeNode[], query: string): WorkspaceTreeNode[] {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
@@ -574,7 +591,7 @@ function filterWorkspaceTree(nodes: WorkspaceTreeNode[], query: string): Workspa
   for (const node of nodes) {
     if (node.kind === 'file') {
       const haystack = `${node.name}\u0000${node.relativePath}`.toLowerCase();
-      if (haystack.includes(normalizedQuery)) {
+      if (fuzzyMatch(haystack, normalizedQuery)) {
         filteredNodes.push(node);
       }
       continue;
@@ -1118,6 +1135,36 @@ export default function App() {
         input.select();
       }
     });
+  };
+
+  /**
+   * Move keyboard focus to a tab chip by index. The chip uses
+   * `tabIndex={isActive ? 0 : -1}`, so after `switchToTab` resolves the
+   * targeted chip is focusable; defer one frame so React commits the
+   * `aria-selected` swap before we focus.
+   */
+  const focusTabChipByIndex = (index: number) => {
+    requestAnimationFrame(() => {
+      const chips = document.querySelectorAll<HTMLElement>(
+        '[role="tablist"][aria-label="Open documents"] [role="tab"]',
+      );
+      chips[index]?.focus();
+    });
+  };
+
+  /** Focus the currently active tab chip. */
+  const focusActiveTabChip = () => {
+    requestAnimationFrame(() => {
+      const active = document.querySelector<HTMLElement>(
+        '[role="tablist"][aria-label="Open documents"] [role="tab"][aria-selected="true"]',
+      );
+      active?.focus();
+    });
+  };
+
+  const isFocusInsideExplorer = () => {
+    const active = document.activeElement as HTMLElement | null;
+    return Boolean(active?.closest('[data-explorer-root]'));
   };
 
   const handleOpenOutlinePanel = useEffectEvent(() => {
@@ -2675,6 +2722,7 @@ export default function App() {
             type="button"
             className="explorer-tree-row flex w-full items-center gap-1.5 text-left text-xs text-sidebar-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             aria-expanded={!collapsed}
+            data-explorer-row=""
             onClick={() => handleToggleWorkspaceFolder(node.key)}
             style={{ paddingLeft: `${4 + depth * 12}px` }}
           >
@@ -2705,6 +2753,7 @@ export default function App() {
           'explorer-tree-row flex w-full items-center gap-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground',
           isActive && 'bg-accent text-accent-foreground',
         )}
+        data-explorer-row=""
         onClick={() => handleOpenWorkspaceDocument(node.path)}
         style={{ paddingLeft: `${24 + depth * 12}px` }}
       >
@@ -2953,23 +3002,35 @@ export default function App() {
         return;
       }
 
-      // Cmd+0 → focus the Explorer sidebar (VS Code: "Show Explorer"). The
-      // 10th tab can still be reached with Cmd+Shift+] cycling.
+      // Cmd+0 toggles between the Explorer and the active tab. When focus is
+      // already inside the Explorer the keypress sends focus back to the tab
+      // chip the user came from; otherwise it opens the Explorer and focuses
+      // the file tree (VS Code "Show Explorer").
       if (event.key === '0' && usesCommandModifier(event) && !event.shiftKey && !event.altKey) {
         event.preventDefault();
-        handleShowExplorerPanel();
-        focusExplorerTree();
+        if (isFocusInsideExplorer()) {
+          focusActiveTabChip();
+        } else {
+          handleShowExplorerPanel();
+          focusExplorerTree();
+        }
         return;
       }
 
       // Cmd+1..9 → tab index 0..8. 10+ tabs have no shortcut; the keypress is
-      // still consumed so it doesn't fall through.
+      // still consumed so it doesn't fall through. When fired from inside the
+      // Explorer we also move keyboard focus onto the targeted tab chip so the
+      // user lands on the editor surface they just selected.
       if (event.key.length === 1 && /[1-9]/.test(event.key) && usesCommandModifier(event) && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         const tabIndex = Number.parseInt(event.key, 10) - 1;
         const target = tabs[tabIndex];
+        const wasInExplorer = isFocusInsideExplorer();
         if (target && target.id !== activeTabId) {
           void switchToTab(target.id);
+        }
+        if (target && wasInExplorer) {
+          focusTabChipByIndex(tabIndex);
         }
         return;
       }

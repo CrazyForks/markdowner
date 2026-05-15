@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FindReplaceOptions } from '@/lib/findReplace';
-import { ReactNode, useEffect, useRef } from 'react';
+import { KeyboardEvent as ReactKeyboardEvent, ReactNode, useEffect, useRef } from 'react';
 
 export type SideBarPanel = 'files' | 'search' | 'outline';
 
@@ -133,9 +133,68 @@ export function SideBar({
 }: SideBarProps) {
   const showOutline = panel === 'outline';
   const showSearch = panel === 'search';
+  const showExplorer = !showOutline && !showSearch;
   const outlinePaddingY = Math.max(2, outlineRowSpacing + 2);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const workspaceSectionTitle = workspaceName ? workspaceName.toUpperCase() : 'NO FOLDER OPENED';
+
+  /**
+   * Arrow-key navigation for the Explorer rows. Up/Down moves focus between
+   * `[data-explorer-row]` elements within this aside. ArrowDown from the
+   * filename filter input drops into the first row; ArrowUp from the first
+   * row hops back to the filter. Other shortcuts (modifiers, typing) pass
+   * through untouched.
+   */
+  const handleExplorerKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+
+    const aside = event.currentTarget;
+    const active = (event.target as HTMLElement | null) ?? null;
+    if (!active) return;
+    const onFilter = active.matches('[data-explorer-filter]');
+    const onRow = active.matches('[data-explorer-row]');
+    if (!onFilter && !onRow) return;
+
+    const rows = Array.from(aside.querySelectorAll<HTMLElement>('[data-explorer-row]'));
+    if (rows.length === 0) return;
+
+    if (onFilter) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        rows[0].focus();
+      }
+      return;
+    }
+
+    const currentIndex = rows.indexOf(active);
+    if (currentIndex < 0) return;
+
+    if (event.key === 'ArrowDown') {
+      const next = rows[Math.min(currentIndex + 1, rows.length - 1)];
+      if (next && next !== active) {
+        event.preventDefault();
+        next.focus();
+      }
+      return;
+    }
+
+    // ArrowUp
+    if (currentIndex === 0) {
+      const filter = aside.querySelector<HTMLInputElement>('[data-explorer-filter]');
+      if (filter) {
+        event.preventDefault();
+        filter.focus();
+        filter.select();
+      }
+      return;
+    }
+    const prev = rows[currentIndex - 1];
+    if (prev) {
+      event.preventDefault();
+      prev.focus();
+    }
+  };
 
   useEffect(() => {
     if (!isOpen || !showSearch) return;
@@ -148,7 +207,8 @@ export function SideBar({
   return (
     <aside
       aria-label={showOutline ? 'Outline' : showSearch ? 'Search' : 'Explorer'}
-      data-explorer-root={showOutline || showSearch ? undefined : ''}
+      data-explorer-root={showExplorer ? '' : undefined}
+      onKeyDown={showExplorer ? handleExplorerKeyDown : undefined}
       className={cn(
         'flex min-h-0 flex-col overflow-y-auto border-r border-border bg-sidebar text-sidebar-foreground transition-opacity duration-300 ease-in-out',
         showOutline || showSearch ? 'gap-5 p-5' : 'explorer-sidebar',
@@ -427,6 +487,7 @@ export function SideBar({
                       type="button"
                       className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
                       aria-label="Switch to open editor"
+                      data-explorer-row=""
                       title={item.path ?? item.name}
                       onClick={() => onSelectOpenEditor(item.id)}
                     >
@@ -506,6 +567,7 @@ export function SideBar({
                         'explorer-tree-row flex w-full items-center gap-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50',
                         isActive && 'bg-accent text-accent-foreground',
                       )}
+                      data-explorer-row=""
                       onClick={() => onOpenRecentDocument(path)}
                       disabled={busy}
                       title={path}
