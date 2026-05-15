@@ -33,6 +33,8 @@ const MENU_COMMAND_SET_MODE_SPLITVIEW: &str = "mode-splitview";
 #[cfg(target_os = "macos")]
 const MENU_MACOS_APP_ID: &str = "app";
 const MENU_FILE_TITLE: &str = "File";
+const MENU_EDIT_ID: &str = "edit";
+const MENU_EDIT_TITLE: &str = "Edit";
 const MENU_VIEW_TITLE: &str = "View";
 const MENU_RECENT_ID: &str = "open-recent";
 const MENU_RECENT_TITLE: &str = "Open Recent";
@@ -144,6 +146,7 @@ enum TopLevelMenuSection {
     #[cfg(target_os = "macos")]
     NativeApp,
     File,
+    Edit,
     View,
 }
 
@@ -153,13 +156,18 @@ fn top_level_menu_sections() -> &'static [TopLevelMenuSection] {
         &[
             TopLevelMenuSection::NativeApp,
             TopLevelMenuSection::File,
+            TopLevelMenuSection::Edit,
             TopLevelMenuSection::View,
         ]
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        &[TopLevelMenuSection::File, TopLevelMenuSection::View]
+        &[
+            TopLevelMenuSection::File,
+            TopLevelMenuSection::Edit,
+            TopLevelMenuSection::View,
+        ]
     }
 }
 
@@ -1073,6 +1081,17 @@ fn build_app_menu<R: Runtime>(
     file_menu_builder = file_menu_builder.item(&recent_menu);
     let file_menu = file_menu_builder.build()?;
 
+    let edit_menu = SubmenuBuilder::with_id(app, MENU_EDIT_ID, MENU_EDIT_TITLE)
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .separator()
+        .select_all()
+        .build()?;
+
     let mut view_menu_builder = SubmenuBuilder::with_id(app, MENU_VIEW_ID, MENU_VIEW_TITLE);
     for descriptor in VIEW_MENU_COMMANDS {
         let item = build_menu_item(app, *descriptor)?;
@@ -1090,6 +1109,9 @@ fn build_app_menu<R: Runtime>(
             }
             TopLevelMenuSection::File => {
                 menu_builder = menu_builder.item(&file_menu);
+            }
+            TopLevelMenuSection::Edit => {
+                menu_builder = menu_builder.item(&edit_menu);
             }
             TopLevelMenuSection::View => {
                 menu_builder = menu_builder.item(&view_menu);
@@ -1524,8 +1546,8 @@ mod tests {
         CLI_BINARY_SCRIPT_TAG, DesktopBackend, FILE_MENU_COMMANDS, MENU_COMMAND_CLOSE_WINDOW,
         MENU_COMMAND_NEW_DOCUMENT, MENU_COMMAND_OPEN_DOCUMENT, MENU_COMMAND_OPEN_WORKSPACE,
         MENU_COMMAND_QUIT_APP, MENU_COMMAND_SAVE_ACTIVE_DOCUMENT,
-        MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS, MENU_COMMAND_SET_MODE_SPLITVIEW, MENU_FILE_TITLE,
-        MENU_VIEW_TITLE, TopLevelMenuSection, VIEW_MENU_COMMANDS,
+        MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS, MENU_COMMAND_SET_MODE_SPLITVIEW, MENU_EDIT_TITLE,
+        MENU_FILE_TITLE, MENU_VIEW_TITLE, TopLevelMenuSection, VIEW_MENU_COMMANDS,
         cli_binary_install_is_ours, cli_binary_wrapper_script_for_target,
         cli_launcher_alias_command_for_path, install_cli_binary_at, install_cli_launcher_alias,
         menu_command_from_id, open_startup_path, resolve_cli_path, shell_config_path_for_shell,
@@ -1842,6 +1864,7 @@ mod tests {
     #[test]
     fn app_menu_descriptors_cover_file_and_view_commands() {
         assert_eq!(MENU_FILE_TITLE, "File");
+        assert_eq!(MENU_EDIT_TITLE, "Edit");
         assert_eq!(MENU_VIEW_TITLE, "View");
         assert_eq!(
             FILE_MENU_COMMANDS
@@ -1897,6 +1920,7 @@ mod tests {
             &[
                 TopLevelMenuSection::NativeApp,
                 TopLevelMenuSection::File,
+                TopLevelMenuSection::Edit,
                 TopLevelMenuSection::View,
             ]
         );
