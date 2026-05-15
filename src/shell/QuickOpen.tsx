@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { fuzzyScore } from '@/lib/fuzzy';
 
 export interface QuickOpenItem {
   path: string;
@@ -26,20 +27,23 @@ const MAX_RESULTS = 50;
 const PAGE_SIZE = 10;
 
 function filterItems(items: QuickOpenItem[], query: string): QuickOpenItem[] {
-  const trimmed = query.trim().toLowerCase();
+  const trimmed = query.trim();
   if (!trimmed) {
     return items.slice(0, MAX_RESULTS);
   }
-  const tokens = trimmed.split(/\s+/).filter(Boolean);
-  const filtered: QuickOpenItem[] = [];
-  for (const item of items) {
-    const haystack = `${item.name} ${item.relativePath}`.toLowerCase();
-    if (tokens.every((token) => haystack.includes(token))) {
-      filtered.push(item);
-      if (filtered.length >= MAX_RESULTS) break;
+  const scored: Array<{ item: QuickOpenItem; score: number; order: number }> = [];
+  items.forEach((item, order) => {
+    // Score name and relativePath separately so a hit on the filename ranks
+    // higher than a hit on the same characters buried deep in a folder path.
+    const nameScore = fuzzyScore(item.name, trimmed);
+    const pathScore = fuzzyScore(item.relativePath, trimmed);
+    const score = Math.max(nameScore * 1.5, pathScore);
+    if (score > 0) {
+      scored.push({ item, score, order });
     }
-  }
-  return filtered;
+  });
+  scored.sort((a, b) => (b.score - a.score) || (a.order - b.order));
+  return scored.slice(0, MAX_RESULTS).map((entry) => entry.item);
 }
 
 export function QuickOpen({ open, onOpenChange, items, onSelect }: QuickOpenProps) {

@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { fuzzyScore, stripToAscii } from '@/lib/fuzzy';
 
 export interface CommandPaletteCommand {
   id: string;
@@ -32,20 +33,20 @@ function filterCommands(
   commands: CommandPaletteCommand[],
   query: string,
 ): CommandPaletteCommand[] {
-  const trimmed = query.trim().toLowerCase();
+  const trimmed = query.trim();
   if (!trimmed) {
     return commands.slice(0, MAX_RESULTS);
   }
-  const tokens = trimmed.split(/\s+/).filter(Boolean);
-  const filtered: CommandPaletteCommand[] = [];
-  for (const command of commands) {
-    const haystack = `${command.label} ${command.category ?? ''}`.toLowerCase();
-    if (tokens.every((token) => haystack.includes(token))) {
-      filtered.push(command);
-      if (filtered.length >= MAX_RESULTS) break;
+  const scored: Array<{ command: CommandPaletteCommand; score: number; order: number }> = [];
+  commands.forEach((command, order) => {
+    const haystack = `${command.label} ${command.category ?? ''}`;
+    const score = fuzzyScore(haystack, trimmed);
+    if (score > 0) {
+      scored.push({ command, score, order });
     }
-  }
-  return filtered;
+  });
+  scored.sort((a, b) => (b.score - a.score) || (a.order - b.order));
+  return scored.slice(0, MAX_RESULTS).map((entry) => entry.command);
 }
 
 export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteProps) {
@@ -143,13 +144,21 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
           <Input
             autoFocus
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => setQuery(stripToAscii(event.target.value))}
+            onCompositionEnd={(event) => {
+              const stripped = stripToAscii((event.target as HTMLInputElement).value);
+              if (stripped !== (event.target as HTMLInputElement).value) {
+                setQuery(stripped);
+              }
+            }}
             onKeyDown={handleKeyDown}
             placeholder="Type a command…"
             aria-label="Command palette search"
             aria-controls={listboxId}
             aria-activedescendant={activeOptionId}
             aria-autocomplete="list"
+            lang="en"
+            inputMode="text"
             className="h-9 border-0 shadow-none focus-visible:ring-0 px-1"
           />
         </div>

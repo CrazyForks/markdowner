@@ -2811,7 +2811,7 @@ describe('App recent documents', () => {
     });
   });
 
-  it('filters Quick Open with a space-separated query that spans the name and path', async () => {
+  it('filters Quick Open fuzzily across name and path with a space-separated query', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         rootDir: '/tmp/project',
@@ -2835,7 +2835,7 @@ describe('App recent documents', () => {
 
     await within(quickOpenDialog).findAllByRole('option');
 
-    fireEvent.change(input, { target: { value: 'md guides' } });
+    fireEvent.change(input, { target: { value: 'api md' } });
 
     await waitFor(() => {
       expect(within(quickOpenDialog).queryAllByRole('option')).toHaveLength(1);
@@ -2845,7 +2845,7 @@ describe('App recent documents', () => {
     expect(match).toHaveTextContent(/guides\/reference\/api\.md/);
   });
 
-  it('filters Quick Open with multi-token queries regardless of token order', async () => {
+  it('filters Quick Open fuzzily by character subsequence in the path', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         rootDir: '/tmp/project',
