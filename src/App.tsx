@@ -2373,6 +2373,17 @@ export default function App() {
       return;
     }
 
+    // CJK IME safety net: never call setContent while a composition is in
+    // flight. Even when the ref/draft compare above looks like a legitimate
+    // external change, replacing the doc mid-composition destroys the
+    // ProseMirror docView and reseats the cursor — Korean syllables after the
+    // first one then land in a new paragraph below the heading. The flush
+    // scheduled by compositionend will re-trigger this effect with both
+    // values realigned once composition actually finishes.
+    if (isWysiwygComposingRef.current || editor.view?.composing) {
+      return;
+    }
+
     // emitUpdate:false prevents Tiptap from firing onUpdate, which would
     // setLocalDraft to a possibly-renormalized markdown string and
     // re-trigger this effect indefinitely (React error #185).
