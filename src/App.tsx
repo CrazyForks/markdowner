@@ -14,7 +14,7 @@ import TableRow from '@tiptap/extension-table-row';
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import { Markdown } from '@tiptap/markdown';
-import { EditorContent, useEditor } from '@tiptap/react';
+import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
 import { ChevronDown, ChevronRight, FileText, FolderOpen } from 'lucide-react';
@@ -894,6 +894,11 @@ export default function App() {
   const lastEditorMarkdownRef = useRef<string>('');
   const isWysiwygComposingRef = useRef(false);
   const wysiwygCompositionFlushTimerRef = useRef<number | null>(null);
+  // Mirrors the live Tiptap editor instance so memoized handleDOMEvents
+  // callbacks (which capture closures at first render) can always reach the
+  // current editor — without this, `editor` inside `compositionend` would be
+  // null after we stabilise the editorProps reference below.
+  const editorInstanceRef = useRef<TiptapEditor | null>(null);
   useEffect(() => {
     isFindReplaceOpenRef.current = isFindReplaceOpen;
   }, [isFindReplaceOpen]);
@@ -1735,8 +1740,24 @@ export default function App() {
     }
   }, [activeDocumentOpen, currentMode]);
 
-  const editor = useEditor({
-    extensions: [
+  // Stable refs so memoized editorProps / onUpdate callbacks can always read
+  // the latest reactive state without forcing Tiptap to setOptions on every
+  // render. The reason these matter: useEditor calls editor.setOptions when
+  // any option reference (extensions / editorProps / content) differs across
+  // renders, and setOptions ultimately calls view.updateState — which during
+  // an active CJK IME composition rebuilds the docView and tears down the
+  // in-flight IME, splitting Korean syllables across blocks.
+  const currentModeRef = useRef(currentMode);
+  useEffect(() => {
+    currentModeRef.current = currentMode;
+  }, [currentMode]);
+  const typewriterModeEnabledRef = useRef(settings.typewriterModeEnabled);
+  useEffect(() => {
+    typewriterModeEnabledRef.current = settings.typewriterModeEnabled;
+  }, [settings.typewriterModeEnabled]);
+
+  const wysiwygExtensions = useMemo(
+    () => [
       StarterKit.configure({
         link: {
           openOnClick: false,
@@ -1757,13 +1778,15 @@ export default function App() {
         },
       }),
     ],
-    content: localDraft || '',
-    contentType: 'markdown',
-    editorProps: {
+    [],
+  );
+
+  const wysiwygEditorProps = useMemo(
+    () => ({
       attributes: {
         class: `editor-surface tiptap-surface ${MARKDOWN_CONTENT_SCOPE_CLASS}`,
       },
-      handleKeyDown: (view, event) => {
+      handleKeyDown: (view: any, event: KeyboardEvent) => {
         if (
           event.key !== 'PageUp' &&
           event.key !== 'PageDown' &&
@@ -1789,12 +1812,12 @@ export default function App() {
         return false;
       },
       handleDOMEvents: {
-        beforeinput: (view, event) => {
+        beforeinput: (_view: any, event: Event) => {
           const inputEvent = event as InputEvent;
           if (
             inputEvent.isComposing ||
             inputEvent.inputType === 'insertCompositionText' ||
-            view.composing
+            (_view as { composing?: boolean }).composing
           ) {
             isWysiwygComposingRef.current = true;
           }
@@ -1810,18 +1833,25 @@ export default function App() {
         },
         compositionend: () => {
           isWysiwygComposingRef.current = false;
-          scheduleWysiwygCompositionFlush(editor);
+          scheduleWysiwygCompositionFlush(editorInstanceRef.current);
           return false;
         },
         compositioncancel: () => {
           isWysiwygComposingRef.current = false;
-          scheduleWysiwygCompositionFlush(editor);
+          scheduleWysiwygCompositionFlush(editorInstanceRef.current);
           return false;
         },
       },
-    },
-    onUpdate: ({ editor: nextEditor }) => {
-      if (currentMode === 'Wysiwyg') {
+    }),
+    // scheduleWysiwygCompositionFlush is a stable useEffectEvent and refs are
+    // stable — keep deps empty so this object identity never changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const handleWysiwygUpdate = useEffectEvent(
+    ({ editor: nextEditor }: { editor: TiptapEditor }) => {
+      if (currentModeRef.current === 'Wysiwyg') {
         if (isWysiwygComposingRef.current || nextEditor.view?.composing) {
           // Keep ProseMirror's editable DOM authoritative during CJK
           // composition. Intermediate jamo states are unstable markdown and
@@ -1832,22 +1862,41 @@ export default function App() {
           return;
         }
         const markdown = nextEditor.getMarkdown();
-        // Record the editor-authored markdown so the sync effect doesn't
-        // mistake this for an external change and clobber subsequent edits.
         lastEditorMarkdownRef.current = markdown;
         publishWysiwygMarkdownDraft(markdown);
       }
-      if (settings.typewriterModeEnabled && currentMode === 'Wysiwyg') {
+      if (typewriterModeEnabledRef.current && currentModeRef.current === 'Wysiwyg') {
         window.requestAnimationFrame(() => centerTiptapEditorLine(nextEditor));
       }
     },
-    onSelectionUpdate: ({ editor: nextEditor }) => {
-      if (settings.typewriterModeEnabled && currentMode === 'Wysiwyg') {
+  );
+
+  const handleWysiwygSelectionUpdate = useEffectEvent(
+    ({ editor: nextEditor }: { editor: TiptapEditor }) => {
+      if (typewriterModeEnabledRef.current && currentModeRef.current === 'Wysiwyg') {
         window.requestAnimationFrame(() => centerTiptapEditorLine(nextEditor));
       }
     },
+  );
+
+  const editor = useEditor({
+    extensions: wysiwygExtensions,
+    // Initial content only. Subsequent localDraft changes flow in via the
+    // dedicated sync useEffect (which itself bails during composition); we do
+    // NOT thread localDraft through useEditor's options because that would
+    // change the option reference on every keystroke and force a setOptions
+    // (and view.updateState) round-trip mid-IME.
+    content: '',
+    contentType: 'markdown',
+    editorProps: wysiwygEditorProps,
+    onUpdate: handleWysiwygUpdate,
+    onSelectionUpdate: handleWysiwygSelectionUpdate,
     immediatelyRender: false,
   });
+
+  useEffect(() => {
+    editorInstanceRef.current = editor;
+  }, [editor]);
 
   const sourceFindResult = useMemo(
     () => findTextMatches(localDraft, findQuery, findOptions),
