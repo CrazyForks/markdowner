@@ -54,6 +54,8 @@ export interface EditorAreaProps {
   minimapEnabled?: boolean;
   /** The scrollable element the minimap mirrors. Typically the active editor pane. */
   minimapScrollEl?: HTMLElement | null;
+  /** Controls cell padding/font in WYSIWYG + preview markdown tables. */
+  tableDensity?: 'compact' | 'normal';
 }
 
 export function EditorArea({
@@ -91,6 +93,7 @@ export function EditorArea({
   wrapColumn,
   minimapEnabled = false,
   minimapScrollEl = null,
+  tableDensity = 'compact',
 }: EditorAreaProps) {
   // Cast the style record so we can carry our custom property
   // (`--editor-wrap-column`) without TypeScript complaining about an
@@ -198,6 +201,7 @@ export function EditorArea({
         className="relative flex min-h-0 flex-1 flex-col bg-background"
         data-mode={currentMode}
         data-minimap={minimapEnabled && activeDocumentOpen ? 'on' : 'off'}
+        data-table-density={tableDensity}
       >
         {!activeDocumentOpen ? (
           <Empty className="flex-1 border-dashed">

@@ -4481,6 +4481,7 @@ export default function App() {
         onWysiwygSurfaceMouseDown={handleWysiwygSurfaceMouseDown}
         minimapEnabled={settings.showMinimap}
         minimapScrollEl={minimapScrollEl}
+        tableDensity={settings.tableDensity}
         editorContent={
           <>
             <EditorContent editor={editor} />

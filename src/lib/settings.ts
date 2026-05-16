@@ -16,6 +16,7 @@ export interface Settings {
   pdfPaperSize: 'A4' | 'Letter';
   diagnosticsEnabled: boolean;
   showMinimap: boolean;
+  tableDensity: 'compact' | 'normal';
 }
 
 export interface DiagnosticsLogStatus {
@@ -63,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pdfPaperSize: 'A4',
   diagnosticsEnabled: false,
   showMinimap: false,
+  tableDensity: 'compact',
 };
 
 export const OUTLINE_FONT_SIZE_MIN = 10;
@@ -116,6 +118,9 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   }
   if (typeof merged.showMinimap !== 'boolean') {
     merged.showMinimap = DEFAULT_SETTINGS.showMinimap;
+  }
+  if (merged.tableDensity !== 'compact' && merged.tableDensity !== 'normal') {
+    merged.tableDensity = DEFAULT_SETTINGS.tableDensity;
   }
   return merged;
 }

@@ -4071,6 +4071,7 @@ describe('App recent documents', () => {
           pdfPaperSize: 'A4',
           diagnosticsEnabled: false,
           showMinimap: false,
+          tableDensity: 'compact',
         },
       });
     });
@@ -5274,6 +5275,7 @@ describe('App recent documents', () => {
           pdfPaperSize: 'A4',
           diagnosticsEnabled: false,
           showMinimap: false,
+          tableDensity: 'compact',
         },
       });
     });

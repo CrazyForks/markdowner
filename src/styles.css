@@ -195,10 +195,11 @@
   }
   .markdown-surface th,
   .markdown-surface td {
-    @apply border border-border px-3 text-left leading-snug;
-    /* Vertical padding scales with the cell's font size so condensed rows
-       stay condensed at any zoom level. */
-    padding-block: 0.2em;
+    @apply border border-border text-left leading-snug;
+    /* Padding is set in default + density overrides below. */
+    padding-inline: 0.6em;
+    padding-block: 0.15em;
+    font-size: 0.95em;
   }
   .markdown-surface th {
     @apply bg-muted font-semibold;
@@ -207,6 +208,21 @@
   .markdown-surface td > p {
     @apply my-0;
     min-height: 0;
+  }
+  /* Density variants — the editor surface inherits a data-table-density
+     attribute from the EditorArea wrapper, so changing the setting
+     re-applies the spacing without a remount. */
+  [data-table-density='compact'] .markdown-surface th,
+  [data-table-density='compact'] .markdown-surface td {
+    padding-inline: 0.5em;
+    padding-block: 0.1em;
+    font-size: 0.9em;
+  }
+  [data-table-density='normal'] .markdown-surface th,
+  [data-table-density='normal'] .markdown-surface td {
+    padding-inline: 0.85em;
+    padding-block: 0.35em;
+    font-size: 1em;
   }
   .markdown-surface img {
     @apply max-w-full rounded-lg;

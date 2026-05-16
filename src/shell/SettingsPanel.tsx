@@ -511,6 +511,40 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
             />
           </div>
 
+          <div className={toggleFieldClass}>
+            <Label htmlFor="table-density" className="text-sm">Table Density</Label>
+            <ToggleGroup
+              id="table-density"
+              data-testid="settings-table-density-toggle"
+              type="single"
+              value={settings.tableDensity}
+              onValueChange={(value) => {
+                if (!value) return;
+                handleSettingChange('tableDensity', value as Settings['tableDensity']);
+              }}
+              variant="outline"
+              size="sm"
+              className={toggleGroupClass}
+            >
+              <ToggleGroupItem
+                value="compact"
+                aria-label="Compact"
+                title="Compact table density"
+                className={toggleItemClass}
+              >
+                Compact
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="normal"
+                aria-label="Normal"
+                title="Normal table density"
+                className={toggleItemClass}
+              >
+                Normal
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
           <div className={switchFieldClass}>
             <Label htmlFor="diagnostics-enabled" className="text-sm">Diagnostics Logging</Label>
             <Switch
