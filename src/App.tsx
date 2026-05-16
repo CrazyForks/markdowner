@@ -14,6 +14,8 @@ import TableRow from '@tiptap/extension-table-row';
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import { Markdown } from '@tiptap/markdown';
+import { Extension } from '@tiptap/core';
+import { Plugin } from '@tiptap/pm/state';
 import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
@@ -799,6 +801,54 @@ function moveLineBoundaryInProseMirror(
   const nextSelection = SelectionCtor.create(state.doc, anchor, targetPos);
   view.dispatch(state.tr.setSelection(nextSelection).scrollIntoView());
   return true;
+}
+
+// Tiptap extension that filters spurious transactions caused by WebKit's
+// Korean IME duplicating the previously-committed syllable when starting the
+// next composition. The duplicate arrives as a normal text-replace transaction
+// that bypasses our React-side guards (it's dispatched by
+// prosemirror-view.readDOMChange via `view.dispatch(mkTr())`, not via
+// `handleTextInput`). Detect it inside `filterTransaction` and reject.
+function createCJKDuplicationGuardExtension(refs: {
+  lastDataRef: { current: string };
+  lastEndAtRef: { current: number };
+}) {
+  return Extension.create({
+    name: 'cjkDuplicationGuard',
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          filterTransaction(tr, state) {
+            if (!tr.docChanged) return true;
+            const lastText = refs.lastDataRef.current;
+            if (!lastText) return true;
+            const recent = Date.now() - refs.lastEndAtRef.current < 400;
+            if (!recent) return true;
+
+            const oldText = state.doc.textContent;
+            const newText = tr.doc.textContent;
+            const doublePattern = lastText + lastText;
+            // Reject only if the new doc gained a NEW occurrence of the
+            // doubled pattern that wasn't in the old doc. This avoids
+            // touching legitimate user inputs where the same syllable was
+            // already typed twice intentionally.
+            const newDoubleCount =
+              newText.split(doublePattern).length - 1;
+            const oldDoubleCount =
+              oldText.split(doublePattern).length - 1;
+            if (newDoubleCount > oldDoubleCount) {
+              // Consume the captured data so the next legitimate insert
+              // (e.g. genuinely typing the same syllable twice on purpose)
+              // is not also rejected.
+              refs.lastDataRef.current = '';
+              return false;
+            }
+            return true;
+          },
+        }),
+      ];
+    },
+  });
 }
 
 function centerTiptapEditorLine(editor: any) {
@@ -1790,7 +1840,13 @@ export default function App() {
           breaks: false,
         },
       }),
+      createCJKDuplicationGuardExtension({
+        lastDataRef: lastWysiwygCompositionDataRef,
+        lastEndAtRef: lastWysiwygCompositionEndAtRef,
+      }),
     ],
+    // The refs are stable across renders, so empty deps are correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
