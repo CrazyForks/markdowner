@@ -900,6 +900,13 @@ export default function App() {
   // after the heading) between syllables — without this, every Hangul
   // syllable after the first splits the heading into heading + paragraph.
   const lastWysiwygCompositionEndAtRef = useRef<number>(0);
+  // The text that the IME just committed (from compositionend.data). WebKit
+  // Korean IME, when transitioning to the next syllable, duplicates the
+  // previously-committed syllable in the DOM as a regular text insertion —
+  // ProseMirror's flush then dispatches it via handleTextInput, producing
+  // `안안녕하세요` from input `안녕하세요`. We compare this ref against the
+  // about-to-insert text inside handleTextInput and swallow the duplicate.
+  const lastWysiwygCompositionDataRef = useRef<string>('');
   // Mirrors the live Tiptap editor instance so memoized handleDOMEvents
   // callbacks (which capture closures at first render) can always reach the
   // current editor — without this, `editor` inside `compositionend` would be
@@ -1836,6 +1843,28 @@ export default function App() {
         }
         return false;
       },
+      handleTextInput: (_view: any, _from: number, _to: number, text: string) => {
+        // CJK IME duplicate-syllable guard. When transitioning from one Hangul
+        // syllable to the next, WebKit's IME duplicates the previous syllable
+        // in the DOM as a regular text insertion (no compositionupdate). The
+        // domObserver.flush() that ProseMirror runs inside compositionstart
+        // then dispatches it via handleTextInput, producing `안안녕하세요`
+        // for input `안녕하세요`. Drop the duplicate when it matches the most
+        // recent compositionend payload within a short window.
+        if (
+          text.length > 0 &&
+          text === lastWysiwygCompositionDataRef.current &&
+          Date.now() - lastWysiwygCompositionEndAtRef.current < 300
+        ) {
+          // Consume the duplicate so the default insertText path is skipped.
+          // Clear the captured data so a legitimately-typed identical sequence
+          // (e.g. user genuinely typing the same syllable twice) still works
+          // on subsequent inputs.
+          lastWysiwygCompositionDataRef.current = '';
+          return true;
+        }
+        return false;
+      },
       handleDOMEvents: {
         beforeinput: (_view: any, event: Event) => {
           const inputEvent = event as InputEvent;
@@ -1856,15 +1885,18 @@ export default function App() {
           }
           return false;
         },
-        compositionend: () => {
+        compositionend: (_view: any, event: Event) => {
           isWysiwygComposingRef.current = false;
           lastWysiwygCompositionEndAtRef.current = Date.now();
+          lastWysiwygCompositionDataRef.current =
+            (event as CompositionEvent).data ?? '';
           scheduleWysiwygCompositionFlush(editorInstanceRef.current);
           return false;
         },
         compositioncancel: () => {
           isWysiwygComposingRef.current = false;
           lastWysiwygCompositionEndAtRef.current = Date.now();
+          lastWysiwygCompositionDataRef.current = '';
           scheduleWysiwygCompositionFlush(editorInstanceRef.current);
           return false;
         },
