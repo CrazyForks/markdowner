@@ -2823,6 +2823,139 @@ describe('App recent documents', () => {
     expect(editor.commands.setContent).not.toHaveBeenCalled();
   });
 
+  it('swallows the WebKit Korean IME duplicate-syllable handleTextInput call', async () => {
+    // Regression test for the bug where typing `# 안녕하세요` rendered as
+    // `# 안안녕하세요`. WebKit's Korean IME fires an extra `handleTextInput`
+    // call mid-composition: after `text="안" from=A to=A+1` (the legitimate
+    // composition update that replaces the in-progress jamo with the final
+    // form), it ALSO dispatches `text="안" from=A+1 to=A+1` — a pure
+    // insertion of the same syllable at the cursor that ends up doubling
+    // the first syllable in the editor. Our handleTextInput must recognise
+    // this insertion-equal-to-preceding-text shape (during composition or
+    // within 200 ms of compositionend) and return true to swallow it.
+    const editor = createMockTiptapEditor('# 안', [{ text: '안', from: 3 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'korean.md',
+        activeDocumentPath: '/tmp/project/korean.md',
+        activeDocumentSource: '# 안',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+    await waitFor(() => {
+      expect(editor.commands.setContent).toHaveBeenCalled();
+    });
+
+    const handleTextInput =
+      tiptapMockState.lastOptions.editorProps.handleTextInput as (
+        view: unknown,
+        from: number,
+        to: number,
+        text: string,
+      ) => boolean;
+    const compositionstart = tiptapMockState.lastOptions.editorProps.handleDOMEvents
+      .compositionstart as (view: unknown, event: Event) => boolean;
+    const compositionend = tiptapMockState.lastOptions.editorProps.handleDOMEvents
+      .compositionend as (view: unknown, event: Event) => boolean;
+
+    // Stub a doc shape just rich enough for the handler's textBetween call.
+    // Position 3 sits right after the '안' character in '# 안'.
+    const docStub = {
+      textBetween: vi.fn((start: number, end: number) => {
+        // Pretend the doc text from positions 2..3 is '안' (matching the
+        // committed syllable that WebKit is about to duplicate).
+        if (start === 2 && end === 3) return '안';
+        return '';
+      }),
+    };
+    const viewStub = { state: { doc: docStub }, dispatch: vi.fn() };
+
+    // Open a composition so the guard's "is composing" precondition is met.
+    act(() => {
+      compositionstart(viewStub, new Event('compositionstart'));
+    });
+
+    // Simulate the legitimate composition-replace first (from !== to). The
+    // handler must allow it through so the IME's in-progress update reaches
+    // the editor.
+    expect(handleTextInput(viewStub, 2, 3, '안')).toBe(false);
+
+    // Now the duplicate insertion (from === to, text matches the character
+    // immediately before the cursor) arrives mid-composition. It must be
+    // swallowed (return true) — that is how the bug stops repeating.
+    expect(handleTextInput(viewStub, 3, 3, '안')).toBe(true);
+
+    // After compositionend, the same insert-equal-to-preceding-text shape
+    // still gets swallowed inside the 200 ms grace window.
+    act(() => {
+      const evt = new Event('compositionend') as CompositionEvent & {
+        data?: string;
+      };
+      (evt as any).data = '안';
+      compositionend(viewStub, evt);
+    });
+    expect(handleTextInput(viewStub, 3, 3, '안')).toBe(true);
+  });
+
+  it('does not swallow insertions whose text does not match the preceding doc text', async () => {
+    // Counter-test for the duplicate-syllable guard: legitimate user input —
+    // including pure insertions during composition where the inserted text
+    // does NOT match the character before the cursor — must still go through
+    // so the IME can actually type new syllables.
+    const editor = createMockTiptapEditor('# 안', [{ text: '안', from: 3 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'korean.md',
+        activeDocumentPath: '/tmp/project/korean.md',
+        activeDocumentSource: '# 안',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+    await waitFor(() => {
+      expect(editor.commands.setContent).toHaveBeenCalled();
+    });
+
+    const handleTextInput =
+      tiptapMockState.lastOptions.editorProps.handleTextInput as (
+        view: unknown,
+        from: number,
+        to: number,
+        text: string,
+      ) => boolean;
+    const compositionstart = tiptapMockState.lastOptions.editorProps.handleDOMEvents
+      .compositionstart as (view: unknown, event: Event) => boolean;
+
+    const docStub = {
+      textBetween: vi.fn((start: number, end: number) => {
+        if (start === 2 && end === 3) return '안';
+        return '';
+      }),
+    };
+    const viewStub = { state: { doc: docStub }, dispatch: vi.fn() };
+
+    act(() => {
+      compositionstart(viewStub, new Event('compositionstart'));
+    });
+
+    // Inserting a different syllable than what precedes the cursor is the
+    // legitimate next-syllable case (e.g. typing 녕 after 안). Must pass.
+    expect(handleTextInput(viewStub, 3, 3, '녕')).toBe(false);
+  });
+
   it('disables Tiptap trailing nodes so headings and list items do not create an automatic blank line', async () => {
     const editor = createMockTiptapEditor('', []);
     tiptapMockState.editor = editor;

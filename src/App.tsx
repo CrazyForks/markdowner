@@ -900,20 +900,13 @@ export default function App() {
   // after the heading) between syllables — without this, every Hangul
   // syllable after the first splits the heading into heading + paragraph.
   const lastWysiwygCompositionEndAtRef = useRef<number>(0);
-  // The text that the IME just committed (from compositionend.data). WebKit
-  // Korean IME, when transitioning to the next syllable, duplicates the
-  // previously-committed syllable in the DOM as a regular text insertion —
-  // ProseMirror's flush then dispatches it via handleTextInput, producing
-  // `안안녕하세요` from input `안녕하세요`. We compare this ref against the
-  // about-to-insert text inside handleTextInput and swallow the duplicate.
+  // Most-recent compositionend payload — kept for diagnostics / future use.
+  // The actual duplicate-syllable detection lives in handleTextInput and
+  // compares against the live editor state rather than this ref, so the
+  // detection survives multi-syllable runs (the bug never depended on the
+  // buffered data anyway — the IME duplicates the in-progress syllable
+  // before compositionend fires).
   const lastWysiwygCompositionDataRef = useRef<string>('');
-  // Rolling buffer of every compositionend payload seen in the last second.
-  // The duplicate that WebKit re-inserts is sometimes the *previous* syllable
-  // rather than the most recent one (e.g. when the diff fed to
-  // handleTextInput is `안녕` after the user has already committed `안` and
-  // `녕`), so a single `lastDataRef` is not enough — we need to be able to
-  // match any recently-committed payload.
-  const wysiwygRecentCompositionDataRef = useRef<{ text: string; at: number }[]>([]);
   // Mirrors the live Tiptap editor instance so memoized handleDOMEvents
   // callbacks (which capture closures at first render) can always reach the
   // current editor — without this, `editor` inside `compositionend` would be
@@ -1851,44 +1844,33 @@ export default function App() {
         return false;
       },
       handleTextInput: (view: any, from: number, to: number, text: string) => {
-        // CJK IME duplicate-syllable guard. When WebKit's Korean IME starts
-        // the next composition, it re-inserts the just-committed syllable in
-        // the DOM. ProseMirror's flush turns that into a handleTextInput call
-        // where the payload is either the duplicate alone (e.g. `안`) or the
-        // duplicate concatenated with the next syllable / its first jamo
-        // (e.g. `안녕`, `안ㄴ`). The duplicated payload is sometimes the
-        // *most-recent* compositionend data and sometimes an older one (when
-        // multiple syllables have accumulated before the diff is flushed), so
-        // walk the rolling buffer in newest-first order and strip the longest
-        // matching prefix found within the 500 ms post-composition window.
+        // CJK IME duplicate-syllable guard. While the user is mid-composition,
+        // WebKit's Korean IME dispatches an extra `insertText` call that
+        // re-inserts the just-composed syllable AT THE CURSOR (from===to)
+        // immediately after the legitimate replace-with-final-form call,
+        // producing `# 안안녕하세요` from input `# 안녕하세요`. The duplicate
+        // is uniquely recognisable: it is an insertion (no range to replace)
+        // whose text exactly matches the characters already sitting just
+        // before the insertion point in the editor state. Swallow it.
+        //
+        // Constraints to avoid false positives:
+        //  • Only while a composition is active or has just ended — outside
+        //    that window, a user genuinely typing the same syllable twice in
+        //    a row (`안안경`, "안전" etc.) must still be honoured.
+        //  • Only when from === to (a pure insertion). Replacements are
+        //    composition-progress updates and are legitimate.
         const now = Date.now();
-        const buffer = wysiwygRecentCompositionDataRef.current;
-        // eslint-disable-next-line no-console
-        console.log('[CJK-DEBUG] handleTextInput', {
-          text,
-          from,
-          to,
-          buffer: buffer.map((b) => `${b.text}@${now - b.at}ms`).join(','),
-          oldDocText: view.state.doc.textContent,
-        });
-        for (let i = 0; i < buffer.length; i += 1) {
-          const entry = buffer[i];
-          if (now - entry.at > 500) continue;
-          if (!entry.text || !text.startsWith(entry.text)) continue;
-          // Remove this entry so a genuinely repeated syllable isn't stripped
-          // a second time on a later legitimate insert.
-          buffer.splice(i, 1);
-          const cleaned = text.slice(entry.text.length);
-          // eslint-disable-next-line no-console
-          console.log('[CJK-DEBUG] handleTextInput STRIP', {
-            stripped: entry.text,
-            cleaned,
-          });
-          if (cleaned.length === 0) {
+        if (
+          from === to &&
+          text.length > 0 &&
+          (isWysiwygComposingRef.current ||
+            now - lastWysiwygCompositionEndAtRef.current < 200)
+        ) {
+          const start = Math.max(0, from - text.length);
+          const before = view.state.doc.textBetween(start, from, '\n', '\n');
+          if (before === text) {
             return true;
           }
-          view.dispatch(view.state.tr.insertText(cleaned, from, to));
-          return true;
         }
         return false;
       },
@@ -1904,44 +1886,19 @@ export default function App() {
           }
           return false;
         },
-        compositionstart: (view: any, event: Event) => {
+        compositionstart: () => {
           isWysiwygComposingRef.current = true;
           if (wysiwygCompositionFlushTimerRef.current !== null) {
             window.clearTimeout(wysiwygCompositionFlushTimerRef.current);
             wysiwygCompositionFlushTimerRef.current = null;
           }
-          // eslint-disable-next-line no-console
-          console.log('[CJK-DEBUG] compositionstart', {
-            data: (event as CompositionEvent).data,
-            domText: (view?.dom as HTMLElement | undefined)?.textContent,
-            stateText: view?.state?.doc?.textContent,
-          });
           return false;
         },
-        compositionend: (view: any, event: Event) => {
+        compositionend: (_view: any, event: Event) => {
           isWysiwygComposingRef.current = false;
-          const now = Date.now();
-          lastWysiwygCompositionEndAtRef.current = now;
-          const data = (event as CompositionEvent).data ?? '';
-          lastWysiwygCompositionDataRef.current = data;
-          if (data.length > 0) {
-            const recent = wysiwygRecentCompositionDataRef.current;
-            // Keep the buffer small and drop entries older than 1s — anything
-            // older cannot plausibly be the syllable WebKit is duplicating.
-            wysiwygRecentCompositionDataRef.current = [
-              { text: data, at: now },
-              ...recent.filter((entry) => now - entry.at < 1000),
-            ].slice(0, 8);
-          }
-          // eslint-disable-next-line no-console
-          console.log('[CJK-DEBUG] compositionend', {
-            data,
-            domText: (view?.dom as HTMLElement | undefined)?.textContent,
-            stateText: view?.state?.doc?.textContent,
-            buffer: wysiwygRecentCompositionDataRef.current
-              .map((b) => `${b.text}@${now - b.at}ms`)
-              .join(','),
-          });
+          lastWysiwygCompositionEndAtRef.current = Date.now();
+          lastWysiwygCompositionDataRef.current =
+            (event as CompositionEvent).data ?? '';
           scheduleWysiwygCompositionFlush(editorInstanceRef.current);
           return false;
         },
@@ -1949,9 +1906,6 @@ export default function App() {
           isWysiwygComposingRef.current = false;
           lastWysiwygCompositionEndAtRef.current = Date.now();
           lastWysiwygCompositionDataRef.current = '';
-          // A cancelled composition shouldn't contribute to the duplicate
-          // buffer — drop any not-yet-consumed entries to be safe.
-          wysiwygRecentCompositionDataRef.current = [];
           scheduleWysiwygCompositionFlush(editorInstanceRef.current);
           return false;
         },
@@ -1967,10 +1921,6 @@ export default function App() {
     ({ editor: nextEditor }: { editor: TiptapEditor }) => {
       if (currentModeRef.current === 'Wysiwyg') {
         if (isWysiwygComposingRef.current || nextEditor.view?.composing) {
-          // eslint-disable-next-line no-console
-          console.log('[CJK-DEBUG] onUpdate SKIP (composing)', {
-            stateText: nextEditor.state.doc.textContent,
-          });
           // Keep ProseMirror's editable DOM authoritative during CJK
           // composition. Intermediate jamo states are unstable markdown and
           // must NOT be written to lastEditorMarkdownRef — if they were, a
@@ -1980,11 +1930,6 @@ export default function App() {
           return;
         }
         const markdown = nextEditor.getMarkdown();
-        // eslint-disable-next-line no-console
-        console.log('[CJK-DEBUG] onUpdate PUBLISH', {
-          markdown,
-          stateText: nextEditor.state.doc.textContent,
-        });
         lastEditorMarkdownRef.current = markdown;
         publishWysiwygMarkdownDraft(markdown);
       }
