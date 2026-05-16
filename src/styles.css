@@ -593,52 +593,79 @@ section[data-mode='Wysiwyg'] {
   background: var(--border);
 }
 
-/* VS Code-style minimap overlay. Anchored to the right edge of the editor
-   surface; renders the raw markdown at a tiny font with a viewport indicator. */
+/* VS Code-style minimap. A vertical strip on the right edge of the editor
+   surface. Each markdown line is rendered as a tiny horizontal bar; the
+   whole document is scaled to fit so users see the full structure at a
+   glance and the viewport indicator gives precise spatial alignment. */
 .minimap {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 110px;
-  background: color-mix(in srgb, var(--muted) 70%, transparent);
-  border-left: 1px solid var(--border);
+  width: 84px;
+  background: color-mix(in srgb, var(--background) 86%, var(--foreground) 4%);
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   overflow: hidden;
   cursor: pointer;
   user-select: none;
   z-index: 5;
 }
-.minimap-content {
-  margin: 0;
-  padding: 6px 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 2px;
-  line-height: 3px;
-  white-space: pre;
-  word-break: keep-all;
-  color: color-mix(in srgb, var(--foreground) 70%, transparent);
+.minimap-track {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 6px 6px;
   pointer-events: none;
-  overflow: hidden;
+}
+.minimap-row {
+  display: flex;
+  align-items: center;
+  min-height: 0;
+}
+.minimap-bar {
+  display: block;
+  height: 60%;
+  min-height: 1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--foreground) 30%, transparent);
+}
+.minimap-row-blank .minimap-bar,
+.minimap-row-blank {
+  background: transparent;
+}
+.minimap-row-heading .minimap-bar {
+  background: color-mix(in srgb, var(--foreground) 65%, transparent);
+  height: 80%;
+}
+.minimap-row-list .minimap-bar {
+  background: color-mix(in srgb, var(--foreground) 38%, transparent);
+}
+.minimap-row-code .minimap-bar {
+  background: color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+.minimap-row-quote .minimap-bar {
+  background: color-mix(in srgb, var(--foreground) 32%, transparent);
 }
 .minimap-viewport {
   position: absolute;
   left: 0;
   right: 0;
-  background: color-mix(in srgb, var(--foreground) 14%, transparent);
-  border-top: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
   pointer-events: none;
-  transition: top 50ms linear;
+  transition: none;
 }
 .minimap:hover .minimap-viewport {
-  background: color-mix(in srgb, var(--foreground) 22%, transparent);
+  background: color-mix(in srgb, var(--foreground) 14%, transparent);
 }
-/* When the minimap is visible, reserve right-padding on the editor panes so
-   long text doesn't slide under the overlay. */
+/* Reserve right-padding on editor panes so long text doesn't slide under
+   the overlay. Slightly narrower padding than the minimap so the viewport
+   indicator still visually catches the text edge. */
 section[data-minimap='on'] .editor-pane-source .cm-content,
 section[data-minimap='on'] .editor-pane-wysiwyg .notion-editor-content,
 section[data-minimap='on'] .editor-pane-preview {
-  padding-right: 120px;
+  padding-right: 96px;
 }
 
 /* Code block node-view shell: keeps the language picker visually attached to

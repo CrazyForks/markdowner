@@ -1,12 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
 import { cn } from '@/lib/utils';
 
 export interface MinimapProps {
-  /** Markdown source displayed in the downscaled preview. */
+  /** Markdown source rendered as line bars. */
   text: string;
-  /** The scrollable element to mirror and control. Pass null while unavailable. */
+  /** The scrollable element the minimap mirrors. Null hides the indicator. */
   scrollEl: HTMLElement | null;
   className?: string;
+}
+
+type LineKind = 'blank' | 'heading' | 'code' | 'list' | 'quote' | 'regular';
+
+interface LineSpec {
+  kind: LineKind;
+  width: number;
 }
 
 interface ViewportRect {
@@ -14,16 +29,65 @@ interface ViewportRect {
   height: number;
 }
 
+const MAX_VISIBLE_WIDTH_CHARS = 80;
+const MIN_LINE_HEIGHT_PX = 1;
+
+function classifyLine(line: string): LineKind {
+  const trimmed = line.trim();
+  if (!trimmed) return 'blank';
+  if (/^#{1,6}\s/.test(trimmed)) return 'heading';
+  if (trimmed.startsWith('```') || trimmed.startsWith('    ')) return 'code';
+  if (/^([-*+]\s|\d+\.\s|\[\s\]|\[x\])/i.test(trimmed)) return 'list';
+  if (trimmed.startsWith('>')) return 'quote';
+  return 'regular';
+}
+
 /**
- * VS Code-style minimap: a tiny preview column anchored to the right of the
- * editor surface. Renders the raw markdown source at ~1-2px font, draws a
- * viewport indicator over the visible region, and routes clicks back into
- * the underlying editor as a proportional scroll.
+ * VS Code-style minimap. Renders each source line as a small horizontal bar
+ * whose width tracks the trimmed line length and colour reflects the
+ * markdown structure (heading / list / code / quote / regular). The whole
+ * document is always scaled to fit the available height so the minimap is
+ * a true preview rather than a scrollable miniature.
+ *
+ * Scroll sync is bidirectional: the editor's scroll position drives a
+ * viewport indicator on the minimap, and click + drag on the minimap maps
+ * back to a proportional scrollTop on the editor.
  */
-export function Minimap({ text, scrollEl, className }: MinimapProps) {
+function MinimapImpl({ text, scrollEl, className }: MinimapProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const [rootHeight, setRootHeight] = useState(0);
   const [viewport, setViewport] = useState<ViewportRect>({ top: 0, height: 0 });
   const draggingRef = useRef(false);
+
+  const lines = useMemo<LineSpec[]>(() => {
+    return text.split('\n').map((raw) => {
+      const trimmed = raw.trim();
+      const width = trimmed.length === 0
+        ? 0
+        : Math.min(1, trimmed.length / MAX_VISIBLE_WIDTH_CHARS);
+      return { kind: classifyLine(raw), width };
+    });
+  }, [text]);
+
+  // Pixel height each line is allotted. Scales the entire document so the
+  // minimap shows the whole thing without an internal scrollbar.
+  const lineHeight = useMemo(() => {
+    if (rootHeight <= 0 || lines.length === 0) return MIN_LINE_HEIGHT_PX;
+    return Math.max(MIN_LINE_HEIGHT_PX, rootHeight / lines.length);
+  }, [rootHeight, lines.length]);
+
+  // Observe rootRef size — the minimap must respond to window resize so
+  // the line-height calculation stays in sync.
+  useEffect(() => {
+    if (!rootRef.current) return;
+    const target = rootRef.current;
+    const ro = new ResizeObserver(() => {
+      setRootHeight(target.clientHeight);
+    });
+    ro.observe(target);
+    setRootHeight(target.clientHeight);
+    return () => ro.disconnect();
+  }, []);
 
   const recalcViewport = useCallback(() => {
     const scroller = scrollEl;
@@ -32,30 +96,25 @@ export function Minimap({ text, scrollEl, className }: MinimapProps) {
       setViewport({ top: 0, height: 0 });
       return;
     }
-    const totalHeight = scroller.scrollHeight;
-    const visibleHeight = scroller.clientHeight;
-    const rootHeight = root.clientHeight;
-    if (totalHeight <= 0 || visibleHeight <= 0 || rootHeight <= 0) {
-      setViewport({ top: 0, height: rootHeight });
+    const total = scroller.scrollHeight;
+    const visible = scroller.clientHeight;
+    const rootH = root.clientHeight;
+    if (total <= 0 || visible <= 0 || rootH <= 0) {
+      setViewport({ top: 0, height: rootH });
       return;
     }
-    const heightRatio = Math.min(1, visibleHeight / totalHeight);
-    const topRatio =
-      totalHeight - visibleHeight > 0
-        ? scroller.scrollTop / (totalHeight - visibleHeight)
-        : 0;
-    const indicatorHeight = Math.max(20, heightRatio * rootHeight);
+    const heightRatio = Math.min(1, visible / total);
+    const denominator = total - visible;
+    const topRatio = denominator > 0 ? scroller.scrollTop / denominator : 0;
+    const indicatorHeight = Math.max(16, heightRatio * rootH);
     const indicatorTop = Math.max(
       0,
-      Math.min(rootHeight - indicatorHeight, topRatio * (rootHeight - indicatorHeight)),
+      Math.min(rootH - indicatorHeight, topRatio * (rootH - indicatorHeight)),
     );
     setViewport({ top: indicatorTop, height: indicatorHeight });
   }, [scrollEl]);
 
-  useEffect(() => {
-    recalcViewport();
-  }, [recalcViewport, text]);
-
+  // Real-time scroll sync from editor → minimap.
   useEffect(() => {
     const scroller = scrollEl;
     if (!scroller) return;
@@ -63,12 +122,17 @@ export function Minimap({ text, scrollEl, className }: MinimapProps) {
     scroller.addEventListener('scroll', onScroll, { passive: true });
     const ro = new ResizeObserver(() => recalcViewport());
     ro.observe(scroller);
-    if (rootRef.current) ro.observe(rootRef.current);
+    recalcViewport();
     return () => {
       scroller.removeEventListener('scroll', onScroll);
       ro.disconnect();
     };
   }, [recalcViewport, scrollEl]);
+
+  // Recompute when content or root height change.
+  useEffect(() => {
+    recalcViewport();
+  }, [recalcViewport, rootHeight, text]);
 
   const scrollToClientY = useCallback(
     (clientY: number) => {
@@ -77,23 +141,20 @@ export function Minimap({ text, scrollEl, className }: MinimapProps) {
       if (!scroller || !root) return;
       const rect = root.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-      const totalHeight = scroller.scrollHeight;
-      const visibleHeight = scroller.clientHeight;
-      const target = ratio * totalHeight - visibleHeight / 2;
-      const clamped = Math.max(0, Math.min(totalHeight - visibleHeight, target));
+      const total = scroller.scrollHeight;
+      const visible = scroller.clientHeight;
+      const target = ratio * total - visible / 2;
+      const clamped = Math.max(0, Math.min(total - visible, target));
       scroller.scrollTop = clamped;
     },
     [scrollEl],
   );
 
-  // Drag-to-scroll: mousedown starts tracking, mousemove updates the scroll
-  // until mouseup releases. Bound at the document level so the user can drag
-  // outside the minimap rect without losing the gesture.
+  // Drag-to-scroll. Document-level move/up listeners so the gesture survives
+  // a cursor that wanders outside the minimap rectangle.
   useEffect(() => {
     if (!draggingRef.current) return;
-    const onMove = (event: MouseEvent) => {
-      scrollToClientY(event.clientY);
-    };
+    const onMove = (event: MouseEvent) => scrollToClientY(event.clientY);
     const onUp = () => {
       draggingRef.current = false;
       document.removeEventListener('mousemove', onMove);
@@ -126,7 +187,22 @@ export function Minimap({ text, scrollEl, className }: MinimapProps) {
       className={cn('minimap', className)}
       onMouseDown={handleMouseDown}
     >
-      <pre className="minimap-content">{text}</pre>
+      <div className="minimap-track">
+        {lines.map((line, index) => (
+          <div
+            key={index}
+            className={`minimap-row minimap-row-${line.kind}`}
+            style={{ height: `${lineHeight}px` }}
+          >
+            {line.kind !== 'blank' ? (
+              <span
+                className="minimap-bar"
+                style={{ width: `${Math.max(line.width * 100, 6)}%` }}
+              />
+            ) : null}
+          </div>
+        ))}
+      </div>
       <div
         className="minimap-viewport"
         style={{ top: viewport.top, height: viewport.height }}
@@ -135,4 +211,5 @@ export function Minimap({ text, scrollEl, className }: MinimapProps) {
   );
 }
 
+export const Minimap = memo(MinimapImpl);
 export default Minimap;
