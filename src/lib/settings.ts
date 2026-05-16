@@ -15,6 +15,7 @@ export interface Settings {
   themeFollowSystem: boolean;
   pdfPaperSize: 'A4' | 'Letter';
   diagnosticsEnabled: boolean;
+  showMinimap: boolean;
 }
 
 export interface DiagnosticsLogStatus {
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS: Settings = {
   themeFollowSystem: true,
   pdfPaperSize: 'A4',
   diagnosticsEnabled: false,
+  showMinimap: false,
 };
 
 export const OUTLINE_FONT_SIZE_MIN = 10;
@@ -111,6 +113,9 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
     merged.assetFolder = DEFAULT_SETTINGS.assetFolder;
   } else {
     merged.assetFolder = merged.assetFolder.trim();
+  }
+  if (typeof merged.showMinimap !== 'boolean') {
+    merged.showMinimap = DEFAULT_SETTINGS.showMinimap;
   }
   return merged;
 }

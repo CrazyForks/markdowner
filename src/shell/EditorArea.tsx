@@ -8,6 +8,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { cn } from '@/lib/utils';
+import { Minimap } from './Minimap';
 import {
   type CSSProperties,
   type MouseEventHandler,
@@ -41,12 +42,18 @@ export interface EditorAreaProps {
   onSplitSourceScroll?: UIEventHandler<HTMLDivElement>;
   onSplitPreviewScroll?: UIEventHandler<HTMLDivElement>;
   onSplitPreviewClick?: MouseEventHandler<HTMLDivElement>;
+  onSourceSurfaceMouseDown?: MouseEventHandler<HTMLDivElement>;
+  onWysiwygSurfaceMouseDown?: MouseEventHandler<HTMLDivElement>;
   fontSize?: number;
   fontFamily?: string;
   focusModeEnabled?: boolean;
   typewriterModeEnabled?: boolean;
   lineWrap?: boolean;
   wrapColumn?: number;
+  /** When true, an overlay minimap is rendered against the editor surface. */
+  minimapEnabled?: boolean;
+  /** The scrollable element the minimap mirrors. Typically the active editor pane. */
+  minimapScrollEl?: HTMLElement | null;
 }
 
 export function EditorArea({
@@ -74,12 +81,16 @@ export function EditorArea({
   onSplitSourceScroll,
   onSplitPreviewScroll,
   onSplitPreviewClick,
+  onSourceSurfaceMouseDown,
+  onWysiwygSurfaceMouseDown,
   fontSize,
   fontFamily,
   focusModeEnabled = false,
   typewriterModeEnabled = false,
   lineWrap = true,
   wrapColumn,
+  minimapEnabled = false,
+  minimapScrollEl = null,
 }: EditorAreaProps) {
   // Cast the style record so we can carry our custom property
   // (`--editor-wrap-column`) without TypeScript complaining about an
@@ -184,8 +195,9 @@ export function EditorArea({
       ) : null}
 
       <section
-        className="flex min-h-0 flex-1 flex-col bg-background"
+        className="relative flex min-h-0 flex-1 flex-col bg-background"
         data-mode={currentMode}
+        data-minimap={minimapEnabled && activeDocumentOpen ? 'on' : 'off'}
       >
         {!activeDocumentOpen ? (
           <Empty className="flex-1 border-dashed">
@@ -258,6 +270,7 @@ export function EditorArea({
             activeDocumentOpen && currentMode === 'SplitView' && 'flex-1 border-r border-border',
           )}
           onScroll={onSplitSourceScroll}
+          onMouseDown={onSourceSurfaceMouseDown}
           style={editorSurfaceStyle}
           aria-hidden={!activeDocumentOpen || currentMode === 'Wysiwyg'}
         >
@@ -296,6 +309,7 @@ export function EditorArea({
             !(activeDocumentOpen && currentMode === 'Wysiwyg') && 'hidden',
             activeDocumentOpen && currentMode === 'Wysiwyg' && 'flex-1',
           )}
+          onMouseDown={onWysiwygSurfaceMouseDown}
           style={editorSurfaceStyle}
           aria-hidden={!(activeDocumentOpen && currentMode === 'Wysiwyg')}
         >
@@ -310,6 +324,10 @@ export function EditorArea({
             </div>
           ) : null}
         </div>
+
+        {minimapEnabled && activeDocumentOpen ? (
+          <Minimap text={localDraft} scrollEl={minimapScrollEl} />
+        ) : null}
       </section>
     </main>
   );

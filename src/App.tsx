@@ -95,6 +95,7 @@ import {
   type FindReplaceOptions,
 } from './lib/findReplace';
 import { nextCursorPositionFromStatistics } from './lib/cursorPosition';
+import { wysiwygCursorSourceLine, wysiwygPositionAtSourceLine } from './lib/modeCursor';
 import {
   DEFAULT_SETTINGS,
   OUTLINE_FONT_SIZE_MAX,
@@ -1608,6 +1609,53 @@ export default function App() {
     window.requestAnimationFrame(() => centerSourceEditorLine(view));
   });
 
+  // Clicks landing on the empty padding around the WYSIWYG editor (below the
+  // last block, or in the left/right gutters) normally fall through with no
+  // visible action because the click never reaches ProseMirror's contentDOM.
+  // Translate the coordinates to the nearest document position so the caret
+  // lands where the user expected — matching VS Code / IDE conventions.
+  const handleWysiwygSurfaceMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!editor) return;
+    if (currentMode !== 'Wysiwyg' && currentMode !== 'SplitView') return;
+    const target = event.target as Node | null;
+    if (!target) return;
+    const contentDom = editor.view.dom;
+    // Click hit the ProseMirror content — let the editor's own handler run.
+    if (contentDom.contains(target)) return;
+    event.preventDefault();
+    const coords = { left: event.clientX, top: event.clientY };
+    let pos: number | null = null;
+    try {
+      const hit = editor.view.posAtCoords(coords);
+      if (hit) pos = hit.pos;
+    } catch {
+      // posAtCoords can throw if the view hasn't laid out yet; fall through
+      // to the document-end fallback below.
+    }
+    if (pos === null) {
+      editor.chain().focus('end').run();
+      return;
+    }
+    editor.chain().focus().setTextSelection(pos).run();
+  };
+
+  // Mirrors handleWysiwygSurfaceMouseDown for the CodeMirror source surface:
+  // clicking the wrapper's padding zone should move the caret to the closest
+  // text position, not silently do nothing.
+  const handleSourceSurfaceMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const view = sourceEditorViewRef.current;
+    if (!view) return;
+    if (currentMode !== 'Editor' && currentMode !== 'SplitView') return;
+    const target = event.target as Node | null;
+    if (!target) return;
+    if (view.dom.contains(target)) return;
+    event.preventDefault();
+    const pos =
+      view.posAtCoords({ x: event.clientX, y: event.clientY }, false) ??
+      view.state.doc.length;
+    focusSourceSelection(pos);
+  };
+
   const handleSplitPreviewClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (currentMode !== 'SplitView') return;
     if (!(event.target instanceof Element)) return;
@@ -1779,6 +1827,16 @@ export default function App() {
   useEffect(() => {
     currentModeRef.current = currentMode;
   }, [currentMode]);
+  // Most recent markdown source line the WYSIWYG cursor was sitting on.
+  // Updated on every Tiptap selection update so mode switches (Option+1/2/3)
+  // can hand the caret to the new editor at the equivalent row.
+  const wysiwygCursorLineRef = useRef<number>(1);
+  // Scroll container the minimap should mirror. Picked from the active editor
+  // pane on every mode/lifecycle change.
+  const [minimapScrollEl, setMinimapScrollEl] = useState<HTMLElement | null>(null);
+  // Tracks the mode the previous render saw so the mode-change effect can
+  // tell which editor "owned" the cursor at the moment of the switch.
+  const previousModeForCursorRef = useRef<EditorMode>(currentMode);
   const typewriterModeEnabledRef = useRef(settings.typewriterModeEnabled);
   useEffect(() => {
     typewriterModeEnabledRef.current = settings.typewriterModeEnabled;
@@ -1956,6 +2014,9 @@ export default function App() {
 
   const handleWysiwygSelectionUpdate = useEffectEvent(
     ({ editor: nextEditor }: { editor: TiptapEditor }) => {
+      // Mirror the WYSIWYG selection as a markdown source line so mode
+      // switches can hand the caret to CodeMirror at the same logical row.
+      wysiwygCursorLineRef.current = wysiwygCursorSourceLine(nextEditor);
       if (typewriterModeEnabledRef.current && currentModeRef.current === 'Wysiwyg') {
         window.requestAnimationFrame(() => centerTiptapEditorLine(nextEditor));
       }
@@ -2960,6 +3021,70 @@ export default function App() {
     hasUnsavedChanges,
     localDraft,
   ]);
+
+  // Resolve the scroll element the minimap should mirror. For Source / Split
+  // we want CodeMirror's scrollDOM (the cm-scroller); for WYSIWYG we want the
+  // outer pane wrapper. Re-runs whenever the editor instance, the active
+  // document, or the current mode change.
+  useEffect(() => {
+    if (!settings.showMinimap || !activeDocumentOpen) {
+      setMinimapScrollEl(null);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      if (currentMode === 'Wysiwyg') {
+        const pane = document.querySelector<HTMLElement>(
+          '[data-testid="editor-surface-wysiwyg"]',
+        );
+        setMinimapScrollEl(pane);
+        return;
+      }
+      const scroll = sourceEditorViewRef.current?.scrollDOM ?? null;
+      setMinimapScrollEl(scroll);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [currentMode, activeDocumentOpen, settings.showMinimap, editor]);
+
+  // Cursor handoff between WYSIWYG ↔ Source on mode change. Captures the
+  // logical line the user was on in the *previous* mode and replays it in
+  // the new one once the editor surface has actually mounted/laid out.
+  useEffect(() => {
+    const previousMode = previousModeForCursorRef.current;
+    previousModeForCursorRef.current = currentMode;
+    if (previousMode === currentMode) return;
+    if (!activeDocumentOpen) return;
+
+    const sourceLine =
+      previousMode === 'Wysiwyg'
+        ? wysiwygCursorLineRef.current
+        : cursorPosition.line;
+    if (!Number.isFinite(sourceLine) || sourceLine < 1) return;
+
+    // Defer to the next frame so the editor pane that just became visible
+    // has measured layout — focus()/setSelection on a display:none element
+    // is a silent no-op in Chromium-based webviews.
+    const frame = window.requestAnimationFrame(() => {
+      if (currentMode === 'Wysiwyg') {
+        const editorInstance = editorInstanceRef.current;
+        if (!editorInstance) return;
+        const pos = wysiwygPositionAtSourceLine(editorInstance, sourceLine);
+        if (pos === null) {
+          editorInstance.chain().focus().run();
+          return;
+        }
+        editorInstance.chain().focus().setTextSelection(pos).run();
+        return;
+      }
+      // Editor or SplitView — the source pane owns the caret.
+      const offset = getSourceOffsetForLine(sourceLine);
+      focusSourceSelection(offset);
+    });
+    return () => window.cancelAnimationFrame(frame);
+    // We intentionally omit cursorPosition.line and getSourceOffsetForLine —
+    // their identity changes on every selection update / draft edit and
+    // would re-trigger this effect mid-typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMode, activeDocumentOpen]);
 
   const handleSetMode = useEffectEvent(async (nextMode: EditorMode) => {
     // Always read snapshot/localDraft from the latest state via useEffectEvent
@@ -4345,6 +4470,10 @@ export default function App() {
         onSplitSourceScroll={handleSplitSourceScroll}
         onSplitPreviewScroll={handleSplitPreviewScroll}
         onSplitPreviewClick={handleSplitPreviewClick}
+        onSourceSurfaceMouseDown={handleSourceSurfaceMouseDown}
+        onWysiwygSurfaceMouseDown={handleWysiwygSurfaceMouseDown}
+        minimapEnabled={settings.showMinimap}
+        minimapScrollEl={minimapScrollEl}
         editorContent={
           <>
             <EditorContent editor={editor} />

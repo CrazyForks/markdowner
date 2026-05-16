@@ -4070,6 +4070,7 @@ describe('App recent documents', () => {
           themeFollowSystem: true,
           pdfPaperSize: 'A4',
           diagnosticsEnabled: false,
+          showMinimap: false,
         },
       });
     });
@@ -5272,6 +5273,7 @@ describe('App recent documents', () => {
           themeFollowSystem: true,
           pdfPaperSize: 'A4',
           diagnosticsEnabled: false,
+          showMinimap: false,
         },
       });
     });

@@ -485,6 +485,15 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
           </div>
 
           <div className={switchFieldClass}>
+            <Label htmlFor="show-minimap" className="text-sm">Show Minimap</Label>
+            <Switch
+              id="show-minimap"
+              checked={settings.showMinimap}
+              onCheckedChange={(checked) => handleSettingChange('showMinimap', checked)}
+            />
+          </div>
+
+          <div className={switchFieldClass}>
             <Label htmlFor="diagnostics-enabled" className="text-sm">Diagnostics Logging</Label>
             <Switch
               id="diagnostics-enabled"

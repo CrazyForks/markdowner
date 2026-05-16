@@ -568,3 +568,51 @@ section[data-mode='Wysiwyg'] {
   margin: 0 2px;
   background: var(--border);
 }
+
+/* VS Code-style minimap overlay. Anchored to the right edge of the editor
+   surface; renders the raw markdown at a tiny font with a viewport indicator. */
+.minimap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 110px;
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  z-index: 5;
+}
+.minimap-content {
+  margin: 0;
+  padding: 6px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 2px;
+  line-height: 3px;
+  white-space: pre;
+  word-break: keep-all;
+  color: color-mix(in srgb, var(--foreground) 70%, transparent);
+  pointer-events: none;
+  overflow: hidden;
+}
+.minimap-viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
+  pointer-events: none;
+  transition: top 50ms linear;
+}
+.minimap:hover .minimap-viewport {
+  background: color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+/* When the minimap is visible, reserve right-padding on the editor panes so
+   long text doesn't slide under the overlay. */
+section[data-minimap='on'] .editor-pane-source .cm-content,
+section[data-minimap='on'] .editor-pane-wysiwyg .notion-editor-content,
+section[data-minimap='on'] .editor-pane-preview {
+  padding-right: 120px;
+}
