@@ -2980,6 +2980,36 @@ export default function App() {
       contentType: 'markdown',
       emitUpdate: false,
     });
+    if (tabChanged) {
+      // ProseMirror's transaction mapper carries the previous tab's
+      // selection through the doc replacement above — when the prior
+      // selection covered a range (Cmd+A, drag-selected paragraph, a find
+      // hit, a node-selected image) the new tab can open with WebKit
+      // visibly rendering that range against the new content. Collapse
+      // the DOM selection to a single caret position so the focus call
+      // that follows (in focusActiveEditor / the user's first click)
+      // doesn't paint the entire freshly-loaded file as highlighted.
+      //
+      // We touch the DOM selection directly instead of dispatching a
+      // ProseMirror transaction because dispatching here would re-enter
+      // the editor's DOMObserver flush path, which in JSDOM hits a
+      // missing-getClientRects branch and shows up as an unhandled error
+      // in tests. The real ProseMirror state has *also* been mapped to
+      // a point already (setContent's default selection mapping snaps to
+      // atStart when the previous range falls outside the new doc), so
+      // clearing the DOM range alone is enough to remove the visible
+      // highlight without contradicting the editor's internal state.
+      const win = typeof window !== 'undefined' ? window : null;
+      const selection = win?.getSelection?.();
+      if (selection && selection.rangeCount > 0) {
+        try {
+          selection.removeAllRanges();
+        } catch {
+          // Some embedded WebViews throw on removeAllRanges when the
+          // selection's anchorNode has been detached. Non-fatal.
+        }
+      }
+    }
   }, [editor, localDraft, activeTabId]);
 
   const previewSource = activeDocumentOpen
