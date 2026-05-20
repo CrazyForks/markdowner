@@ -52,6 +52,8 @@ export interface EditorAreaProps {
    */
   syncLocalDraft?: string;
   fontSize?: number;
+  /** Unitless line-height multiplier; applied so CodeMirror + ProseMirror match. */
+  lineHeight?: number;
   fontFamily?: string;
   focusModeEnabled?: boolean;
   typewriterModeEnabled?: boolean;
@@ -94,6 +96,7 @@ export function EditorArea({
   onWysiwygSurfaceMouseDown,
   syncLocalDraft,
   fontSize,
+  lineHeight,
   fontFamily,
   focusModeEnabled = false,
   typewriterModeEnabled = false,
@@ -109,6 +112,13 @@ export function EditorArea({
   const editorSurfaceStyle: CSSProperties & Record<string, string | number> = {};
   if (fontSize && Number.isFinite(fontSize) && fontSize > 0) {
     editorSurfaceStyle.fontSize = `${fontSize}px`;
+  }
+  if (lineHeight && Number.isFinite(lineHeight) && lineHeight > 0) {
+    // Unitless line-height — CodeMirror and ProseMirror both inherit; rendered
+    // line-height becomes `fontSize * lineHeight`, so ⌘+/⌘- on the font alone
+    // keeps the leading proportional.
+    editorSurfaceStyle.lineHeight = lineHeight;
+    editorSurfaceStyle['--editor-line-height'] = String(lineHeight);
   }
   if (fontFamily && fontFamily.trim().length > 0) {
     editorSurfaceStyle.fontFamily = fontFamily;

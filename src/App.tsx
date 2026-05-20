@@ -107,6 +107,8 @@ import {
 } from './lib/modeCursor';
 import {
   DEFAULT_SETTINGS,
+  EDITOR_FONT_SIZE_MAX,
+  EDITOR_FONT_SIZE_MIN,
   OUTLINE_FONT_SIZE_MAX,
   OUTLINE_FONT_SIZE_MIN,
   OUTLINE_ROW_SPACING_MAX,
@@ -3857,6 +3859,39 @@ export default function App() {
         return;
       }
 
+      // Cmd+- / Cmd+= (a.k.a. Cmd++) adjust the editor font size, modifying
+      // the same `editorFontSize` value the Settings panel exposes. We match
+      // on `event.code` for layout independence: on macOS/KR keyboards the
+      // `-` and `=` glyphs sit at Minus/Equal regardless of typed character,
+      // and Cmd+Shift+= (the "+" combo) reports Equal as well. The change
+      // routes through handleSettingsChange so it is persisted via
+      // save_settings — no separate codepath.
+      if (
+        usesCommandModifier(event) &&
+        !event.altKey &&
+        (event.code === 'Minus' || event.code === 'Equal')
+      ) {
+        // Cmd+Shift+- is unbound; only react to plain Cmd+- (no shift).
+        // Cmd+= and Cmd+Shift+= ("+") both bump the size.
+        const isIncrement = event.code === 'Equal';
+        const isDecrement = event.code === 'Minus' && !event.shiftKey;
+        if (!isIncrement && !isDecrement) {
+          return;
+        }
+        event.preventDefault();
+        const current = Number.isFinite(settings.editorFontSize) && settings.editorFontSize > 0
+          ? settings.editorFontSize
+          : DEFAULT_SETTINGS.editorFontSize;
+        const next = Math.min(
+          EDITOR_FONT_SIZE_MAX,
+          Math.max(EDITOR_FONT_SIZE_MIN, current + (isIncrement ? 1 : -1)),
+        );
+        if (next !== current) {
+          handleSettingsChange({ ...settings, editorFontSize: next });
+        }
+        return;
+      }
+
       // Cmd+Shift+] / Cmd+Shift+[ → next / previous tab (wrapping). Users see
       // these as ⌘} / ⌘{ since `{` and `}` are Shift-bracket on US/KR layouts.
       if (
@@ -4715,6 +4750,7 @@ export default function App() {
           ) : null
         }
         fontSize={settings.editorFontSize || DEFAULT_SETTINGS.editorFontSize}
+        lineHeight={settings.editorLineHeight || DEFAULT_SETTINGS.editorLineHeight}
         fontFamily={settings.editorFontFamily}
         focusModeEnabled={settings.focusModeEnabled}
         typewriterModeEnabled={settings.typewriterModeEnabled}

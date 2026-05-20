@@ -59,6 +59,7 @@ export const CODE_BLOCK_THEMES: ReadonlyArray<{ value: CodeBlockTheme; label: st
 export interface Settings {
   autoSave: boolean;
   editorFontSize: number;
+  editorLineHeight: number;
   editorFontFamily: string;
   editorLineWrap: boolean;
   editorWrapColumn: number;
@@ -109,7 +110,8 @@ export const CLI_ALIAS_COMMAND =
 
 export const DEFAULT_SETTINGS: Settings = {
   autoSave: false,
-  editorFontSize: 12,
+  editorFontSize: 14,
+  editorLineHeight: 1.6,
   editorFontFamily: '',
   editorLineWrap: true,
   editorWrapColumn: 120,
@@ -129,6 +131,14 @@ export const DEFAULT_SETTINGS: Settings = {
   codeBlockThemeSync: true,
 };
 
+export const EDITOR_FONT_SIZE_MIN = 8;
+export const EDITOR_FONT_SIZE_MAX = 48;
+// Line-height is stored as a unitless multiplier so it tracks with font-size:
+// rendered line-height ends up at `fontSize * editorLineHeight`. ⌘+/⌘- can
+// therefore stay font-size-only while the displayed leading still scales.
+export const EDITOR_LINE_HEIGHT_MIN = 1.0;
+export const EDITOR_LINE_HEIGHT_MAX = 2.5;
+export const EDITOR_LINE_HEIGHT_STEP = 0.1;
 export const OUTLINE_FONT_SIZE_MIN = 10;
 export const OUTLINE_FONT_SIZE_MAX = 18;
 export const OUTLINE_ROW_SPACING_MIN = 0;
@@ -180,6 +190,23 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   const merged = { ...DEFAULT_SETTINGS, ...(value ?? {}) };
   if (!Number.isFinite(merged.editorFontSize) || merged.editorFontSize <= 0) {
     merged.editorFontSize = DEFAULT_SETTINGS.editorFontSize;
+  } else {
+    merged.editorFontSize = Math.min(
+      EDITOR_FONT_SIZE_MAX,
+      Math.max(EDITOR_FONT_SIZE_MIN, Math.round(merged.editorFontSize)),
+    );
+  }
+  if (!Number.isFinite(merged.editorLineHeight) || merged.editorLineHeight <= 0) {
+    merged.editorLineHeight = DEFAULT_SETTINGS.editorLineHeight;
+  } else {
+    // Round to one decimal place so the stored value matches the 0.1 step
+    // shown in the UI (1.0, 1.1, 1.2, …) and a Cmd-driven adjustment never
+    // accumulates floating-point drift.
+    const clamped = Math.min(
+      EDITOR_LINE_HEIGHT_MAX,
+      Math.max(EDITOR_LINE_HEIGHT_MIN, merged.editorLineHeight),
+    );
+    merged.editorLineHeight = Math.round(clamped * 10) / 10;
   }
   merged.outlineFontSize = normalizeBoundedInteger(
     merged.outlineFontSize,

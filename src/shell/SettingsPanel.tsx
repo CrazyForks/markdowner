@@ -10,6 +10,11 @@ import {
   CLI_BINARY_INSTALL_PATH,
   CODE_BLOCK_THEMES,
   DEFAULT_SETTINGS,
+  EDITOR_FONT_SIZE_MAX,
+  EDITOR_FONT_SIZE_MIN,
+  EDITOR_LINE_HEIGHT_MAX,
+  EDITOR_LINE_HEIGHT_MIN,
+  EDITOR_LINE_HEIGHT_STEP,
   EDITOR_WRAP_COLUMN_MAX,
   EDITOR_WRAP_COLUMN_MIN,
   OUTLINE_FONT_SIZE_MAX,
@@ -154,6 +159,7 @@ export function SettingsPanel({
   };
 
   const fontSizeValue = settings.editorFontSize || DEFAULT_SETTINGS.editorFontSize;
+  const lineHeightValue = settings.editorLineHeight || DEFAULT_SETTINGS.editorLineHeight;
   const outlineFontSizeValue = settings.outlineFontSize || DEFAULT_SETTINGS.outlineFontSize;
   const outlineRowSpacingValue =
     settings.outlineRowSpacing ?? DEFAULT_SETTINGS.outlineRowSpacing;
@@ -291,15 +297,43 @@ export function SettingsPanel({
             <Input
               id="font-size"
               type="number"
-              min={8}
-              max={48}
+              min={EDITOR_FONT_SIZE_MIN}
+              max={EDITOR_FONT_SIZE_MAX}
               className={inputControlClass}
               value={fontSizeValue}
               onChange={(event) => {
-                const parsed = Number.parseInt(event.target.value, 10);
-                handleSettingChange(
+                handleBoundedNumberChange(
                   'editorFontSize',
-                  Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.editorFontSize,
+                  event.target.value,
+                  DEFAULT_SETTINGS.editorFontSize,
+                  EDITOR_FONT_SIZE_MIN,
+                  EDITOR_FONT_SIZE_MAX,
+                );
+              }}
+            />
+          </div>
+
+          <div className={inputFieldClass}>
+            <Label htmlFor="line-height" className="text-sm">Line Height</Label>
+            <Input
+              id="line-height"
+              type="number"
+              inputMode="decimal"
+              min={EDITOR_LINE_HEIGHT_MIN}
+              max={EDITOR_LINE_HEIGHT_MAX}
+              step={EDITOR_LINE_HEIGHT_STEP}
+              className={inputControlClass}
+              value={lineHeightValue}
+              onChange={(event) => {
+                const parsed = Number.parseFloat(event.target.value);
+                if (!Number.isFinite(parsed)) return;
+                const clamped = Math.min(
+                  EDITOR_LINE_HEIGHT_MAX,
+                  Math.max(EDITOR_LINE_HEIGHT_MIN, parsed),
+                );
+                handleSettingChange(
+                  'editorLineHeight',
+                  Math.round(clamped * 10) / 10,
                 );
               }}
             />

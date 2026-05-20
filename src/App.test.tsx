@@ -4155,7 +4155,8 @@ describe('App recent documents', () => {
       expect(invokeMock).toHaveBeenCalledWith('save_settings', {
         settings: {
           autoSave: false,
-          editorFontSize: 12,
+          editorFontSize: 14,
+          editorLineHeight: 1.6,
           editorFontFamily: '',
           editorLineWrap: true,
           editorWrapColumn: 120,
@@ -5362,7 +5363,8 @@ describe('App recent documents', () => {
       expect(invokeMock).toHaveBeenCalledWith('save_settings', {
         settings: {
           autoSave: false,
-          editorFontSize: 12,
+          editorFontSize: 14,
+          editorLineHeight: 1.6,
           editorFontFamily: '',
           editorLineWrap: true,
           editorWrapColumn: 120,
@@ -5384,7 +5386,7 @@ describe('App recent documents', () => {
       });
     });
 
-    expect(within(dialog).getByLabelText(/^font size$/i)).toHaveValue(12);
+    expect(within(dialog).getByLabelText(/^font size$/i)).toHaveValue(14);
     expect(within(dialog).getByLabelText(/font family/i)).toHaveValue('');
   });
 

@@ -63,6 +63,8 @@ const SECTIONS: ShortcutSection[] = [
       { keys: '⌥2', label: 'Editor mode' },
       { keys: '⌥3', label: 'Split View' },
       { keys: '⌘⇧T', label: 'Toggle Typewriter Mode' },
+      { keys: '⌘+', label: 'Increase font size' },
+      { keys: '⌘-', label: 'Decrease font size' },
     ],
   },
   {

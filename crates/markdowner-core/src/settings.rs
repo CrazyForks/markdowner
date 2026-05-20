@@ -7,6 +7,8 @@ use crate::EditorMode;
 pub struct Settings {
     pub auto_save: bool,
     pub editor_font_size: u32,
+    /// Unitless line-height multiplier; the frontend normalizes 0 → default.
+    pub editor_line_height: f32,
     pub editor_font_family: String,
     pub editor_line_wrap: bool,
     pub editor_wrap_column: u32,
@@ -31,6 +33,7 @@ impl Default for Settings {
         Self {
             auto_save: false,
             editor_font_size: 0,
+            editor_line_height: 0.0,
             editor_font_family: String::new(),
             editor_line_wrap: true,
             editor_wrap_column: 120,
