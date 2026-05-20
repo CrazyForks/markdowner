@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Terminal, Trash2 } from 'lucide-react';
+import { Copy, CopyCheck, Terminal, Trash2 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -75,12 +75,15 @@ export function SettingsPanel({
 
   const [ctrlGLauncher, setCtrlGLauncher] = useState<CtrlGLauncherStatus>({
     shellConfigPath: '',
-    targetAppBundle: '',
+    // Mirror the backend's default so the snippet is visible even before the
+    // first cliBinary status round-trip resolves (e.g. tests, web preview).
+    snippet: 'export EDITOR="mdner"\nexport VISUAL="mdner"',
     installed: false,
   });
   const [ctrlGLauncherBusy, setCtrlGLauncherBusy] = useState(false);
   const [ctrlGLauncherMessage, setCtrlGLauncherMessage] = useState('');
   const [ctrlGLauncherError, setCtrlGLauncherError] = useState(false);
+  const [ctrlGSnippetCopied, setCtrlGSnippetCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,8 +188,8 @@ export function SettingsPanel({
       const result = await installCtrlGLauncher();
       setCtrlGLauncherMessage(
         result.alreadyDone
-          ? `Already installed in ${result.shellConfigPath}. Open a new terminal to use it.`
-          : `Installed in ${result.shellConfigPath}. Open a new terminal to use it.`,
+          ? `Already in ${result.shellConfigPath}. Open a new terminal to pick it up.`
+          : `Added to ${result.shellConfigPath}. Open a new terminal to pick it up.`,
       );
       await refreshCtrlGLauncherStatus();
     } catch (error) {
@@ -207,8 +210,8 @@ export function SettingsPanel({
       const result = await uninstallCtrlGLauncher();
       setCtrlGLauncherMessage(
         result.alreadyDone
-          ? `Not installed in ${result.shellConfigPath}`
-          : `Uninstalled from ${result.shellConfigPath}. Open a new terminal to drop the binding.`,
+          ? `Not present in ${result.shellConfigPath}`
+          : `Removed from ${result.shellConfigPath}. Open a new terminal to drop it.`,
       );
       await refreshCtrlGLauncherStatus();
     } catch (error) {
@@ -218,6 +221,21 @@ export function SettingsPanel({
       setCtrlGLauncherMessage(`Uninstall failed: ${text || 'unknown error'}`);
     } finally {
       setCtrlGLauncherBusy(false);
+    }
+  };
+
+  const handleCopyCtrlGSnippet = async () => {
+    if (!ctrlGLauncher.snippet) return;
+    try {
+      await navigator.clipboard.writeText(ctrlGLauncher.snippet);
+      setCtrlGSnippetCopied(true);
+      // Revert the icon after a moment so the button is reusable without
+      // ambiguity if the user copies a second time.
+      window.setTimeout(() => setCtrlGSnippetCopied(false), 1500);
+    } catch (error) {
+      console.error('Failed to copy Ctrl+G snippet:', error);
+      setCtrlGLauncherError(true);
+      setCtrlGLauncherMessage('Copy failed — try selecting the snippet manually.');
     }
   };
 
@@ -376,22 +394,44 @@ export function SettingsPanel({
             </span>
           </div>
           <p className="text-sm text-muted-foreground">
-            Binds <code className="font-mono text-xs">Ctrl+G</code> at the shell prompt to launch
-            Markdowner. Works in zsh and bash when you're at the prompt — useful while running
-            Claude Code, Codex, or any CLI tool from the terminal. (TUI apps that capture
-            keystrokes won't see Ctrl+G; press it from the shell.)
+            Sets <code className="font-mono text-xs">EDITOR</code> and{' '}
+            <code className="font-mono text-xs">VISUAL</code> to{' '}
+            <code className="font-mono text-xs">mdner</code> in your shell rc so CLI tools
+            (Claude Code, Codex, <code className="font-mono text-xs">git commit</code>, …) open
+            Markdowner when you press <code className="font-mono text-xs">Ctrl+G</code> (or
+            otherwise spawn your editor). Requires the <code className="font-mono text-xs">mdner</code>{' '}
+            CLI Binary above. Use Copy if you'd rather paste it into a different rc file or a
+            tool-specific config.
           </p>
-          {ctrlGLauncher.shellConfigPath ? (
-            <div
-              data-testid="settings-ctrl-g-launcher-path"
-              className="min-w-0 overflow-hidden rounded bg-muted px-2 py-1.5"
-            >
-              <code className="block min-w-0 whitespace-pre-wrap break-all font-mono text-xs leading-5">
-                {ctrlGLauncher.shellConfigPath}
-                {ctrlGLauncher.targetAppBundle
-                  ? `  →  ${ctrlGLauncher.targetAppBundle}`
-                  : ''}
-              </code>
+          {ctrlGLauncher.snippet ? (
+            <div className="flex min-w-0 flex-col gap-2">
+              <pre
+                data-testid="settings-ctrl-g-launcher-snippet"
+                className="min-w-0 overflow-x-auto rounded bg-muted px-3 py-2 font-mono text-xs leading-5 whitespace-pre"
+              >
+                {ctrlGLauncher.snippet}
+              </pre>
+              <div className="flex items-center justify-between gap-2">
+                <code
+                  data-testid="settings-ctrl-g-launcher-path"
+                  className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
+                  title={ctrlGLauncher.shellConfigPath}
+                >
+                  {ctrlGLauncher.shellConfigPath || '…'}
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyCtrlGSnippet}
+                  aria-label="Copy Ctrl+G shell snippet"
+                  data-testid="settings-ctrl-g-launcher-copy"
+                  disabled={!ctrlGLauncher.snippet}
+                >
+                  {ctrlGSnippetCopied ? <CopyCheck /> : <Copy />}
+                  {ctrlGSnippetCopied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
             </div>
           ) : null}
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row">

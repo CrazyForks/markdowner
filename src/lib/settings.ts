@@ -105,7 +105,13 @@ export interface CliBinaryActionResult {
 
 export interface CtrlGLauncherStatus {
   shellConfigPath: string;
-  targetAppBundle: string;
+  /**
+   * The two-line shell snippet (`export EDITOR="mdner"` / `export VISUAL="mdner"`)
+   * the install would (or did) append. Surfaced so the Settings UI can render
+   * the exact text and offer a Copy button for users who'd rather paste it
+   * into a different rc file or a CLI tool's own config.
+   */
+  snippet: string;
   installed: boolean;
 }
 
@@ -340,7 +346,7 @@ export async function ctrlGLauncherStatus(): Promise<CtrlGLauncherStatus | null>
     if (!result || typeof result !== 'object') return null;
     return {
       shellConfigPath: typeof result.shellConfigPath === 'string' ? result.shellConfigPath : '',
-      targetAppBundle: typeof result.targetAppBundle === 'string' ? result.targetAppBundle : '',
+      snippet: typeof result.snippet === 'string' ? result.snippet : '',
       installed: Boolean(result.installed),
     };
   } catch (error) {
