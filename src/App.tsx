@@ -4832,12 +4832,12 @@ export default function App() {
             name: tab.name,
             path: tab.path,
             isActive: tab.id === activeTabId,
-            isDirty:
-              tab.kind === 'settings'
-                ? false
-                : tab.id === activeTabId
-                ? localDraft !== tab.source
-                : tab.draft !== tab.source,
+            // Reuse tabIsDirty so the indicator agrees with the close/quit
+            // "Save changes?" prompt — both must normalize trailing newlines
+            // so the WYSIWYG TrailingNode's empty paragraph (which exists
+            // only in the view, not on disk) doesn't pin the dot on after a
+            // successful save.
+            isDirty: tabIsDirty(tab),
             missing: tab.missing,
           }))}
           recentDocuments={snapshot.recentDocuments}
@@ -4914,12 +4914,9 @@ export default function App() {
             id: tab.id,
             kind: tab.kind,
             name: tab.name,
-            isDirty:
-              tab.kind === 'settings'
-                ? false
-                : tab.id === activeTabId
-                ? localDraft !== tab.source
-                : tab.draft !== tab.source,
+            // Same normalized check as the Explorer "Open Editors" list and
+            // the close/quit "Save changes?" prompt. See tabIsDirty.
+            isDirty: tabIsDirty(tab),
             missing: tab.missing,
             shortcutLabel:
               index < 9 ? `⌘${index + 1}` : index === 9 ? '⌘0' : null,

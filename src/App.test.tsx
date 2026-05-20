@@ -2281,6 +2281,43 @@ describe('App recent documents', () => {
     });
   });
 
+  it('clears the tab dirty indicator when localDraft only differs from tab.source by a trailing newline', async () => {
+    // Reproduces the user-reported bug: after Cmd+S, the WYSIWYG TrailingNode
+    // (or any path where the editor's serialized markdown drops the final \n)
+    // leaves localDraft as "# Hello" while tab.source becomes "# Hello\n" on
+    // disk. The close/quit prompt already normalizes both sides via
+    // normalizeFinalNewline, so it correctly treats the doc as clean — but the
+    // tab/sidebar dot indicator used to use raw strict equality, leaving the
+    // dirty circle painted even though the file was successfully saved. The
+    // fix routes both indicators through tabIsDirty so the comparison is
+    // consistently normalized.
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        // Source as loaded from disk ends in a trailing newline.
+        activeDocumentSource: '# Meeting notes\n',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    const editor = await screen.findByRole('textbox', { name: /source editor/i });
+
+    // Simulate the editor surfacing a value WITHOUT the trailing newline — the
+    // WYSIWYG serialization shape that the save path's normalizeFinalNewline
+    // would round-trip to "# Meeting notes\n" on disk.
+    fireEvent.change(editor, { target: { value: '# Meeting notes' } });
+
+    // The tab strip has one tab; if the indicator (•) were painted, the
+    // accessible label "Unsaved changes" would be in the document. The fix
+    // keeps the comparison normalized, so neither the tab strip nor the
+    // sidebar's Open Editors list should announce the dirty state.
+    expect(screen.queryByLabelText('Unsaved changes')).toBeNull();
+  });
+
   it('opens a workspace with the keyboard shortcut', async () => {
     openDialogMock.mockResolvedValue('/tmp/project');
     openWorkspaceMock.mockResolvedValue(
