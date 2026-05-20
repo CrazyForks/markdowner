@@ -593,6 +593,77 @@ section[data-mode='Wysiwyg'] {
   background: var(--border);
 }
 
+/* Floating link editor popup (portal to body). Appears above or below the
+   anchor under the caret or mouse cursor. */
+.link-popup {
+  position: fixed;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.2),
+    0 2px 4px rgba(0, 0, 0, 0.08);
+  user-select: none;
+  animation: link-popup-in 90ms ease-out;
+  max-width: min(420px, calc(100vw - 16px));
+}
+@keyframes link-popup-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.link-popup-input {
+  flex: 1 1 auto;
+  min-width: 180px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  outline: none;
+}
+.link-popup-input:focus-visible {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent);
+}
+.link-popup-separator {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
+}
+.link-popup-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background-color 80ms ease, color 80ms ease;
+}
+.link-popup-button:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.link-popup-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.link-popup-button.is-danger:hover {
+  color: var(--destructive);
+}
+
 /* VS Code-style minimap. A vertical strip on the right edge of the editor
    surface. Each markdown line is rendered as a tiny horizontal bar; the
    whole document is scaled to fit so users see the full structure at a

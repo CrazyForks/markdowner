@@ -46,6 +46,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { LinkPopup } from '@/components/wysiwyg/LinkPopup';
 import { SelectionToolbar } from '@/components/wysiwyg/SelectionToolbar';
 import { SlashCommandMenu } from '@/components/wysiwyg/SlashCommandMenu';
 import { TableToolbar } from '@/components/wysiwyg/TableToolbar';
@@ -253,6 +254,12 @@ const SIDEBAR_DEFAULT_WIDTH = 280;
 const SIDEBAR_KEYBOARD_STEP = 8;
 const SIDEBAR_KEYBOARD_PAGE_STEP = 32;
 const CHORD_PREFIX_TIMEOUT_MS = 1500;
+// Debounce window for serializing the WYSIWYG ProseMirror tree into markdown.
+// `editor.getMarkdown()` is O(N) over the doc; on multi-thousand-line files
+// running it per keystroke makes typing visibly stutter. Coalesce serialization
+// at this cadence and force-flush at synchronization points (save, mode
+// switch, tab stash, close prompts) to keep correctness without the cost.
+const WYSIWYG_FLUSH_DEBOUNCE_MS = 120;
 
 function readSidebarState(): boolean {
   try {
@@ -1043,9 +1050,14 @@ export default function App() {
   const stashActiveTabDraft = () => {
     const id = activeTabId;
     if (!id) return;
+    // Force the WYSIWYG debounce to settle so we capture the user's most
+    // recent keystrokes (otherwise switching tabs mid-burst loses ≤120ms of
+    // typing). For Source mode this is a no-op.
+    const fresh = flushWysiwygDraftNow();
+    const draft = fresh ?? localDraft;
     setTabs((prev) =>
       prev.map((tab) =>
-        tab.id === id && tab.kind === 'document' ? { ...tab, draft: localDraft } : tab,
+        tab.id === id && tab.kind === 'document' ? { ...tab, draft } : tab,
       ),
     );
   };
@@ -1835,34 +1847,75 @@ export default function App() {
     setLocalDraft(markdown);
   });
 
-  const scheduleWysiwygCompositionFlush = useEffectEvent(
-    (
-      nextEditor:
-        | { getMarkdown: () => string; view?: { composing?: boolean } }
-        | null
-        | undefined,
-    ) => {
+  // Serialize the editor's current state into localDraft. Skips silently when
+  // not in WYSIWYG mode or while a CJK IME composition is in flight; the
+  // compositionend handler reschedules in that case.
+  const runWysiwygFlush = useEffectEvent(() => {
+    if (currentModeRef.current !== 'Wysiwyg') return;
+    const ed = editorInstanceRef.current;
+    if (!ed) return;
+    if (isWysiwygComposingRef.current || ed.view?.composing) return;
+    publishWysiwygMarkdownDraft(ed.getMarkdown());
+  });
+
+  // Debounced flush. Per-keystroke updates schedule with the default debounce;
+  // compositionend / cancel callers pass 0 to flush on the next tick.
+  const scheduleWysiwygFlush = useEffectEvent(
+    (delayMs: number = WYSIWYG_FLUSH_DEBOUNCE_MS) => {
       if (wysiwygCompositionFlushTimerRef.current !== null) {
         window.clearTimeout(wysiwygCompositionFlushTimerRef.current);
       }
-
       wysiwygCompositionFlushTimerRef.current = window.setTimeout(() => {
         wysiwygCompositionFlushTimerRef.current = null;
-        if (currentMode !== 'Wysiwyg' || !nextEditor) {
-          return;
-        }
-        // CJK IMEs typically chain composition events: compositionend for the
-        // current syllable can be immediately followed by compositionstart for
-        // the next jamo. Re-check the live composing flags so we don't snapshot
-        // a half-formed intermediate document and clobber the in-flight IME.
-        if (isWysiwygComposingRef.current || nextEditor.view?.composing) {
-          return;
-        }
-
-        publishWysiwygMarkdownDraft(nextEditor.getMarkdown());
-      }, 0);
+        runWysiwygFlush();
+      }, delayMs);
     },
   );
+
+  // Synchronous force-flush for paths that need an up-to-date markdown
+  // snapshot (save, mode switch, tab stash, close prompts). Returns the
+  // serialized markdown so callers can compare against it without waiting for
+  // the React state update that setLocalDraft schedules.
+  const flushWysiwygDraftNow = useEffectEvent((): string | null => {
+    if (currentModeRef.current !== 'Wysiwyg') return null;
+    const ed = editorInstanceRef.current;
+    if (!ed) return null;
+    if (wysiwygCompositionFlushTimerRef.current !== null) {
+      window.clearTimeout(wysiwygCompositionFlushTimerRef.current);
+      wysiwygCompositionFlushTimerRef.current = null;
+    }
+    // CJK IME finalization: if the user triggers save (or any sync-critical
+    // path) while still composing a Hangul syllable, returning null here used
+    // to drop the in-flight character — callers would fall back to the stale
+    // localDraft and persist a document that's missing the user's last
+    // keystroke. Blurring the contenteditable commits the composition
+    // synchronously on every browser we ship to; we restore focus right
+    // afterwards so typing keeps working. After the blur, getMarkdown()
+    // reflects the finalized character.
+    const dom = ed.view?.dom as HTMLElement | undefined;
+    if (isWysiwygComposingRef.current || ed.view?.composing) {
+      if (!dom || typeof dom.blur !== 'function') return null;
+      const hadFocus = typeof document !== 'undefined' && document.activeElement === dom;
+      dom.blur();
+      isWysiwygComposingRef.current = false;
+      if (hadFocus) {
+        // Restore caret focus on a microtask so the composition has fully
+        // finalized before ProseMirror re-attaches the selection.
+        Promise.resolve().then(() => {
+          if (currentModeRef.current === 'Wysiwyg') ed.commands?.focus?.();
+        });
+      }
+    }
+    const markdown = ed.getMarkdown();
+    publishWysiwygMarkdownDraft(markdown);
+    return markdown;
+  });
+
+  // Thin alias retained so the existing compositionend / cancel handlers keep
+  // their call shape; semantically identical to scheduleWysiwygFlush(0).
+  const scheduleWysiwygCompositionFlush = useEffectEvent(() => {
+    scheduleWysiwygFlush(0);
+  });
 
   useEffect(() => {
     if (!activeDocumentOpen) {
@@ -2073,14 +2126,14 @@ export default function App() {
           lastWysiwygCompositionEndAtRef.current = Date.now();
           lastWysiwygCompositionDataRef.current =
             (event as CompositionEvent).data ?? '';
-          scheduleWysiwygCompositionFlush(editorInstanceRef.current);
+          scheduleWysiwygCompositionFlush();
           return false;
         },
         compositioncancel: () => {
           isWysiwygComposingRef.current = false;
           lastWysiwygCompositionEndAtRef.current = Date.now();
           lastWysiwygCompositionDataRef.current = '';
-          scheduleWysiwygCompositionFlush(editorInstanceRef.current);
+          scheduleWysiwygCompositionFlush();
           return false;
         },
       },
@@ -2103,9 +2156,12 @@ export default function App() {
           // splitting Korean syllables across lines.
           return;
         }
-        const markdown = nextEditor.getMarkdown();
-        lastEditorMarkdownRef.current = markdown;
-        publishWysiwygMarkdownDraft(markdown);
+        // Don't serialize on every keystroke. editor.getMarkdown() walks the
+        // entire ProseMirror tree (O(N)); on 10k-line documents that turns
+        // typing into a ~50ms+ stall per character. Schedule a debounced flush
+        // and let sync-critical callers (save / mode switch / tab close)
+        // force-flush via flushWysiwygDraftNow().
+        scheduleWysiwygFlush();
       }
       if (typewriterModeEnabledRef.current && currentModeRef.current === 'Wysiwyg') {
         window.requestAnimationFrame(() => centerTiptapEditorLine(nextEditor));
@@ -2688,15 +2744,33 @@ export default function App() {
       return;
     }
 
-    // CJK IME safety net: never call setContent while a composition is in
-    // flight. Even when the ref/draft compare above looks like a legitimate
-    // external change, replacing the doc mid-composition destroys the
-    // ProseMirror docView and reseats the cursor — Korean syllables after the
-    // first one then land in a new paragraph below the heading. The flush
-    // scheduled by compositionend will re-trigger this effect with both
+    // Same-tab CJK IME safety net: replacing the doc mid-composition tears
+    // down the ProseMirror docView and reseats the cursor — Korean syllables
+    // after the first one then land in a new paragraph below the heading. The
+    // flush scheduled by compositionend will re-trigger this effect with both
     // values realigned once composition actually finishes.
-    if (isWysiwygComposingRef.current || editor.view?.composing) {
+    if (!tabChanged && (isWysiwygComposingRef.current || editor.view?.composing)) {
       return;
+    }
+
+    // Tab change during an in-flight composition MUST finalize the IME before
+    // we proceed. If we deferred (like the same-tab branch does), the editor
+    // would stay on the previous tab's content while activeTabId already
+    // points at the new tab; the eventual compositionend flush would then
+    // serialize the previous tab's markdown into the new tab's localDraft and
+    // the user would see the "previous page contents leaked into the new tab"
+    // bug. Blurring the editable DOM commits the composition on every browser
+    // we ship to; we drop our internal composing flag and clear the pending
+    // flush timer so the late compositionend can't overwrite the just-applied
+    // new content.
+    if (tabChanged && (isWysiwygComposingRef.current || editor.view?.composing)) {
+      const dom = editor.view?.dom as HTMLElement | undefined;
+      dom?.blur?.();
+      isWysiwygComposingRef.current = false;
+      if (wysiwygCompositionFlushTimerRef.current !== null) {
+        window.clearTimeout(wysiwygCompositionFlushTimerRef.current);
+        wysiwygCompositionFlushTimerRef.current = null;
+      }
     }
 
     // emitUpdate:false prevents Tiptap from firing onUpdate, which would
@@ -2811,11 +2885,17 @@ export default function App() {
       return;
     }
 
-    if (localDraft === snapshot.activeDocumentSource) {
+    // In WYSIWYG mode, force the debounced flush so the persisted draft
+    // includes any keystrokes that haven't crossed the debounce boundary yet.
+    // The returned markdown lets us compare without waiting for React state.
+    const fresh = flushWysiwygDraftNow();
+    const draft = fresh ?? localDraft;
+
+    if (draft === snapshot.activeDocumentSource) {
       return;
     }
 
-    const synced = await replaceActiveDocumentSource(localDraft);
+    const synced = await replaceActiveDocumentSource(draft);
     applySnapshot({ ...synced, mode: preserveMode }, true);
   };
 
@@ -2991,7 +3071,14 @@ export default function App() {
   };
 
   const closeOnlyRemainingTab = useEffectEvent(async () => {
-    if (!hasActiveTabEdits) {
+    // Pull any pending WYSIWYG edits across the debounce boundary so the
+    // dirty check below reflects the user's actual most-recent state.
+    const fresh = flushWysiwygDraftNow();
+    const currentDraft = fresh ?? localDraft;
+    const targetTab = activeTabId ? tabs.find((t) => t.id === activeTabId) ?? null : null;
+    const isDirty =
+      targetTab?.kind === 'document' && currentDraft !== targetTab.source;
+    if (!isDirty) {
       clearActiveDocumentSurface();
       return;
     }
@@ -3208,6 +3295,13 @@ export default function App() {
     // so concurrent menu, palette, and keyboard chord paths agree on the truth.
     if (snapshot.mode === nextMode) {
       return;
+    }
+
+    // Capture any pending WYSIWYG keystrokes before switching — the source
+    // editor renders straight from localDraft, so a stale debounce window
+    // would briefly flash the pre-typing content after the mode change.
+    if (snapshot.mode === 'Wysiwyg') {
+      flushWysiwygDraftNow();
     }
 
     const requestId = modeRequestIdRef.current + 1;
@@ -3971,10 +4065,22 @@ export default function App() {
         return;
       }
 
+      // Flush any pending WYSIWYG keystrokes so the active-tab dirty check
+      // doesn't drop the user's last ≤120ms of typing on close. For other
+      // tabs we rely on the already-persisted `tab.draft` set by stash on
+      // tab switch (which also flushes).
+      const fresh = flushWysiwygDraftNow();
+      const currentDraft = fresh ?? localDraft;
+      const targetTab = activeTabId ? tabs.find((t) => t.id === activeTabId) ?? null : null;
+      const activeDirty =
+        targetTab?.kind === 'document' && currentDraft !== targetTab.source;
+      const anyOtherDirty = tabs.some(
+        (t) => t.kind === 'document' && t.id !== activeTabId && t.draft !== t.source,
+      );
       // Native window close gates on the active tab; app quit (Cmd+Q) gates on
       // any tab having edits, matching Zed's behavior.
       const requiresPrompt =
-        target === 'app' ? hasAnyTabEdits : hasActiveTabEdits;
+        target === 'app' ? activeDirty || anyOtherDirty : activeDirty;
       if (!requiresPrompt) {
         return;
       }
@@ -3987,7 +4093,7 @@ export default function App() {
 
       // For a quit with multiple tabs, switch to the first dirty tab so the
       // dialog and the subsequent Save action operate on a real dirty doc.
-      if (target === 'app' && !hasActiveTabEdits) {
+      if (target === 'app' && !activeDirty) {
         const firstDirty = tabs.find(tabIsDirty);
         if (firstDirty && firstDirty.id !== activeTabId) {
           await switchToTab(firstDirty.id);
@@ -4629,6 +4735,7 @@ export default function App() {
             <EditorContent editor={editor} />
             <SlashCommandMenu editor={editor} enabled={currentMode === 'Wysiwyg'} />
             <SelectionToolbar editor={editor} enabled={currentMode === 'Wysiwyg'} />
+            <LinkPopup editor={editor} enabled={currentMode === 'Wysiwyg'} />
             <TableToolbar editor={editor} enabled={currentMode === 'Wysiwyg'} />
           </>
         }
