@@ -299,17 +299,18 @@
   .notion-editor-content .ProseMirror h3 {
     @apply mt-6 mb-2 px-1 tracking-normal;
   }
+  /* Headings inherit the editor's line-height (set inline on the pane via
+     editorLineHeight) so the Settings value visibly applies to them too.
+     Only font-size is scoped here — `em` units keep the visual hierarchy
+     scaling with the body font-size. */
   .notion-editor-content .ProseMirror h1 {
     font-size: 1.875em;
-    line-height: 1.2;
   }
   .notion-editor-content .ProseMirror h2 {
     font-size: 1.5em;
-    line-height: 1.25;
   }
   .notion-editor-content .ProseMirror h3 {
     font-size: 1.25em;
-    line-height: 1.3;
   }
   /* First block hugs the top — no extra margin above the document's leading
      heading or paragraph since the static page header was removed. */
@@ -317,11 +318,13 @@
     @apply mt-0;
   }
   /* When the document opens with an H1, render it as a Notion-style page
-     title: oversized, tighter leading, no top margin. */
+     title: oversized, no top margin. Cap line-height at 1.2 so a very loose
+     editorLineHeight setting doesn't make the giant title sprawl, but still
+     follow the setting when it sits below the cap. */
   .notion-editor-content .ProseMirror > h1:first-child {
     @apply mt-0 mb-3 font-bold tracking-tight;
     font-size: 2.35em;
-    line-height: 1.1;
+    line-height: min(var(--editor-line-height, 1.6), 1.2);
   }
   /* Horizontal rules need their own top/bottom margin override — the
      `.notion-editor-content .ProseMirror > *` rule above sets `my-1`
@@ -331,8 +334,14 @@
     margin-top: 20px;
     margin-bottom: 20px;
   }
+  /* Empty paragraphs still need a clickable target height. Using `1lh`
+     (= one line at the current font-size + line-height) instead of the
+     hard 28px (min-h-7) lets the editorLineHeight setting visibly
+     change paragraph leading; short paragraphs no longer get pinned by
+     a floor that sits above the line-height result at default font. */
   .notion-editor-content .ProseMirror p {
-    @apply my-1 min-h-7 px-1;
+    @apply my-1 px-1;
+    min-height: 1lh;
   }
   .notion-editor-content .ProseMirror ul,
   .notion-editor-content .ProseMirror ol {
