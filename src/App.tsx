@@ -2149,12 +2149,12 @@ export default function App() {
             if (isAtFirstLine) {
               const nodePos = $from.before($from.depth);
               const dom = view.nodeDOM?.(nodePos) as HTMLElement | null;
-              const select = dom?.querySelector?.('select[data-code-block-language-select]') as
-                | HTMLSelectElement
+              const trigger = dom?.querySelector?.('[data-code-block-language-select]') as
+                | HTMLButtonElement
                 | null;
-              if (select && !select.disabled) {
+              if (trigger && !trigger.disabled) {
                 event.preventDefault();
-                select.focus();
+                trigger.focus();
                 return true;
               }
             }

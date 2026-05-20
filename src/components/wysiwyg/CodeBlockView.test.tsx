@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CodeBlockView } from './CodeBlockView';
@@ -69,7 +69,7 @@ function renderView({
     editor,
     updateAttributes,
     getPos,
-    select: screen.getByLabelText(/code block language/i) as HTMLSelectElement,
+    trigger: screen.getByLabelText(/code block language/i) as HTMLButtonElement,
   };
 }
 
@@ -79,115 +79,155 @@ describe('CodeBlockView language picker', () => {
   });
 
   it('cycles through languages starting with the same letter on repeated key presses', () => {
-    const { select, updateAttributes } = renderView({ language: null });
+    const { trigger, updateAttributes } = renderView({ language: null });
 
-    fireEvent.keyDown(select, { key: 'j' });
+    fireEvent.keyDown(trigger, { key: 'j' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'java' });
 
-    fireEvent.keyDown(select, { key: 'j' });
+    fireEvent.keyDown(trigger, { key: 'j' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'javascript' });
 
-    fireEvent.keyDown(select, { key: 'j' });
+    fireEvent.keyDown(trigger, { key: 'j' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'json' });
 
     // Wraps back to the first j-language after the last match.
-    fireEvent.keyDown(select, { key: 'j' });
+    fireEvent.keyDown(trigger, { key: 'j' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'java' });
   });
 
   it('resets the cycle when a different letter is pressed', () => {
-    const { select, updateAttributes } = renderView({ language: null });
+    const { trigger, updateAttributes } = renderView({ language: null });
 
-    fireEvent.keyDown(select, { key: 'j' });
+    fireEvent.keyDown(trigger, { key: 'j' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'java' });
 
-    fireEvent.keyDown(select, { key: 'k' });
+    fireEvent.keyDown(trigger, { key: 'k' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'kotlin' });
 
     // Coming back to 'j' starts fresh from the first j-option, not from
     // wherever the previous j-cycle stopped.
-    fireEvent.keyDown(select, { key: 'j' });
+    fireEvent.keyDown(trigger, { key: 'j' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'java' });
   });
 
   it('treats Plain text (plaintext value) as null when a letter is matched', () => {
-    const { select, updateAttributes } = renderView({ language: 'java' });
+    const { trigger, updateAttributes } = renderView({ language: 'java' });
 
-    fireEvent.keyDown(select, { key: 'p' });
+    fireEvent.keyDown(trigger, { key: 'p' });
     // Plain text maps to a null attribute so the fenced markdown emits no
     // language tag.
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: null });
   });
 
   it('passes ArrowDown through into the code body and ArrowUp back above the block', () => {
-    const { select, chain } = renderView({ language: null, pos: 7 });
+    const { trigger, chain } = renderView({ language: null, pos: 7 });
 
-    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
     expect(chain.setTextSelection).toHaveBeenLastCalledWith(8); // pos + 1
     expect(chain.run).toHaveBeenCalled();
 
     chain.setTextSelection.mockClear();
     chain.run.mockClear();
-    fireEvent.keyDown(select, { key: 'ArrowUp' });
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
     expect(chain.setTextSelection).toHaveBeenLastCalledWith(6); // pos − 1
     expect(chain.run).toHaveBeenCalled();
   });
 
   it('does not run typeahead while a modifier key is held', () => {
-    const { select, updateAttributes } = renderView({ language: null });
+    const { trigger, updateAttributes } = renderView({ language: null });
 
-    fireEvent.keyDown(select, { key: 'j', metaKey: true });
+    fireEvent.keyDown(trigger, { key: 'j', metaKey: true });
     expect(updateAttributes).not.toHaveBeenCalled();
 
-    fireEvent.keyDown(select, { key: 'j', ctrlKey: true });
+    fireEvent.keyDown(trigger, { key: 'j', ctrlKey: true });
     expect(updateAttributes).not.toHaveBeenCalled();
   });
 
   it('does not run typeahead when no language starts with the pressed letter', () => {
-    const { select, updateAttributes } = renderView({ language: 'java' });
+    const { trigger, updateAttributes } = renderView({ language: 'java' });
 
     // No language label starts with 'z' in CODE_BLOCK_LANGUAGES.
-    fireEvent.keyDown(select, { key: 'z' });
+    fireEvent.keyDown(trigger, { key: 'z' });
     expect(updateAttributes).not.toHaveBeenCalled();
   });
 
-  it('opens the dropdown via showPicker when Enter is pressed on the focused select', () => {
-    const { select } = renderView({ language: null });
-    // jsdom does not implement showPicker; stub it so we can assert the call.
-    const showPicker = vi.fn();
-    Object.defineProperty(select, 'showPicker', {
-      configurable: true,
-      value: showPicker,
-    });
+  it('opens the language listbox when Enter is pressed on the focused trigger', async () => {
+    const { trigger } = renderView({ language: null });
 
-    fireEvent.keyDown(select, { key: 'Enter' });
-    expect(showPicker).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+
+    // findByRole reaches into document.body, so it finds the portaled listbox.
+    const listbox = await screen.findByRole('listbox', { name: /code block language/i });
+    expect(listbox).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('swallows the showPicker NotAllowedError so Enter never throws into React', () => {
-    const { select } = renderView({ language: null });
-    const showPicker = vi.fn(() => {
-      throw new DOMException('NotAllowedError', 'NotAllowedError');
-    });
-    Object.defineProperty(select, 'showPicker', {
-      configurable: true,
-      value: showPicker,
-    });
+  it('opens the language listbox when Space is pressed on the focused trigger', async () => {
+    const { trigger } = renderView({ language: null });
 
-    expect(() => fireEvent.keyDown(select, { key: 'Enter' })).not.toThrow();
-    expect(showPicker).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(trigger, { key: ' ' });
+
+    const listbox = await screen.findByRole('listbox', { name: /code block language/i });
+    expect(listbox).toBeInTheDocument();
   });
 
-  it('resets the cycle after the select loses focus', () => {
-    const { select, updateAttributes } = renderView({ language: null });
+  it('applies the highlighted option and closes the listbox on Enter', async () => {
+    const { trigger, updateAttributes } = renderView({ language: null });
 
-    fireEvent.keyDown(select, { key: 'j' });
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const listbox = await screen.findByRole('listbox', { name: /code block language/i });
+
+    // Active starts at the current language (Plain text → index 0). One
+    // ArrowDown moves to Bash, then Enter commits.
+    fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+    fireEvent.keyDown(listbox, { key: 'Enter' });
+
+    expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'bash' });
+    expect(screen.queryByRole('listbox', { name: /code block language/i })).toBeNull();
+  });
+
+  it('Escape inside the listbox dismisses it without changing the language', async () => {
+    const { trigger, updateAttributes } = renderView({ language: 'java' });
+
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const listbox = await screen.findByRole('listbox', { name: /code block language/i });
+    fireEvent.keyDown(listbox, { key: 'Escape' });
+
+    expect(screen.queryByRole('listbox', { name: /code block language/i })).toBeNull();
+    expect(updateAttributes).not.toHaveBeenCalled();
+  });
+
+  it('clicking an option commits its language and closes the listbox', async () => {
+    const { trigger, updateAttributes } = renderView({ language: null });
+
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const listbox = await screen.findByRole('listbox', { name: /code block language/i });
+
+    const ruby = within(listbox).getByRole('option', { name: 'Ruby' });
+    fireEvent.mouseDown(ruby);
+
+    expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'ruby' });
+    expect(screen.queryByRole('listbox', { name: /code block language/i })).toBeNull();
+  });
+
+  it('does not open the listbox when the trigger is disabled', () => {
+    const { trigger } = renderView({ language: null, editable: false });
+
+    expect(trigger).toBeDisabled();
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(screen.queryByRole('listbox', { name: /code block language/i })).toBeNull();
+  });
+
+  it('resets the cycle after the trigger loses focus', () => {
+    const { trigger, updateAttributes } = renderView({ language: null });
+
+    fireEvent.keyDown(trigger, { key: 'j' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'java' });
 
-    fireEvent.blur(select);
+    fireEvent.blur(trigger);
 
     // Returning to the picker and pressing 'j' again starts a fresh cycle.
-    fireEvent.keyDown(select, { key: 'j' });
+    fireEvent.keyDown(trigger, { key: 'j' });
     expect(updateAttributes).toHaveBeenLastCalledWith({ language: 'java' });
   });
 });

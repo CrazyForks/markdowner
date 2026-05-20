@@ -1,4 +1,13 @@
-import { useMemo, useRef, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
+import { createPortal } from 'react-dom';
 import {
   NodeViewContent,
   NodeViewWrapper,
@@ -40,6 +49,13 @@ export const CODE_BLOCK_LANGUAGES: ReadonlyArray<{ value: string; label: string 
 ];
 
 const PLAINTEXT_VALUE = 'plaintext';
+const POPUP_MIN_WIDTH = 192;
+const POPUP_GAP = 4;
+
+// Bumped per CodeBlockView mount so each language listbox has a unique DOM id —
+// needed for `aria-controls`/`aria-activedescendant` to resolve to *this* code
+// block's popup when multiple code blocks are visible on screen at once.
+let LANGUAGE_PICKER_ID_SEQ = 0;
 
 export function CodeBlockView(props: NodeViewProps) {
   const { node, updateAttributes, editor, getPos } = props;
@@ -47,12 +63,33 @@ export function CodeBlockView(props: NodeViewProps) {
   const editable = editor.isEditable;
 
   const options = useMemo(() => CODE_BLOCK_LANGUAGES, []);
+  const currentIndex = useMemo(() => {
+    const idx = options.findIndex((opt) => opt.value === language);
+    return idx >= 0 ? idx : 0;
+  }, [options, language]);
+  const currentOption = options[currentIndex];
 
   // Track the most-recent letter-key cycle so consecutive presses of the same
   // letter advance through every matching language (j → java → javascript → …
   // → wraps). Cleared implicitly whenever a different letter starts a fresh
   // search via the `currentIdx >= 0 ? currentIdx + 1 : 0` branch below.
   const cycleRef = useRef<{ letter: string; index: number } | null>(null);
+
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const pickerId = useMemo(() => `code-block-lang-picker-${++LANGUAGE_PICKER_ID_SEQ}`, []);
+
+  // Listbox state. `popupRect` carries the viewport-relative coords we computed
+  // from the trigger's getBoundingClientRect; we render the popup via a portal
+  // to document.body so the .code-block-view's `overflow: hidden` (which keeps
+  // the rounded corners clean) can't clip the dropdown.
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(currentIndex);
+  const [popupRect, setPopupRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
 
   // Move the caret into the codeblock content. Used when the user presses
   // ArrowDown on the language selector — the selector is treated as a single
@@ -82,14 +119,92 @@ export function CodeBlockView(props: NodeViewProps) {
     updateAttributes({ language: nextValue === PLAINTEXT_VALUE ? null : nextValue });
   };
 
-  const handleSelectKeyDown = (event: KeyboardEvent<HTMLSelectElement>) => {
+  const computePopupRect = (): { top: number; left: number; width: number } | null => {
+    const trigger = triggerRef.current;
+    if (!trigger || typeof trigger.getBoundingClientRect !== 'function') return null;
+    const rect = trigger.getBoundingClientRect();
+    // Width is at least POPUP_MIN_WIDTH and at most the trigger width — but
+    // since the dropdown can be wider than the trigger, we widen and then
+    // right-align so the popup hugs the trigger's right edge (mirroring the
+    // native macOS NSPopUpButton drop direction).
+    const width = Math.max(rect.width, POPUP_MIN_WIDTH);
+    return {
+      top: rect.bottom + POPUP_GAP,
+      left: rect.right - width,
+      width,
+    };
+  };
+
+  const openDropdown = () => {
+    if (!editable) return;
+    cycleRef.current = null;
+    setActiveIndex(currentIndex);
+    setPopupRect(computePopupRect());
+    setIsOpen(true);
+  };
+
+  const closeDropdown = (returnFocus: boolean) => {
+    setIsOpen(false);
+    setPopupRect(null);
+    if (returnFocus) {
+      // Defer so React can unmount the portal before we hand focus back; if
+      // we focused synchronously the still-mounted <ul> would steal it.
+      requestAnimationFrame(() => triggerRef.current?.focus());
+    }
+  };
+
+  // Land keyboard focus on the listbox once it opens — keystrokes from there
+  // route to handleListKeyDown for option navigation / selection.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    listRef.current?.focus();
+  }, [isOpen]);
+
+  // Keep the active option visible as the user navigates with arrow keys.
+  useEffect(() => {
+    if (!isOpen) return;
+    const list = listRef.current;
+    if (!list) return;
+    const item = list.querySelector<HTMLElement>(`[data-option-index="${activeIndex}"]`);
+    if (item && typeof item.scrollIntoView === 'function') {
+      item.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isOpen, activeIndex]);
+
+  // Close on outside mousedown / outside scroll / resize. Scrolls *inside* the
+  // listbox are how arrow navigation pages through options — let those through.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (triggerRef.current?.contains(target)) return;
+      if (listRef.current?.contains(target)) return;
+      closeDropdown(false);
+    };
+    const handleScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && listRef.current?.contains(target)) return;
+      closeDropdown(false);
+    };
+    const handleResize = () => closeDropdown(false);
+    document.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleResize);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isOpen]);
+
+  const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.altKey || event.metaKey || event.ctrlKey) return;
 
     // Pass arrow navigation through the picker so it behaves like a single
     // focusable stop — ArrowDown carries the user into the code body, ArrowUp
-    // out to the block above. Native <select> would otherwise consume these
-    // for option cycling; we surface that via Enter/Space (open dropdown) and
-    // a–z typeahead below.
+    // out to the block above. The listbox itself owns the open-state arrow
+    // navigation via handleListKeyDown.
     if (event.key === 'ArrowDown' && !event.shiftKey) {
       event.preventDefault();
       cycleRef.current = null;
@@ -110,29 +225,20 @@ export function CodeBlockView(props: NodeViewProps) {
       return;
     }
 
-    // Enter opens the option list. The native <select> on macOS WebKit only
-    // opens on Space by default, so we forward Enter through showPicker()
-    // (standardized on HTMLSelectElement; supported in Tauri's WebKit).
-    // Calling from a keydown handler counts as a user gesture, so the
-    // NotAllowedError path is effectively unreachable here.
-    if (event.key === 'Enter') {
+    // Enter and Space both open the option list. Previously we relied on the
+    // native <select>'s Space default and HTMLSelectElement.showPicker() for
+    // Enter, but showPicker is a no-op in this WebKit build. With the custom
+    // listbox we own both keys outright and they behave identically.
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
       event.preventDefault();
-      cycleRef.current = null;
-      const select = event.currentTarget;
-      if (typeof select.showPicker === 'function') {
-        try {
-          select.showPicker();
-        } catch {
-          /* user-gesture restriction — silently ignore */
-        }
-      }
+      openDropdown();
       return;
     }
 
     // a–z typeahead with cycling: first press lands on the first matching
     // language; repeated presses of the same letter advance through the rest
     // and wrap. A different letter resets the cycle. The dropdown stays
-    // closed — Space (native) and Enter (handled above) open it.
+    // closed — open it with Enter or Space.
     if (event.key.length === 1 && /^[a-zA-Z]$/.test(event.key)) {
       event.preventDefault();
       const letter = event.key.toLowerCase();
@@ -152,6 +258,91 @@ export function CodeBlockView(props: NodeViewProps) {
     }
   };
 
+  const handleListKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
+    if (event.altKey || event.metaKey || event.ctrlKey) return;
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeDropdown(true);
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((idx) => Math.min(idx + 1, options.length - 1));
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((idx) => Math.max(idx - 1, 0));
+      return;
+    }
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setActiveIndex(0);
+      return;
+    }
+    if (event.key === 'End') {
+      event.preventDefault();
+      setActiveIndex(options.length - 1);
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+      event.preventDefault();
+      const opt = options[activeIndex];
+      if (opt) setLanguage(opt.value);
+      closeDropdown(true);
+      return;
+    }
+    if (event.key === 'Tab') {
+      // Don't trap focus inside the listbox — let the browser move on, but
+      // dismiss the picker on the way out so it isn't left dangling.
+      closeDropdown(false);
+      return;
+    }
+    // Typeahead within the open listbox: jump active to the next matching
+    // option after the current one (wrapping). Independent of the closed-state
+    // cycleRef so navigating in the open list doesn't perturb the closed cycle.
+    if (event.key.length === 1 && /^[a-zA-Z]$/.test(event.key)) {
+      event.preventDefault();
+      const letter = event.key.toLowerCase();
+      const total = options.length;
+      for (let offset = 1; offset <= total; offset++) {
+        const idx = (activeIndex + offset) % total;
+        if (options[idx].label.toLowerCase().startsWith(letter)) {
+          setActiveIndex(idx);
+          return;
+        }
+      }
+    }
+  };
+
+  const handleOptionMouseDown = (
+    event: ReactMouseEvent<HTMLLIElement>,
+    idx: number,
+  ) => {
+    // Prevent the mousedown from blurring the listbox before our click handler
+    // gets to run — without this the outside-mousedown listener would fire
+    // first and close the popup before the selection lands.
+    event.preventDefault();
+    const opt = options[idx];
+    if (opt) setLanguage(opt.value);
+    closeDropdown(true);
+  };
+
+  const handleTriggerClick = () => {
+    if (!editable) return;
+    if (isOpen) {
+      closeDropdown(false);
+    } else {
+      openDropdown();
+    }
+  };
+
+  const activeOption = options[activeIndex];
+  const activeOptionDomId = activeOption
+    ? `${pickerId}-option-${activeIndex}`
+    : undefined;
+
   return (
     <NodeViewWrapper className="code-block-view" data-language={language}>
       <pre>
@@ -161,30 +352,62 @@ export function CodeBlockView(props: NodeViewProps) {
         />
       </pre>
       <div className="code-block-toolbar" contentEditable={false}>
-        <select
+        <button
+          ref={triggerRef}
+          type="button"
           aria-label="Code block language"
+          aria-haspopup="listbox"
+          aria-expanded={isOpen}
+          aria-controls={isOpen ? pickerId : undefined}
           className="code-block-language-select"
-          value={language}
           disabled={!editable}
           data-code-block-language-select=""
-          onChange={(event) => {
-            // Mouse / dropdown-driven changes reset the typeahead cycle so the
-            // next letter press always starts from the freshly-picked language.
-            cycleRef.current = null;
-            setLanguage(event.target.value);
-          }}
-          onKeyDown={handleSelectKeyDown}
+          onClick={handleTriggerClick}
+          onKeyDown={handleTriggerKeyDown}
           onBlur={() => {
             cycleRef.current = null;
           }}
         >
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          <span className="code-block-language-label">{currentOption.label}</span>
+        </button>
       </div>
+      {isOpen && popupRect && typeof document !== 'undefined'
+        ? createPortal(
+            <ul
+              ref={listRef}
+              id={pickerId}
+              role="listbox"
+              aria-label="Code block language"
+              aria-activedescendant={activeOptionDomId}
+              tabIndex={-1}
+              contentEditable={false}
+              className="code-block-language-list"
+              style={{
+                top: popupRect.top,
+                left: popupRect.left,
+                minWidth: popupRect.width,
+              }}
+              onKeyDown={handleListKeyDown}
+            >
+              {options.map((option, idx) => (
+                <li
+                  key={option.value}
+                  id={`${pickerId}-option-${idx}`}
+                  role="option"
+                  data-option-index={idx}
+                  data-active={idx === activeIndex ? '' : undefined}
+                  aria-selected={option.value === language}
+                  className="code-block-language-option"
+                  onMouseEnter={() => setActiveIndex(idx)}
+                  onMouseDown={(event) => handleOptionMouseDown(event, idx)}
+                >
+                  {option.label}
+                </li>
+              ))}
+            </ul>,
+            document.body,
+          )
+        : null}
     </NodeViewWrapper>
   );
 }

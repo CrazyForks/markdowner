@@ -852,11 +852,15 @@ section[data-minimap='on'] .editor-pane-preview {
   min-width: 8.5rem;
   font-size: 12px;
   font-family: inherit;
+  line-height: 1.4;
+  text-align: left;
   cursor: pointer;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
   appearance: none;
-  /* Inline chevron so the picker reads as a select even with appearance:none. */
+  /* Inline chevron so the picker reads as a dropdown even though the trigger
+     is a <button> (we own the dropdown surface, see .code-block-language-list
+     below). Two short linear-gradients form the down-arrow glyph. */
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
     linear-gradient(135deg, currentColor 50%, transparent 50%);
   background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%;
@@ -873,6 +877,49 @@ section[data-minimap='on'] .editor-pane-preview {
 .code-block-language-select:disabled {
   cursor: default;
   opacity: 0.6;
+}
+.code-block-language-label {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Custom listbox rendered via React portal to document.body. Coords come from
+   the trigger's getBoundingClientRect at open time, so `position: fixed` is
+   correct (viewport-relative). z-index sits well above the editor surface and
+   any toolbars; scroll/resize close the popup so positioning never goes
+   stale. */
+.code-block-language-list {
+  position: fixed;
+  z-index: 100;
+  max-height: 16rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--foreground) 18%, transparent);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.code-block-language-option {
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.code-block-language-option[data-active] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.code-block-language-option[aria-selected="true"] {
+  font-weight: 600;
 }
 
 /* highlight.js token palette — tuned to match the editor's neutral surface in
