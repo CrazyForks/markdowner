@@ -94,7 +94,7 @@ import {
 } from './lib/desktop';
 import { calculateDocumentStats } from './lib/documentStats';
 import { isDiscardCloseDecision, isSaveCloseDecision } from './lib/closeDecision';
-import { resolveClosePromptState } from './lib/closePrompt';
+import { buildCloseConfirmationDialog, resolveClosePromptState } from './lib/closePrompt';
 import { resolveActiveDraftSyncPlan } from './lib/draftSync';
 import {
   findTextMatches,
@@ -2492,18 +2492,8 @@ export default function App() {
     }
 
     try {
-      const decision = await message(
-        `Save changes to '${snapshot.activeDocumentName ?? 'Untitled.md'}' before closing?`,
-        {
-          title: WINDOW_TITLE,
-          kind: 'warning',
-          buttons: {
-            yes: 'Save',
-            no: "Don't Save",
-            cancel: 'Cancel',
-          },
-        },
-      );
+      const confirmation = buildCloseConfirmationDialog(snapshot.activeDocumentName, WINDOW_TITLE);
+      const decision = await message(confirmation.message, confirmation.options);
 
       if (isSaveCloseDecision(decision)) {
         await withBusy(async () => {
@@ -3457,18 +3447,11 @@ export default function App() {
       }
 
       try {
-        const decision = await message(
-          `Save changes to '${snapshot.activeDocumentName ?? 'Untitled.md'}' before closing?`,
-          {
-            title: WINDOW_TITLE,
-            kind: 'warning',
-            buttons: {
-              yes: 'Save',
-              no: "Don't Save",
-              cancel: 'Cancel',
-            },
-          },
+        const confirmation = buildCloseConfirmationDialog(
+          snapshot.activeDocumentName,
+          WINDOW_TITLE,
         );
+        const decision = await message(confirmation.message, confirmation.options);
 
         if (isSaveCloseDecision(decision)) {
           await withBusy(async () => {

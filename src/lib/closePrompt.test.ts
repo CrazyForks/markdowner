@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDocumentTab, createSettingsTab } from './documentTabs';
-import { resolveClosePromptState } from './closePrompt';
+import { buildCloseConfirmationDialog, resolveClosePromptState } from './closePrompt';
 
 describe('resolveClosePromptState', () => {
   it('prompts window closes only for active document edits', () => {
@@ -103,5 +103,28 @@ describe('resolveClosePromptState', () => {
       firstDirtyTabId: dirtyTab.id,
       requiresPrompt: true,
     });
+  });
+});
+
+describe('buildCloseConfirmationDialog', () => {
+  it('builds the shared save confirmation message and button options', () => {
+    expect(buildCloseConfirmationDialog('notes.md', 'Markdowner')).toEqual({
+      message: "Save changes to 'notes.md' before closing?",
+      options: {
+        title: 'Markdowner',
+        kind: 'warning',
+        buttons: {
+          yes: 'Save',
+          no: "Don't Save",
+          cancel: 'Cancel',
+        },
+      },
+    });
+  });
+
+  it('uses Untitled.md when there is no active document name', () => {
+    expect(buildCloseConfirmationDialog(null, 'Markdowner').message).toBe(
+      "Save changes to 'Untitled.md' before closing?",
+    );
   });
 });

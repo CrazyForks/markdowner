@@ -15,6 +15,19 @@ type ClosePromptState = {
   requiresPrompt: boolean;
 };
 
+type CloseConfirmationDialog = {
+  message: string;
+  options: {
+    title: string;
+    kind: 'warning';
+    buttons: {
+      yes: string;
+      no: string;
+      cancel: string;
+    };
+  };
+};
+
 export function resolveClosePromptState(
   input: ResolveClosePromptStateInput,
 ): ClosePromptState {
@@ -33,5 +46,23 @@ export function resolveClosePromptState(
     activeDirty,
     firstDirtyTabId: firstDirtyTab?.id ?? null,
     requiresPrompt: input.target === 'app' ? firstDirtyTab !== null : activeDirty,
+  };
+}
+
+export function buildCloseConfirmationDialog(
+  activeDocumentName: string | null | undefined,
+  title: string,
+): CloseConfirmationDialog {
+  return {
+    message: `Save changes to '${activeDocumentName ?? 'Untitled.md'}' before closing?`,
+    options: {
+      title,
+      kind: 'warning',
+      buttons: {
+        yes: 'Save',
+        no: "Don't Save",
+        cancel: 'Cancel',
+      },
+    },
   };
 }
