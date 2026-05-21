@@ -13,6 +13,9 @@ type EditorFontSizeShortcutEvent = CommandModifierEvent &
 type TabShortcutEvent = CommandModifierEvent &
   Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
 
+type ModeNumberShortcutEvent = CommandModifierEvent &
+  Pick<KeyboardEvent, 'altKey' | 'code' | 'shiftKey'>;
+
 export type ModeChordResolution =
   | { kind: 'pendingModifier' }
   | { kind: 'mode'; mode: EditorMode }
@@ -25,6 +28,8 @@ export type TabShortcutResolution =
   | { kind: 'selectPrevious' }
   | { kind: 'selectIndex'; index: number }
   | { kind: 'moveActive'; direction: -1 | 1 };
+
+export type ModeNumberShortcutResolution = { kind: 'mode'; mode: EditorMode };
 
 export function usesCommandModifier(event: CommandModifierEvent): boolean {
   return event.metaKey || event.ctrlKey;
@@ -115,4 +120,23 @@ export function resolveTabShortcut(event: TabShortcutEvent): TabShortcutResoluti
   }
 
   return null;
+}
+
+export function resolveModeNumberShortcut(
+  event: ModeNumberShortcutEvent,
+): ModeNumberShortcutResolution | null {
+  if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) {
+    return null;
+  }
+
+  switch (event.code) {
+    case 'Digit1':
+      return { kind: 'mode', mode: 'Wysiwyg' };
+    case 'Digit2':
+      return { kind: 'mode', mode: 'Editor' };
+    case 'Digit3':
+      return { kind: 'mode', mode: 'SplitView' };
+    default:
+      return null;
+  }
 }

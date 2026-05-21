@@ -182,6 +182,7 @@ import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
   resolveModeChord,
+  resolveModeNumberShortcut,
   resolveTabShortcut,
   usesCommandModifier,
 } from './lib/keyboardShortcuts';
@@ -3325,21 +3326,10 @@ export default function App() {
 
       // Alt+1 → WYSIWYG, Alt+2 → Editor, Alt+3 → Split-view. macOS Option
       // produces non-ASCII glyphs in event.key (¡/™/£), so match on event.code.
-      if (
-        event.altKey &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.shiftKey &&
-        (event.code === 'Digit1' || event.code === 'Digit2' || event.code === 'Digit3')
-      ) {
+      const modeNumberShortcut = resolveModeNumberShortcut(event);
+      if (modeNumberShortcut) {
         event.preventDefault();
-        const nextMode: EditorMode =
-          event.code === 'Digit1'
-            ? 'Wysiwyg'
-            : event.code === 'Digit2'
-              ? 'Editor'
-              : 'SplitView';
-        void handleSetMode(nextMode);
+        void handleSetMode(modeNumberShortcut.mode);
         return;
       }
 

@@ -4,6 +4,7 @@ import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
   resolveModeChord,
+  resolveModeNumberShortcut,
   resolveTabShortcut,
   usesCommandModifier,
 } from './keyboardShortcuts';
@@ -155,5 +156,29 @@ describe('resolveTabShortcut', () => {
       ),
     ).toBeNull();
     expect(resolveTabShortcut(shortcutEvent({ key: '0', metaKey: true }))).toBeNull();
+  });
+});
+
+describe('resolveModeNumberShortcut', () => {
+  it.each([
+    ['Digit1', 'Wysiwyg'],
+    ['Digit2', 'Editor'],
+    ['Digit3', 'SplitView'],
+  ] as const)('maps Alt+%s to %s mode', (code, mode) => {
+    expect(resolveModeNumberShortcut(shortcutEvent({ code, altKey: true }))).toEqual({
+      kind: 'mode',
+      mode,
+    });
+  });
+
+  it('ignores unsupported mode number shortcuts', () => {
+    expect(resolveModeNumberShortcut(shortcutEvent({ code: 'Digit4', altKey: true }))).toBeNull();
+    expect(
+      resolveModeNumberShortcut(shortcutEvent({ code: 'Digit1', altKey: true, shiftKey: true })),
+    ).toBeNull();
+    expect(
+      resolveModeNumberShortcut(shortcutEvent({ code: 'Digit1', altKey: true, metaKey: true })),
+    ).toBeNull();
+    expect(resolveModeNumberShortcut(shortcutEvent({ code: 'Digit1' }))).toBeNull();
   });
 });
