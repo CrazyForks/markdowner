@@ -8,7 +8,10 @@ import {
   findDocumentTabByPath,
   generateDocumentTabId,
   isDocumentTabDirty,
+  markDocumentTabMissing,
   mergeRestoredDocumentTabs,
+  refreshActiveDocumentTab,
+  refreshSwitchedDocumentTab,
   resolveCloseTabTransition,
   upsertDocumentTab,
   type DocumentTab,
@@ -467,5 +470,147 @@ describe('resolveCloseTabTransition', () => {
       activeTabId: 'active',
       clearPreSettingsDocTabId: false,
     });
+  });
+});
+
+describe('document tab metadata refresh helpers', () => {
+  it('refreshes the active document tab from a saved snapshot and resets its draft', () => {
+    const active = documentTab({
+      id: 'active',
+      path: '/tmp/draft.md',
+      name: 'draft.md',
+      source: 'old',
+      draft: 'unsaved edits',
+    });
+    const inactive = documentTab({
+      id: 'inactive',
+      path: '/tmp/inactive.md',
+      name: 'inactive.md',
+    });
+
+    expect(
+      refreshActiveDocumentTab({
+        tabs: [active, inactive, createSettingsTab()],
+        activeTabId: 'active',
+        path: '/tmp/saved.md',
+        name: 'saved.md',
+        source: '# Saved',
+      }),
+    ).toEqual([
+      createDocumentTab({
+        id: 'active',
+        path: '/tmp/saved.md',
+        name: 'saved.md',
+        source: '# Saved',
+      }),
+      inactive,
+      createSettingsTab(),
+    ]);
+  });
+
+  it('does not refresh settings or missing active tabs', () => {
+    const saved = documentTab({
+      id: 'saved',
+      path: '/tmp/saved.md',
+      name: 'saved.md',
+    });
+    const settings = createSettingsTab();
+
+    expect(
+      refreshActiveDocumentTab({
+        tabs: [saved, settings],
+        activeTabId: SETTINGS_TAB_ID,
+        path: '/tmp/ignored.md',
+        name: 'ignored.md',
+        source: 'ignored',
+      }),
+    ).toEqual([saved, settings]);
+
+    expect(
+      refreshActiveDocumentTab({
+        tabs: [saved],
+        activeTabId: null,
+        path: '/tmp/ignored.md',
+        name: 'ignored.md',
+        source: 'ignored',
+      }),
+    ).toEqual([saved]);
+  });
+
+  it('refreshes switched tab metadata while preserving its stashed draft', () => {
+    const target = documentTab({
+      id: 'target',
+      path: '/tmp/target.md',
+      name: 'target.md',
+      source: 'old source',
+      draft: 'local draft',
+      missing: true,
+    });
+    const other = documentTab({
+      id: 'other',
+      path: '/tmp/other.md',
+      name: 'other.md',
+    });
+
+    expect(
+      refreshSwitchedDocumentTab({
+        tabs: [target, other],
+        targetId: 'target',
+        path: '/tmp/renamed.md',
+        name: 'renamed.md',
+        source: 'fresh source',
+      }),
+    ).toEqual([
+      {
+        ...target,
+        path: '/tmp/renamed.md',
+        name: 'renamed.md',
+        source: 'fresh source',
+        draft: 'local draft',
+        missing: false,
+      },
+      other,
+    ]);
+  });
+
+  it('keeps existing switched tab metadata when a snapshot omits fields', () => {
+    const target = documentTab({
+      id: 'target',
+      path: '/tmp/target.md',
+      name: 'target.md',
+      source: 'existing source',
+      draft: 'local draft',
+      missing: true,
+    });
+
+    expect(
+      refreshSwitchedDocumentTab({
+        tabs: [target],
+        targetId: 'target',
+        path: null,
+        name: null,
+        source: null,
+      }),
+    ).toEqual([{ ...target, missing: false }]);
+  });
+
+  it('marks a document tab as missing and clears stale document content', () => {
+    const target = documentTab({
+      id: 'target',
+      path: '/tmp/missing.md',
+      name: 'missing.md',
+      source: 'old source',
+      draft: 'old draft',
+    });
+    const other = documentTab({
+      id: 'other',
+      path: '/tmp/other.md',
+      name: 'other.md',
+    });
+
+    expect(markDocumentTabMissing([target, other], 'target')).toEqual([
+      { ...target, missing: true, source: '', draft: '' },
+      other,
+    ]);
   });
 });

@@ -108,7 +108,10 @@ import {
   findDocumentTabByPath,
   generateDocumentTabId,
   isDocumentTabDirty,
+  markDocumentTabMissing,
   mergeRestoredDocumentTabs,
+  refreshActiveDocumentTab,
+  refreshSwitchedDocumentTab,
   resolveCloseTabTransition,
   upsertDocumentTab,
   type DocumentTab,
@@ -551,11 +554,13 @@ export default function App() {
     const source = next.activeDocumentSource ?? '';
     startTransition(() => {
       setTabs((prev) =>
-        prev.map((tab) =>
-          tab.id === activeTabId && tab.kind === 'document'
-            ? createDocumentTab({ id: tab.id, path, name, source })
-            : tab,
-        ),
+        refreshActiveDocumentTab({
+          tabs: prev,
+          activeTabId,
+          path,
+          name,
+          source,
+        }),
       );
     });
   };
@@ -2856,26 +2861,18 @@ export default function App() {
         setLocalDraft(target.draft);
         // Refresh tab metadata in case the file changed on disk.
         setTabs((prev) =>
-          prev.map((tab) =>
-            tab.id === target.id
-              ? {
-                  ...tab,
-                  source: next.activeDocumentSource ?? tab.source,
-                  name: next.activeDocumentName ?? tab.name,
-                  path: next.activeDocumentPath ?? tab.path,
-                  missing: false,
-                }
-              : tab,
-          ),
+          refreshSwitchedDocumentTab({
+            tabs: prev,
+            targetId: target.id,
+            path: next.activeDocumentPath,
+            name: next.activeDocumentName,
+            source: next.activeDocumentSource,
+          }),
         );
       } catch {
         if (isEditorOpStale(token)) return;
         // The file disappeared between sessions — convert this tab to missing.
-        setTabs((prev) =>
-          prev.map((tab) =>
-            tab.id === target.id ? { ...tab, missing: true, source: '', draft: '' } : tab,
-          ),
-        );
+        setTabs((prev) => markDocumentTabMissing(prev, target.id));
         setActiveTabId(target.id);
         setLocalDraft('');
       }

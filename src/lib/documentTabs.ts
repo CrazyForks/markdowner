@@ -71,6 +71,22 @@ type ResolveCloseTabTransitionInput = {
   preSettingsDocTabId: string | null;
 };
 
+type RefreshActiveDocumentTabInput = {
+  tabs: readonly DocumentTab[];
+  activeTabId: string | null;
+  path: string | null;
+  name: string;
+  source: string;
+};
+
+type RefreshSwitchedDocumentTabInput = {
+  tabs: readonly DocumentTab[];
+  targetId: string;
+  path: string | null;
+  name: string | null;
+  source: string | null;
+};
+
 type CloseTabTransition =
   | { kind: 'missing' }
   | { kind: 'clearSurface' }
@@ -300,5 +316,48 @@ function selectTabAfterClose(input: {
     input.remainingTabs[input.closedIndex - 1] ??
     input.remainingTabs[0] ??
     null
+  );
+}
+
+export function refreshActiveDocumentTab(
+  input: RefreshActiveDocumentTabInput,
+): DocumentTab[] {
+  if (!input.activeTabId) return [...input.tabs];
+  return input.tabs.map((tab) =>
+    tab.id === input.activeTabId && tab.kind === 'document'
+      ? createDocumentTab({
+          id: tab.id,
+          path: input.path,
+          name: input.name,
+          source: input.source,
+        })
+      : tab,
+  );
+}
+
+export function refreshSwitchedDocumentTab(
+  input: RefreshSwitchedDocumentTabInput,
+): DocumentTab[] {
+  return input.tabs.map((tab) =>
+    tab.id === input.targetId && tab.kind === 'document'
+      ? {
+          ...tab,
+          source: input.source ?? tab.source,
+          name: input.name ?? tab.name,
+          path: input.path ?? tab.path,
+          missing: false,
+        }
+      : tab,
+  );
+}
+
+export function markDocumentTabMissing(
+  tabs: readonly DocumentTab[],
+  targetId: string,
+): DocumentTab[] {
+  return tabs.map((tab) =>
+    tab.id === targetId && tab.kind === 'document'
+      ? { ...tab, missing: true, source: '', draft: '' }
+      : tab,
   );
 }
