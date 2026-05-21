@@ -28,7 +28,6 @@ import type {
   UIEvent as ReactUIEvent,
 } from 'react';
 import {
-  createElement,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -37,7 +36,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -146,6 +145,7 @@ import {
   readSourceNumber,
 } from './lib/sourcePreviewClick';
 import { createSourceLinkClickExtension } from './lib/sourceLinkClick';
+import { sourceLineMarkdownComponents } from './lib/sourceLineComponents';
 import {
   buildSourceLineStartOffsets,
   clampSourceOffset,
@@ -237,57 +237,12 @@ const SETTINGS_TAB_ID = '__markdowner_settings__';
 const SETTINGS_TAB_NAME = 'Settings';
 
 type ThemeMode = 'system' | 'manual';
-type MarkdownSourceNode = {
-  position?: {
-    start?: {
-      line?: number;
-      offset?: number;
-    };
-    end?: {
-      offset?: number;
-    };
-  };
-};
-type MarkdownSourceLineProps = {
-  node?: MarkdownSourceNode;
-};
 function resolveOsTheme(): ThemeKind {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return 'BuiltInDark';
   }
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'BuiltInDark' : 'BuiltInLight';
 }
-
-function createSourceLineComponent(tagName: keyof HTMLElementTagNameMap) {
-  return function SourceLineComponent(props: MarkdownSourceLineProps) {
-    const { node, ...elementProps } = props as MarkdownSourceLineProps & Record<string, unknown>;
-    const sourceLine = node?.position?.start?.line;
-    const sourceOffset = node?.position?.start?.offset;
-    const sourceEndOffset = node?.position?.end?.offset;
-
-    return createElement(tagName, {
-      ...elementProps,
-      'data-source-line': Number.isFinite(sourceLine) ? sourceLine : undefined,
-      'data-source-offset': Number.isFinite(sourceOffset) ? sourceOffset : undefined,
-      'data-source-end-offset': Number.isFinite(sourceEndOffset) ? sourceEndOffset : undefined,
-    });
-  };
-}
-
-const sourceLineMarkdownComponents = {
-  h1: createSourceLineComponent('h1'),
-  h2: createSourceLineComponent('h2'),
-  h3: createSourceLineComponent('h3'),
-  h4: createSourceLineComponent('h4'),
-  h5: createSourceLineComponent('h5'),
-  h6: createSourceLineComponent('h6'),
-  p: createSourceLineComponent('p'),
-  li: createSourceLineComponent('li'),
-  blockquote: createSourceLineComponent('blockquote'),
-  pre: createSourceLineComponent('pre'),
-  table: createSourceLineComponent('table'),
-  tr: createSourceLineComponent('tr'),
-} satisfies Components;
 
 const CHORD_PREFIX_TIMEOUT_MS = 1500;
 // Debounce window for serializing the WYSIWYG ProseMirror tree into markdown.
