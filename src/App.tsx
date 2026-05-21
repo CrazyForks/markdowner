@@ -180,6 +180,7 @@ import {
 } from './lib/linkOpener';
 import {
   matchesShortcut,
+  resolveEditorFontSizeShortcut,
   resolveModeChord,
   usesCommandModifier,
 } from './lib/keyboardShortcuts';
@@ -3235,25 +3236,18 @@ export default function App() {
       // and Cmd+Shift+= (the "+" combo) reports Equal as well. The change
       // routes through handleSettingsChange so it is persisted via
       // save_settings — no separate codepath.
-      if (
-        usesCommandModifier(event) &&
-        !event.altKey &&
-        (event.code === 'Minus' || event.code === 'Equal')
-      ) {
-        // Cmd+Shift+- is unbound; only react to plain Cmd+- (no shift).
-        // Cmd+= and Cmd+Shift+= ("+") both bump the size.
-        const isIncrement = event.code === 'Equal';
-        const isDecrement = event.code === 'Minus' && !event.shiftKey;
-        if (!isIncrement && !isDecrement) {
-          return;
-        }
+      const editorFontSizeShortcut = resolveEditorFontSizeShortcut(event);
+      if (editorFontSizeShortcut) {
         event.preventDefault();
         const current = Number.isFinite(settings.editorFontSize) && settings.editorFontSize > 0
           ? settings.editorFontSize
           : DEFAULT_SETTINGS.editorFontSize;
         const next = Math.min(
           EDITOR_FONT_SIZE_MAX,
-          Math.max(EDITOR_FONT_SIZE_MIN, current + (isIncrement ? 1 : -1)),
+          Math.max(
+            EDITOR_FONT_SIZE_MIN,
+            current + (editorFontSizeShortcut.kind === 'increase' ? 1 : -1),
+          ),
         );
         if (next !== current) {
           handleSettingsChange({ ...settings, editorFontSize: next });

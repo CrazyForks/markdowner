@@ -7,10 +7,15 @@ type ShortcutEvent = CommandModifierEvent &
 
 type ModeChordEvent = Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
 
+type EditorFontSizeShortcutEvent = CommandModifierEvent &
+  Pick<KeyboardEvent, 'altKey' | 'code' | 'shiftKey'>;
+
 export type ModeChordResolution =
   | { kind: 'pendingModifier' }
   | { kind: 'mode'; mode: EditorMode }
   | { kind: 'cancel' };
+
+export type EditorFontSizeShortcutResolution = { kind: 'increase' } | { kind: 'decrease' };
 
 export function usesCommandModifier(event: CommandModifierEvent): boolean {
   return event.metaKey || event.ctrlKey;
@@ -47,4 +52,19 @@ export function resolveModeChord(event: ModeChordEvent): ModeChordResolution {
     default:
       return { kind: 'cancel' };
   }
+}
+
+export function resolveEditorFontSizeShortcut(
+  event: EditorFontSizeShortcutEvent,
+): EditorFontSizeShortcutResolution | null {
+  if (!usesCommandModifier(event) || event.altKey) {
+    return null;
+  }
+  if (event.code === 'Equal') {
+    return { kind: 'increase' };
+  }
+  if (event.code === 'Minus' && !event.shiftKey) {
+    return { kind: 'decrease' };
+  }
+  return null;
 }

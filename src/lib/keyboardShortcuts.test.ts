@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   matchesShortcut,
+  resolveEditorFontSizeShortcut,
   resolveModeChord,
   usesCommandModifier,
 } from './keyboardShortcuts';
@@ -14,6 +15,7 @@ function shortcutEvent(overrides: Partial<KeyboardEvent> = {}) {
     key: 'x',
     metaKey: false,
     shiftKey: false,
+    code: 'KeyX',
     ...overrides,
   } as KeyboardEvent;
 }
@@ -79,5 +81,29 @@ describe('resolveModeChord', () => {
     expect(resolveModeChord(shortcutEvent({ key: 'w', altKey: true }))).toEqual({
       kind: 'cancel',
     });
+  });
+});
+
+describe('resolveEditorFontSizeShortcut', () => {
+  it.each([
+    [{ code: 'Equal', metaKey: true }, 'increase'],
+    [{ code: 'Equal', metaKey: true, shiftKey: true }, 'increase'],
+    [{ code: 'Minus', ctrlKey: true }, 'decrease'],
+  ] as const)('resolves %o as %s', (event, direction) => {
+    expect(resolveEditorFontSizeShortcut(shortcutEvent(event))).toEqual({
+      kind: direction,
+    });
+  });
+
+  it('ignores unbound or alt-modified font size key combinations', () => {
+    expect(
+      resolveEditorFontSizeShortcut(
+        shortcutEvent({ code: 'Minus', metaKey: true, shiftKey: true }),
+      ),
+    ).toBeNull();
+    expect(
+      resolveEditorFontSizeShortcut(shortcutEvent({ code: 'Equal', metaKey: true, altKey: true })),
+    ).toBeNull();
+    expect(resolveEditorFontSizeShortcut(shortcutEvent({ code: 'Equal' }))).toBeNull();
   });
 });
