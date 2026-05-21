@@ -249,7 +249,10 @@ import {
 import { buildQuickOpenItems } from './lib/quickOpenItems';
 import { buildOpenTabsPayload } from './lib/openTabsSession';
 import { buildWorkspaceSearchPaths } from './lib/workspaceSearchScope';
-import { openSelectedDocumentTabs } from './lib/openDocumentSelection';
+import {
+  openSelectedDocumentTabs,
+  resolveOpenSelectedDocumentTabsTransition,
+} from './lib/openDocumentSelection';
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -2376,20 +2379,30 @@ export default function App() {
         createTabId: generateDocumentTabId,
         shouldAbort: () => isEditorOpStale(token),
       });
-      if (openResult.kind === 'aborted') return;
+      const openTransition = resolveOpenSelectedDocumentTabsTransition({
+        result: openResult,
+        currentTabs: tabs,
+      });
 
-      const { additions, lastSnapshot, lastActiveId } = openResult;
-
-      if (additions.length > 0 && lastSnapshot && lastActiveId) {
-        const finalActiveId = lastActiveId;
-        startTransition(() => {
-          setTabs((prev) => [...prev, ...additions]);
-          setActiveTabId(finalActiveId);
-        });
-        applySnapshot(lastSnapshot);
-      } else if (lastActiveId) {
-        // Every selected file was already open — switch to the last one.
-        await switchToTab(lastActiveId);
+      switch (openTransition.kind) {
+        case 'noop':
+          return;
+        case 'appendAdditions':
+          startTransition(() => {
+            setTabs((current) => {
+              const next = resolveOpenSelectedDocumentTabsTransition({
+                result: openResult,
+                currentTabs: current,
+              });
+              return next.kind === 'appendAdditions' ? next.tabs : current;
+            });
+            setActiveTabId(openTransition.activeTabId);
+          });
+          applySnapshot(openTransition.snapshot);
+          return;
+        case 'switchExisting':
+          // Every selected file was already open — switch to the last one.
+          await switchToTab(openTransition.activeTabId);
       }
     });
 

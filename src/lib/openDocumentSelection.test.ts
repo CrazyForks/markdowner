@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AppSnapshot } from './desktop';
 import { createDocumentTab } from './documentTabs';
-import { openSelectedDocumentTabs } from './openDocumentSelection';
+import {
+  openSelectedDocumentTabs,
+  resolveOpenSelectedDocumentTabsTransition,
+} from './openDocumentSelection';
 
 function snapshotFor(path: string, source = `# ${path}`): AppSnapshot {
   return {
@@ -124,5 +127,74 @@ describe('openSelectedDocumentTabs', () => {
     });
 
     expect(result).toEqual({ kind: 'aborted' });
+  });
+});
+
+describe('resolveOpenSelectedDocumentTabsTransition', () => {
+  it('appends newly opened tabs and activates the last opened tab', () => {
+    const existing = createDocumentTab({
+      id: 'existing',
+      path: '/tmp/existing.md',
+    });
+    const addition = createDocumentTab({
+      id: 'new-tab',
+      path: '/tmp/new.md',
+    });
+    const lastSnapshot = snapshotFor('/tmp/new.md');
+
+    expect(
+      resolveOpenSelectedDocumentTabsTransition({
+        result: {
+          kind: 'ready',
+          additions: [addition],
+          lastSnapshot,
+          lastActiveId: 'new-tab',
+        },
+        currentTabs: [existing],
+      }),
+    ).toEqual({
+      kind: 'appendAdditions',
+      tabs: [existing, addition],
+      activeTabId: 'new-tab',
+      snapshot: lastSnapshot,
+    });
+  });
+
+  it('switches to the last selected existing tab when there are no additions', () => {
+    expect(
+      resolveOpenSelectedDocumentTabsTransition({
+        result: {
+          kind: 'ready',
+          additions: [],
+          lastSnapshot: null,
+          lastActiveId: 'existing',
+        },
+        currentTabs: [createDocumentTab({ id: 'existing', path: '/tmp/existing.md' })],
+      }),
+    ).toEqual({
+      kind: 'switchExisting',
+      activeTabId: 'existing',
+    });
+  });
+
+  it('returns no-op for aborted or empty selection results', () => {
+    expect(
+      resolveOpenSelectedDocumentTabsTransition({
+        result: { kind: 'aborted' },
+        currentTabs: [],
+      }),
+    ).toEqual({ kind: 'noop' });
+
+    expect(
+      resolveOpenSelectedDocumentTabsTransition({
+        result: {
+          kind: 'ready',
+          additions: [],
+          lastSnapshot: null,
+          lastActiveId: null,
+        },
+        currentTabs: [],
+      }),
+    ).toEqual({ kind: 'noop' });
   });
 });

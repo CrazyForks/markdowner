@@ -22,6 +22,24 @@ type OpenSelectedDocumentTabsResult =
       lastActiveId: string | null;
     };
 
+type ResolveOpenSelectedDocumentTabsTransitionInput = {
+  result: OpenSelectedDocumentTabsResult;
+  currentTabs: readonly DocumentTab[];
+};
+
+type OpenSelectedDocumentTabsTransition =
+  | { kind: 'noop' }
+  | {
+      kind: 'appendAdditions';
+      tabs: DocumentTab[];
+      activeTabId: string;
+      snapshot: AppSnapshot;
+    }
+  | {
+      kind: 'switchExisting';
+      activeTabId: string;
+    };
+
 export async function openSelectedDocumentTabs(
   input: OpenSelectedDocumentTabsInput,
 ): Promise<OpenSelectedDocumentTabsResult> {
@@ -60,4 +78,32 @@ export async function openSelectedDocumentTabs(
     lastSnapshot,
     lastActiveId,
   };
+}
+
+export function resolveOpenSelectedDocumentTabsTransition(
+  input: ResolveOpenSelectedDocumentTabsTransitionInput,
+): OpenSelectedDocumentTabsTransition {
+  if (input.result.kind === 'aborted') {
+    return { kind: 'noop' };
+  }
+
+  const { additions, lastSnapshot, lastActiveId } = input.result;
+
+  if (additions.length > 0 && lastSnapshot && lastActiveId) {
+    return {
+      kind: 'appendAdditions',
+      tabs: [...input.currentTabs, ...additions],
+      activeTabId: lastActiveId,
+      snapshot: lastSnapshot,
+    };
+  }
+
+  if (lastActiveId) {
+    return {
+      kind: 'switchExisting',
+      activeTabId: lastActiveId,
+    };
+  }
+
+  return { kind: 'noop' };
 }
