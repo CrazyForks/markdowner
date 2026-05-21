@@ -8,7 +8,7 @@ import {
   WholeWord,
   X,
 } from 'lucide-react';
-import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,7 +72,7 @@ export function FindReplaceBar({
           ? `${activeMatchNumber} of ${matchCount}`
           : 'No matches';
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     findInputRef.current?.focus();
     findInputRef.current?.select();
   }, []);
