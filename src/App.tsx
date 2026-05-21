@@ -95,6 +95,7 @@ import {
 import { calculateDocumentStats } from './lib/documentStats';
 import { isDiscardCloseDecision, isSaveCloseDecision } from './lib/closeDecision';
 import { resolveClosePromptState } from './lib/closePrompt';
+import { resolveActiveDraftSyncPlan } from './lib/draftSync';
 import {
   findTextMatches,
   replaceAllMatches,
@@ -2265,34 +2266,35 @@ export default function App() {
     preserveMode: EditorMode = snapshot.mode,
     options: { forFinalSave?: boolean } = {},
   ) => {
-    if (!activeDocumentOpen || snapshot.activeDocumentSource === null) {
-      return;
-    }
-
     // In WYSIWYG mode, force the debounced flush so the persisted draft
     // includes any keystrokes that haven't crossed the debounce boundary yet.
     // The returned markdown lets us compare without waiting for React state.
-    const fresh = flushWysiwygDraftNow();
-    const draft = fresh ?? localDraft;
+    const plan = resolveActiveDraftSyncPlan({
+      activeDocumentOpen,
+      activeDocumentSource: snapshot.activeDocumentSource,
+      localDraft,
+      flushedDraft: flushWysiwygDraftNow(),
+      forFinalSave: options.forFinalSave,
+    });
+    if (!plan) {
+      return;
+    }
+
     // VS Code-parity trailing newline: every save path collapses the tail
     // to exactly one `\n` before reaching Rust + disk. Non-save syncs
     // (tab switch, mode switch) keep the live draft verbatim so the
     // editor doesn't visibly mutate mid-navigation.
-    const outgoing = options.forFinalSave ? normalizeFinalNewline(draft) : draft;
-    if (outgoing !== draft) {
-      setLocalDraft(outgoing);
+    if (plan.shouldUpdateLocalDraft) {
+      setLocalDraft(plan.outgoingDraft);
     }
 
     // Compare normalized to avoid spurious writes when the only diff is
     // trailing whitespace that the save path would have normalized anyway.
-    if (
-      normalizeFinalNewline(outgoing) ===
-      normalizeFinalNewline(snapshot.activeDocumentSource)
-    ) {
+    if (!plan.shouldReplaceActiveSource) {
       return;
     }
 
-    const synced = await replaceActiveDocumentSource(outgoing);
+    const synced = await replaceActiveDocumentSource(plan.outgoingDraft);
     applySnapshot({ ...synced, mode: preserveMode }, true);
   };
 
