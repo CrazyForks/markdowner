@@ -182,6 +182,7 @@ import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
   resolveModeChord,
+  resolveTabShortcut,
   usesCommandModifier,
 } from './lib/keyboardShortcuts';
 import { parseMarkdownOutline, type OutlineItem } from './lib/outline';
@@ -3257,56 +3258,36 @@ export default function App() {
 
       // Cmd+Shift+] / Cmd+Shift+[ → next / previous tab (wrapping). Users see
       // these as ⌘} / ⌘{ since `{` and `}` are Shift-bracket on US/KR layouts.
-      if (
-        usesCommandModifier(event) &&
-        event.shiftKey &&
-        !event.altKey &&
-        (event.key === ']' || event.key === '}')
-      ) {
-        event.preventDefault();
-        if (tabs.length > 0 && activeTabId) {
-          const idx = tabs.findIndex((tab) => tab.id === activeTabId);
-          if (idx >= 0) {
-            const next = tabs[(idx + 1) % tabs.length];
-            if (next && next.id !== activeTabId) {
-              void switchToTab(next.id);
-            }
-          }
-        }
-        return;
-      }
-      if (
-        usesCommandModifier(event) &&
-        event.shiftKey &&
-        !event.altKey &&
-        (event.key === '[' || event.key === '{')
-      ) {
-        event.preventDefault();
-        if (tabs.length > 0 && activeTabId) {
-          const idx = tabs.findIndex((tab) => tab.id === activeTabId);
-          if (idx >= 0) {
-            const prev = tabs[(idx - 1 + tabs.length) % tabs.length];
-            if (prev && prev.id !== activeTabId) {
-              void switchToTab(prev.id);
-            }
-          }
-        }
-        return;
-      }
-
       // Ctrl+Shift+PageUp / PageDown → move active tab left / right (no wrap),
       // matching VS Code "Move Editor Left/Right".
-      if (
-        event.ctrlKey &&
-        event.shiftKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        (event.key === 'PageUp' || event.key === 'PageDown')
-      ) {
+      // Cmd+1..9 → tab index 0..8. 10+ tabs have no shortcut; the keypress is
+      // still consumed so it doesn't fall through. Regardless of where focus
+      // started, send the caret into the editor surface for the targeted tab
+      // so the user can resume typing immediately.
+      const tabShortcut = resolveTabShortcut(event);
+      if (tabShortcut) {
         event.preventDefault();
-        if (tabs.length > 0 && activeTabId) {
-          const direction = event.key === 'PageDown' ? 1 : -1;
-          setTabs((prev) => moveTab(prev, activeTabId, direction));
+        if (tabShortcut.kind === 'selectIndex') {
+          const target = tabs[tabShortcut.index];
+          if (target && target.id !== activeTabId) {
+            void switchToTab(target.id);
+          }
+          if (target) {
+            focusActiveEditor();
+          }
+        } else if (tabs.length > 0 && activeTabId) {
+          if (tabShortcut.kind === 'selectNext' || tabShortcut.kind === 'selectPrevious') {
+            const idx = tabs.findIndex((tab) => tab.id === activeTabId);
+            if (idx >= 0) {
+              const offset = tabShortcut.kind === 'selectNext' ? 1 : -1;
+              const target = tabs[(idx + offset + tabs.length) % tabs.length];
+              if (target && target.id !== activeTabId) {
+                void switchToTab(target.id);
+              }
+            }
+          } else if (tabShortcut.kind === 'moveActive') {
+            setTabs((prev) => moveTab(prev, activeTabId, tabShortcut.direction));
+          }
         }
         return;
       }
@@ -3338,23 +3319,6 @@ export default function App() {
         } else {
           handleShowExplorerPanel();
           focusExplorerTree();
-        }
-        return;
-      }
-
-      // Cmd+1..9 → tab index 0..8. 10+ tabs have no shortcut; the keypress is
-      // still consumed so it doesn't fall through. Regardless of where focus
-      // started, send the caret into the editor surface for the targeted tab
-      // so the user can resume typing immediately.
-      if (event.key.length === 1 && /[1-9]/.test(event.key) && usesCommandModifier(event) && !event.shiftKey && !event.altKey) {
-        event.preventDefault();
-        const tabIndex = Number.parseInt(event.key, 10) - 1;
-        const target = tabs[tabIndex];
-        if (target && target.id !== activeTabId) {
-          void switchToTab(target.id);
-        }
-        if (target) {
-          focusActiveEditor();
         }
         return;
       }

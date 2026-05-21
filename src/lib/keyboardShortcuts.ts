@@ -10,12 +10,21 @@ type ModeChordEvent = Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
 type EditorFontSizeShortcutEvent = CommandModifierEvent &
   Pick<KeyboardEvent, 'altKey' | 'code' | 'shiftKey'>;
 
+type TabShortcutEvent = CommandModifierEvent &
+  Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
+
 export type ModeChordResolution =
   | { kind: 'pendingModifier' }
   | { kind: 'mode'; mode: EditorMode }
   | { kind: 'cancel' };
 
 export type EditorFontSizeShortcutResolution = { kind: 'increase' } | { kind: 'decrease' };
+
+export type TabShortcutResolution =
+  | { kind: 'selectNext' }
+  | { kind: 'selectPrevious' }
+  | { kind: 'selectIndex'; index: number }
+  | { kind: 'moveActive'; direction: -1 | 1 };
 
 export function usesCommandModifier(event: CommandModifierEvent): boolean {
   return event.metaKey || event.ctrlKey;
@@ -66,5 +75,44 @@ export function resolveEditorFontSizeShortcut(
   if (event.code === 'Minus' && !event.shiftKey) {
     return { kind: 'decrease' };
   }
+  return null;
+}
+
+export function resolveTabShortcut(event: TabShortcutEvent): TabShortcutResolution | null {
+  if (usesCommandModifier(event) && event.shiftKey && !event.altKey) {
+    if (event.key === ']' || event.key === '}') {
+      return { kind: 'selectNext' };
+    }
+    if (event.key === '[' || event.key === '{') {
+      return { kind: 'selectPrevious' };
+    }
+  }
+
+  if (
+    event.ctrlKey &&
+    event.shiftKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    (event.key === 'PageUp' || event.key === 'PageDown')
+  ) {
+    return {
+      kind: 'moveActive',
+      direction: event.key === 'PageDown' ? 1 : -1,
+    };
+  }
+
+  if (
+    event.key.length === 1 &&
+    /[1-9]/.test(event.key) &&
+    usesCommandModifier(event) &&
+    !event.shiftKey &&
+    !event.altKey
+  ) {
+    return {
+      kind: 'selectIndex',
+      index: Number.parseInt(event.key, 10) - 1,
+    };
+  }
+
   return null;
 }

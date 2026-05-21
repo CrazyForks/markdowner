@@ -4,6 +4,7 @@ import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
   resolveModeChord,
+  resolveTabShortcut,
   usesCommandModifier,
 } from './keyboardShortcuts';
 
@@ -105,5 +106,54 @@ describe('resolveEditorFontSizeShortcut', () => {
       resolveEditorFontSizeShortcut(shortcutEvent({ code: 'Equal', metaKey: true, altKey: true })),
     ).toBeNull();
     expect(resolveEditorFontSizeShortcut(shortcutEvent({ code: 'Equal' }))).toBeNull();
+  });
+});
+
+describe('resolveTabShortcut', () => {
+  it.each([
+    [{ key: ']', metaKey: true, shiftKey: true }, { kind: 'selectNext' }],
+    [{ key: '}', metaKey: true, shiftKey: true }, { kind: 'selectNext' }],
+    [{ key: '[', ctrlKey: true, shiftKey: true }, { kind: 'selectPrevious' }],
+    [{ key: '{', ctrlKey: true, shiftKey: true }, { kind: 'selectPrevious' }],
+  ] as const)('resolves tab selection shortcut %o', (event, expected) => {
+    expect(resolveTabShortcut(shortcutEvent(event))).toEqual(expected);
+  });
+
+  it.each([
+    ['1', 0],
+    ['9', 8],
+  ] as const)('resolves command+%s to a tab index', (key, index) => {
+    expect(resolveTabShortcut(shortcutEvent({ key, metaKey: true }))).toEqual({
+      kind: 'selectIndex',
+      index,
+    });
+  });
+
+  it.each([
+    [{ key: 'PageUp', ctrlKey: true, shiftKey: true }, -1],
+    [{ key: 'PageDown', ctrlKey: true, shiftKey: true }, 1],
+  ] as const)('resolves move-tab shortcut %o', (event, direction) => {
+    expect(resolveTabShortcut(shortcutEvent(event))).toEqual({
+      kind: 'moveActive',
+      direction,
+    });
+  });
+
+  it('ignores tab shortcuts with unsupported modifiers or keys', () => {
+    expect(resolveTabShortcut(shortcutEvent({ key: ']', metaKey: true }))).toBeNull();
+    expect(
+      resolveTabShortcut(shortcutEvent({ key: '1', metaKey: true, shiftKey: true })),
+    ).toBeNull();
+    expect(
+      resolveTabShortcut(
+        shortcutEvent({
+          key: 'PageDown',
+          ctrlKey: true,
+          shiftKey: true,
+          metaKey: true,
+        }),
+      ),
+    ).toBeNull();
+    expect(resolveTabShortcut(shortcutEvent({ key: '0', metaKey: true }))).toBeNull();
   });
 });
