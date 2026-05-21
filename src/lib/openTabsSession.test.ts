@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDocumentTab, createSettingsTab } from './documentTabs';
-import { buildOpenTabsPayload, loadOpenTabsWithEmptyRetry } from './openTabsSession';
+import {
+  buildOpenTabsPayload,
+  cursorPositionsMapFromOpenTabsPayload,
+  loadOpenTabsWithEmptyRetry,
+} from './openTabsSession';
 
 describe('buildOpenTabsPayload', () => {
   it('persists only path-backed document tabs and the active document path', () => {
@@ -61,6 +65,40 @@ describe('buildOpenTabsPayload', () => {
         '/tmp/saved.md': { line: 1, column: 1 },
       },
     });
+  });
+});
+
+describe('cursorPositionsMapFromOpenTabsPayload', () => {
+  it('returns a cursor-position map from persisted open-tabs payloads', () => {
+    const map = cursorPositionsMapFromOpenTabsPayload({
+      openTabs: ['/tmp/first.md', '/tmp/second.md'],
+      activeTabPath: '/tmp/second.md',
+      cursorPositions: {
+        '/tmp/first.md': { line: 2, column: 3 },
+        '/tmp/second.md': { line: 4, column: 5 },
+      },
+    });
+
+    expect(map).toBeInstanceOf(Map);
+    expect([...map.entries()]).toEqual([
+      ['/tmp/first.md', { line: 2, column: 3 }],
+      ['/tmp/second.md', { line: 4, column: 5 }],
+    ]);
+  });
+
+  it('returns an independent map so callers can update cursor state safely', () => {
+    const payload = {
+      openTabs: ['/tmp/first.md'],
+      activeTabPath: '/tmp/first.md',
+      cursorPositions: {
+        '/tmp/first.md': { line: 2, column: 3 },
+      },
+    };
+
+    const map = cursorPositionsMapFromOpenTabsPayload(payload);
+    map.set('/tmp/other.md', { line: 1, column: 1 });
+
+    expect(Object.keys(payload.cursorPositions)).toEqual(['/tmp/first.md']);
   });
 });
 

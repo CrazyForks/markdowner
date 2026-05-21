@@ -250,7 +250,11 @@ import {
   type WorkspaceTreeNode,
 } from './lib/workspaceTree';
 import { buildQuickOpenItems } from './lib/quickOpenItems';
-import { buildOpenTabsPayload, loadOpenTabsWithEmptyRetry } from './lib/openTabsSession';
+import {
+  buildOpenTabsPayload,
+  cursorPositionsMapFromOpenTabsPayload,
+  loadOpenTabsWithEmptyRetry,
+} from './lib/openTabsSession';
 import { buildWorkspaceSearchPaths } from './lib/workspaceSearchScope';
 import {
   openSelectedDocumentTabs,
@@ -1784,7 +1788,7 @@ export default function App() {
           try {
             const persistedTabs = await loadOpenTabs();
             if (cancelled) return;
-            cursorByPathRef.current = new Map(Object.entries(persistedTabs.cursorPositions));
+            cursorByPathRef.current = cursorPositionsMapFromOpenTabsPayload(persistedTabs);
             const activePath = next.activeDocumentPath;
             if (activePath) {
               startupRestoreRef.current = {
@@ -1812,7 +1816,7 @@ export default function App() {
           // Hydrate the caret map regardless of whether tabs come back —
           // useful when the user reopens a single CLI-opened file and the
           // map still carries its remembered position.
-          cursorByPathRef.current = new Map(Object.entries(persistedTabs.cursorPositions));
+          cursorByPathRef.current = cursorPositionsMapFromOpenTabsPayload(persistedTabs);
           if (persistedTabs.openTabs.length === 0) {
             setStartupTabsReady(true);
             return;

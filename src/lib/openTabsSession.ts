@@ -53,6 +53,12 @@ export function buildOpenTabsPayload(
   };
 }
 
+export function cursorPositionsMapFromOpenTabsPayload(
+  payload: OpenTabsPayload,
+): Map<string, SourceCursorLocation> {
+  return new Map(Object.entries(payload.cursorPositions));
+}
+
 export async function loadOpenTabsWithEmptyRetry(
   input: LoadOpenTabsWithEmptyRetryInput,
 ): Promise<LoadOpenTabsWithEmptyRetryResult> {
