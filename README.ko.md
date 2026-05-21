@@ -8,6 +8,7 @@ Markdowner는 `Tauri v2`, `React`, `Vite`, `Tiptap` 기반으로 구성된 Rust 
 
 - `pnpm tauri dev` 로 macOS 로컬 개발 실행이 가능합니다
 - `pnpm tauri build --debug` 로 macOS 로컬 debug 빌드가 가능합니다
+- `pnpm build:mac:dmg` 로 ad-hoc signing 이 적용된 무료 macOS DMG 배포 빌드를 만들 수 있습니다
 - 앱 셸에는 파일 열기, 폴더 열기, 저장, 명령 팔레트, 빠른 열기, 모드 전환, 테마 전환, 드래그 앤 드롭 열기, `markdowner-core` 와 연결되는 Rust command bridge 가 포함되어 있습니다
 - 사이드 패널에 문서 목차가 구현되어 있으며 헤딩 클릭으로 줄 점프가 가능합니다
 - 안정성은 원자적 쓰기, 외부 변경 감지, ErrorBoundary fallback까지 적용되어 있습니다
@@ -32,7 +33,7 @@ Markdowner는 `Tauri v2`, `React`, `Vite`, `Tiptap` 기반으로 구성된 Rust 
 
 - Asset folder와 PDF paper size는 설정으로 저장되지만, 실제 런타임 동작은 이미지 asset/export workflow 구현에 맞춰 연결될 예정입니다
 - 코드 하이라이팅은 Rust core 모델에 알려진 code fence 기준으로 존재하지만, frontend preview/WYSIWYG 하이라이팅 정책은 제품 수준 polish가 더 필요합니다
-- macOS bundle 생성은 켜져 있지만, production signing, notarization, release metadata, 배포 workflow는 미완료입니다
+- 무료 직접 배포용 macOS DMG 생성은 가능하지만, 유료 Developer ID signing/notarization 과 release metadata 는 아직 미완료입니다
 - Rust core와 React shell 테스트는 의미 있게 존재하지만, 전체 데스크톱 E2E, screenshot regression, 자동 접근성 gate는 아직 없습니다
 
 미구현 항목:
@@ -162,10 +163,14 @@ target/debug/markdowner-desktop
 ```bash
 pnpm build                         # 타입 체크와 프런트엔드 빌드
 pnpm build debug                   # Tauri 디버그 빌드
+pnpm build dmg                     # ad-hoc signing 이 적용된 릴리즈 DMG 빌드
+pnpm build universal dmg           # Apple Silicon + Intel universal DMG 빌드
 pnpm build install                 # Tauri 릴리즈 빌드 후 /Applications 에 설치
 pnpm build install open            # 설치 후 설치된 앱 실행
 pnpm build debug install open      # 디버그 빌드, 설치, 실행
 pnpm build:install:open            # 설치 + 실행 package-script alias
+pnpm build:mac:dmg                 # 릴리즈 DMG package-script alias
+pnpm build:mac:universal:dmg       # universal DMG package-script alias
 ```
 
 설치 옵션:
@@ -186,6 +191,41 @@ pnpm build install -- --open       # "open" 의 flag 형태
 - 대상 위치에 기존 `Markdowner.app` 이 있으면 제거한 뒤 `ditto` 로 복사하고, 로컬 빌드 번들이 Gatekeeper 경고 없이 실행되도록 `com.apple.quarantine` 속성을 제거합니다
 - `open` 또는 `--open` 을 주면 복사 후 설치된 번들을 실행합니다
 - `scripts/build-and-install.sh` 는 `pnpm build install` 을 감싼 호환용 wrapper 로 남겨두었습니다
+
+## 무료 macOS DMG 배포
+
+Markdowner는 `src-tauri/tauri.conf.json` 에서 Tauri ad-hoc macOS signing 을 사용하도록 설정되어 있습니다.
+
+```json
+"signingIdentity": "-"
+```
+
+직접 다운로드로 보낼 DMG는 다음 명령으로 만듭니다.
+
+```bash
+pnpm build:mac:dmg
+```
+
+명령 실행 후 생성된 `.dmg` 경로와 SHA-256 checksum 이 출력됩니다. DMG와 checksum 을 같이 공유하면, 받는 사람이 다운로드한 파일이 원본과 같은지 확인할 수 있습니다.
+
+Apple Silicon 과 Intel Mac 을 하나의 DMG로 지원하려면 Rust target 두 개를 한 번 설치한 뒤 universal 빌드를 실행합니다.
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+pnpm build:mac:universal:dmg
+```
+
+중요한 제한: ad-hoc signing 은 Developer ID signing 이 아니며 notarization 도 아닙니다. 다운로드한 DMG는 첫 실행 시 상대방 Mac 에서 Privacy & Security 수동 허용이 필요할 수 있습니다. 일반 사용자에게 경고 없는 더블클릭 실행 경험을 제공하려면 여전히 유료 Apple Developer Program, Developer ID 인증서, notarization 이 필요합니다.
+
+테스터에게 전달할 실행 안내문:
+
+```text
+1. DMG를 열고 Markdowner.app을 Applications 폴더로 옮깁니다.
+2. Markdowner를 한 번 실행해 봅니다.
+3. macOS가 실행을 막으면 System Settings -> Privacy & Security를 엽니다.
+4. Security 영역에서 Markdowner의 Open Anyway를 누릅니다.
+5. 다시 Open을 누르면 이후에는 일반 앱처럼 실행됩니다.
+```
 
 ### `scripts/build-and-run.sh`
 
@@ -223,7 +263,7 @@ pnpm tauri build --debug
 
 ## 참고 사항과 현재 제한사항
 
-- Tauri 데스크톱 셸은 macOS 로컬에서 동작하고 번들 생성은 활성화되어 있습니다 (`src-tauri/tauri.conf.json`의 `"bundle.active"` 는 `true`). 다만 프로덕션 배포를 위한 서명/공증 흐름은 후속 작업입니다.
+- Tauri 데스크톱 셸은 macOS 로컬에서 동작하고 무료 ad-hoc DMG 생성도 가능합니다. 다만 일반 사용자에게 경고 없는 공개 배포를 제공하기 위한 유료 Developer ID signing/notarization 은 후속 작업입니다.
 - 프런트엔드 프로덕션 번들은 현재 Vite chunk size warning 이 발생할 정도로 크기가 큽니다.
 - Windows 지원은 다음 단계의 목표이며, 아직 완료된 로컬 개발 워크플로는 아닙니다.
 - `crates/markdowner-macos` 는 Tauri 셸이 주 앱 진입점이 되는 동안 참고 구현과 회귀 기준으로 남겨둔 상태입니다.

@@ -8,6 +8,7 @@ Markdowner is a Rust-first Markdown editor desktop app built with `Tauri v2`, `R
 
 - macOS local development run works through `pnpm tauri dev`
 - macOS local debug build works through `pnpm tauri build --debug`
+- macOS no-cost DMG distribution works through `pnpm build:mac:dmg` with ad-hoc signing
 - the app shell includes file open, folder open, save, command palette, quick open, mode switching, theme switching, drag-and-drop open, and a Rust command bridge to `markdowner-core`
 - document outlines are shown in the side panel with jump-to-line support
 - shell reliability includes atomic writes, external-change detection, and ErrorBoundary fallback
@@ -32,7 +33,7 @@ Partially complete:
 
 - Asset folder and PDF paper size are persisted in settings, but their full runtime behaviors are waiting on the image asset and export workflows
 - Code highlighting exists in the Rust core model for known code fences, but frontend preview/WYSIWYG highlighting policy still needs product-level polish
-- macOS bundle generation is enabled, but production signing, notarization, release metadata, and distribution workflow are not complete
+- macOS DMG generation is enabled for no-cost direct distribution, but paid Developer ID signing/notarization and release metadata are not complete
 - Test coverage is meaningful at the Rust core and React shell levels, but there is no full desktop E2E, screenshot regression, or automated accessibility gate yet
 
 Not implemented yet:
@@ -162,10 +163,14 @@ Use `pnpm build` for the normal frontend production build. Add build subcommands
 ```bash
 pnpm build                         # type-check and build the frontend
 pnpm build debug                   # debug Tauri build
+pnpm build dmg                     # release DMG with ad-hoc signing
+pnpm build universal dmg           # universal Apple Silicon + Intel DMG
 pnpm build install                 # release Tauri build, install to /Applications
 pnpm build install open            # install, then launch the installed app
 pnpm build debug install open      # debug build, install, then launch
 pnpm build:install:open            # package-script alias for install + open
+pnpm build:mac:dmg                 # package-script alias for release DMG
+pnpm build:mac:universal:dmg       # package-script alias for universal DMG
 ```
 
 Install options:
@@ -186,6 +191,41 @@ Behavior:
 - Replaces any existing `Markdowner.app` at the destination, copies with `ditto`, and clears the `com.apple.quarantine` attribute so the locally built bundle launches without a Gatekeeper prompt
 - Pass `open` or `--open` to launch the installed bundle after copying
 - `scripts/build-and-install.sh` remains as a compatibility wrapper around `pnpm build install`
+
+## No-Cost macOS DMG Distribution
+
+Markdowner is configured for Tauri ad-hoc macOS signing through `src-tauri/tauri.conf.json`:
+
+```json
+"signingIdentity": "-"
+```
+
+Build a DMG for direct download distribution:
+
+```bash
+pnpm build:mac:dmg
+```
+
+The command prints the generated `.dmg` path and a SHA-256 checksum. Share both with testers so they can verify the downloaded file.
+
+For one DMG that supports both Apple Silicon and Intel Macs, install both Rust targets once and run the universal build:
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+pnpm build:mac:universal:dmg
+```
+
+Important limitation: ad-hoc signing is not Developer ID signing and does not notarize the app. A downloaded DMG can still require the recipient to allow the app manually in macOS Privacy & Security on first launch. A warning-free double-click flow for general users still requires the paid Apple Developer Program, a Developer ID certificate, and notarization.
+
+Tester launch instructions:
+
+```text
+1. Open the DMG and drag Markdowner.app to Applications.
+2. Try opening Markdowner once.
+3. If macOS blocks it, open System Settings -> Privacy & Security.
+4. In the Security section, click Open Anyway for Markdowner.
+5. Confirm Open. Future launches should work normally.
+```
 
 ### `scripts/build-and-run.sh`
 
@@ -223,7 +263,7 @@ pnpm tauri build --debug
 
 ## Notes and Current Limitations
 
-- The Tauri desktop shell is working locally on macOS and bundle generation is enabled (`"bundle.active": true` in `src-tauri/tauri.conf.json`); production-signing/notarization flow is still follow-up.
+- The Tauri desktop shell is working locally on macOS and no-cost ad-hoc DMG generation is available; paid Developer ID signing/notarization remains follow-up for warning-free public distribution.
 - The frontend production bundle is currently large enough to trigger Vite's chunk size warning.
 - Windows support is a planned next step rather than a completed local workflow.
 - `crates/markdowner-macos` still exists as a reference implementation and regression target while the Tauri shell becomes the main app entrypoint.
