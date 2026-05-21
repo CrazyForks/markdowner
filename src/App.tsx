@@ -134,6 +134,12 @@ import {
 } from './lib/linkOpener';
 import { createSourceLinkClickExtension } from './lib/sourceLinkClick';
 import {
+  buildSourceLineStartOffsets,
+  clampSourceOffset,
+  normalizeFinalNewline,
+  sourceOffsetForLine,
+} from './lib/sourceText';
+import {
   findWysiwygTextMatches,
   isWysiwygFindMatch,
   replaceWysiwygTextMatch,
@@ -318,16 +324,6 @@ function writeSidebarWidth(width: number) {
   }
 }
 
-function buildLineStartOffsets(source: string) {
-  const offsets = [0];
-  for (let index = 0; index < source.length; index += 1) {
-    if (source[index] === '\n') {
-      offsets.push(index + 1);
-    }
-  }
-  return offsets;
-}
-
 function lineTextFromOffset(source: string, offset: number) {
   const lineEnd = source.indexOf('\n', offset);
   const text = source.slice(offset, lineEnd === -1 ? source.length : lineEnd);
@@ -345,22 +341,6 @@ function syncScrollPosition(source: HTMLElement, target: HTMLElement | null) {
   if (target.scrollTop !== nextScrollTop) {
     target.scrollTop = nextScrollTop;
   }
-}
-
-function clampSelectionOffset(offset: number, sourceLength: number) {
-  if (!Number.isFinite(offset)) return 0;
-  return Math.max(0, Math.min(sourceLength, Math.round(offset)));
-}
-
-// Collapse any trailing newline run into exactly one `\n`. VS Code's
-// `files.insertFinalNewline` + `files.trimFinalNewlines` combined: empty
-// input still emits a single newline, multi-newline tails get squeezed,
-// and a text that already ends with exactly one `\n` round-trips unchanged.
-// Used both at save time (forced finalization on disk) and for dirty
-// comparisons so the WYSIWYG TrailingNode's extra blank paragraph at the
-// bottom doesn't flag a clean doc as dirty.
-function normalizeFinalNewline(text: string): string {
-  return text.replace(/\n*$/, '\n');
 }
 
 function readSourceNumber(element: HTMLElement, key: keyof DOMStringMap) {
@@ -444,18 +424,18 @@ function mapRenderedTextOffsetToSourceOffset(
   renderedOffset: number,
 ) {
   const renderedText = element.textContent ?? '';
-  const rawStart = clampSelectionOffset(sourceOffset, source.length);
-  const rawEnd = Math.max(rawStart, clampSelectionOffset(sourceEndOffset, source.length));
+  const rawStart = clampSourceOffset(sourceOffset, source.length);
+  const rawEnd = Math.max(rawStart, clampSourceOffset(sourceEndOffset, source.length));
   const rawText = source.slice(rawStart, rawEnd);
 
   if (renderedText.length > 0) {
     const renderedTextStart = rawText.indexOf(renderedText);
     if (renderedTextStart >= 0) {
-      return clampSelectionOffset(rawStart + renderedTextStart + renderedOffset, source.length);
+      return clampSourceOffset(rawStart + renderedTextStart + renderedOffset, source.length);
     }
   }
 
-  return clampSelectionOffset(rawStart + renderedOffset, source.length);
+  return clampSourceOffset(rawStart + renderedOffset, source.length);
 }
 
 function matchesShortcut(
@@ -1289,14 +1269,14 @@ export default function App() {
       };
     });
   }, [activeDocumentOpen, deferredLocalDraft]);
-  const sourceLineStartOffsets = useMemo(() => buildLineStartOffsets(localDraft), [localDraft]);
+  const sourceLineStartOffsets = useMemo(
+    () => buildSourceLineStartOffsets(localDraft),
+    [localDraft],
+  );
   const themeMode: ThemeMode = settings.themeFollowSystem ? 'system' : 'manual';
 
   const getSourceOffsetForLine = (lineNumber: number) => {
-    if (!Number.isFinite(lineNumber) || lineNumber < 1) {
-      return 0;
-    }
-    return sourceLineStartOffsets[lineNumber - 1] ?? localDraft.length;
+    return sourceOffsetForLine(lineNumber, sourceLineStartOffsets, localDraft.length);
   };
 
   const focusSourceSelection = (
@@ -1304,8 +1284,8 @@ export default function App() {
     selectionEnd = selectionStart,
     options: { focusEditor?: boolean; alignTop?: boolean } = {},
   ) => {
-    const nextSelectionStart = clampSelectionOffset(selectionStart, localDraft.length);
-    const nextSelectionEnd = clampSelectionOffset(selectionEnd, localDraft.length);
+    const nextSelectionStart = clampSourceOffset(selectionStart, localDraft.length);
+    const nextSelectionEnd = clampSourceOffset(selectionEnd, localDraft.length);
     const selection = { anchor: nextSelectionStart, head: nextSelectionEnd };
     const shouldFocus = options.focusEditor !== false;
 
