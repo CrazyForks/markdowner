@@ -192,6 +192,7 @@ import {
   resolveFocusToggleShortcut,
   resolveModeChord,
   resolveModeNumberShortcut,
+  resolveShellShortcutAction,
   resolveTabShortcut,
   resolveTabShortcutAction,
 } from './lib/keyboardShortcuts';
@@ -3055,60 +3056,68 @@ export default function App() {
         return;
       }
 
-      if (matchesShortcut(event, 'n')) {
+      const shellShortcutAction = resolveShellShortcutAction(event, {
+        activeDocumentOpen,
+        isSidebarOpen,
+        sidebarPanel,
+      });
+      if (shellShortcutAction.kind !== 'none') {
         event.preventDefault();
-        void handleNewDocument();
-        return;
-      }
-
-      // Cmd+T opens a new (untitled) tab — handleNewDocument creates a new
-      // tab when one does not already exist and switches to it otherwise.
-      if (matchesShortcut(event, 't')) {
-        event.preventDefault();
-        void handleNewDocument();
-        return;
-      }
-
-      if (matchesShortcut(event, 'o', { shift: true })) {
-        event.preventDefault();
-        void handleOpenWorkspace();
-        return;
-      }
-
-      if (matchesShortcut(event, 'e', { shift: true })) {
-        event.preventDefault();
-        // VS Code parity: when Explorer is already visible, collapse the sidebar;
-        // otherwise show it and move keyboard focus into the file tree.
-        if (isSidebarOpen && sidebarPanel === 'files') {
-          handleToggleSidebar();
-        } else {
-          handleShowExplorerPanel();
-          focusExplorerTree();
+        switch (shellShortcutAction.kind) {
+          case 'closeTabOrWindow':
+            void handleCloseTabOrWindow();
+            return;
+          case 'newDocument':
+            void handleNewDocument();
+            return;
+          case 'openDocument':
+            void handleOpenDocument();
+            return;
+          case 'openOutlinePanel':
+            handleOpenOutlinePanel();
+            return;
+          case 'openWorkspace':
+            void handleOpenWorkspace();
+            return;
+          case 'quit':
+            void handleQuitCommand();
+            return;
+          case 'save':
+            void handleSave();
+            return;
+          case 'saveAs':
+            void handleSaveAs();
+            return;
+          case 'showExplorerPanel':
+            handleShowExplorerPanel();
+            focusExplorerTree();
+            return;
+          case 'toggleCommandPalette':
+            setIsCommandPaletteOpen((prev) => !prev);
+            return;
+          case 'toggleDocumentStats':
+            setIsDocumentStatsOpen((prev) => !prev);
+            return;
+          case 'toggleQuickOpen':
+            setIsQuickOpenOpen((prev) => !prev);
+            return;
+          case 'toggleSettingsTab':
+            void toggleSettingsTab();
+            return;
+          case 'toggleShortcuts':
+            setIsShortcutsOpen((prev) => !prev);
+            return;
+          case 'toggleSidebar':
+            handleToggleSidebar();
+            return;
+          case 'toggleTypewriterMode':
+            handleSettingsChange({
+              ...settings,
+              typewriterModeEnabled: !settings.typewriterModeEnabled,
+            });
+            return;
+          default:
         }
-        return;
-      }
-
-      if (matchesShortcut(event, 'b', { shift: true })) {
-        event.preventDefault();
-        handleToggleSidebar();
-        return;
-      }
-
-      if (matchesShortcut(event, ',')) {
-        event.preventDefault();
-        void toggleSettingsTab();
-        return;
-      }
-
-      if (matchesShortcut(event, '/')) {
-        event.preventDefault();
-        setIsShortcutsOpen((prev) => !prev);
-        return;
-      }
-
-      if (matchesShortcut(event, 'd', { shift: true })) {
-        event.preventDefault();
-        handleOpenOutlinePanel();
         return;
       }
 
@@ -3139,58 +3148,6 @@ export default function App() {
             return;
           default:
         }
-        return;
-      }
-
-      if (matchesShortcut(event, 'p', { shift: true })) {
-        event.preventDefault();
-        setIsCommandPaletteOpen((prev) => !prev);
-        return;
-      }
-
-      if (matchesShortcut(event, 'p')) {
-        event.preventDefault();
-        setIsQuickOpenOpen((prev) => !prev);
-        return;
-      }
-
-      if (matchesShortcut(event, 'i', { shift: true })) {
-        if (!activeDocumentOpen) {
-          return;
-        }
-
-        event.preventDefault();
-        setIsDocumentStatsOpen((prev) => !prev);
-        return;
-      }
-
-      if (matchesShortcut(event, 'o')) {
-        event.preventDefault();
-        void handleOpenDocument();
-        return;
-      }
-
-      if (matchesShortcut(event, 's', { shift: true })) {
-        event.preventDefault();
-        void handleSaveAs();
-        return;
-      }
-
-      if (matchesShortcut(event, 's')) {
-        event.preventDefault();
-        void handleSave();
-        return;
-      }
-
-      if (matchesShortcut(event, 'q')) {
-        event.preventDefault();
-        void handleQuitCommand();
-        return;
-      }
-
-      if (matchesShortcut(event, 'w')) {
-        event.preventDefault();
-        void handleCloseTabOrWindow();
         return;
       }
 
@@ -3281,10 +3238,6 @@ export default function App() {
         return;
       }
 
-      if (matchesShortcut(event, 't', { shift: true })) {
-        event.preventDefault();
-        handleSettingsChange({ ...settings, typewriterModeEnabled: !settings.typewriterModeEnabled });
-      }
     };
 
     window.addEventListener('keydown', handleKeyboardShortcut);

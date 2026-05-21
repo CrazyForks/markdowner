@@ -36,6 +36,12 @@ type FindShortcutContext = {
   sidebarPanel: 'files' | 'outline' | 'search';
 };
 
+type ShellShortcutContext = {
+  activeDocumentOpen: boolean;
+  isSidebarOpen: boolean;
+  sidebarPanel: 'files' | 'outline' | 'search';
+};
+
 export type ModeChordResolution =
   | { kind: 'pendingModifier' }
   | { kind: 'mode'; mode: EditorMode }
@@ -50,6 +56,25 @@ export type FindShortcutAction =
   | { kind: 'openFind' }
   | { kind: 'openReplace' }
   | { kind: 'toggleSidebar' };
+
+export type ShellShortcutAction =
+  | { kind: 'closeTabOrWindow' }
+  | { kind: 'newDocument' }
+  | { kind: 'none' }
+  | { kind: 'openDocument' }
+  | { kind: 'openOutlinePanel' }
+  | { kind: 'openWorkspace' }
+  | { kind: 'quit' }
+  | { kind: 'save' }
+  | { kind: 'saveAs' }
+  | { kind: 'showExplorerPanel' }
+  | { kind: 'toggleCommandPalette' }
+  | { kind: 'toggleDocumentStats' }
+  | { kind: 'toggleQuickOpen' }
+  | { kind: 'toggleSettingsTab' }
+  | { kind: 'toggleShortcuts' }
+  | { kind: 'toggleSidebar' }
+  | { kind: 'toggleTypewriterMode' };
 
 export type TabShortcutResolution =
   | { kind: 'selectNext' }
@@ -173,6 +198,63 @@ export function resolveFindShortcutAction(
   }
 
   return null;
+}
+
+export function resolveShellShortcutAction(
+  event: ShortcutEvent,
+  context: ShellShortcutContext,
+): ShellShortcutAction {
+  if (matchesShortcut(event, 'n') || matchesShortcut(event, 't')) {
+    return { kind: 'newDocument' };
+  }
+  if (matchesShortcut(event, 'o', { shift: true })) {
+    return { kind: 'openWorkspace' };
+  }
+  if (matchesShortcut(event, 'e', { shift: true })) {
+    return context.isSidebarOpen && context.sidebarPanel === 'files'
+      ? { kind: 'toggleSidebar' }
+      : { kind: 'showExplorerPanel' };
+  }
+  if (matchesShortcut(event, 'b', { shift: true })) {
+    return { kind: 'toggleSidebar' };
+  }
+  if (matchesShortcut(event, ',')) {
+    return { kind: 'toggleSettingsTab' };
+  }
+  if (matchesShortcut(event, '/')) {
+    return { kind: 'toggleShortcuts' };
+  }
+  if (matchesShortcut(event, 'd', { shift: true })) {
+    return { kind: 'openOutlinePanel' };
+  }
+  if (matchesShortcut(event, 'p', { shift: true })) {
+    return { kind: 'toggleCommandPalette' };
+  }
+  if (matchesShortcut(event, 'p')) {
+    return { kind: 'toggleQuickOpen' };
+  }
+  if (matchesShortcut(event, 'i', { shift: true })) {
+    return context.activeDocumentOpen ? { kind: 'toggleDocumentStats' } : { kind: 'none' };
+  }
+  if (matchesShortcut(event, 'o')) {
+    return { kind: 'openDocument' };
+  }
+  if (matchesShortcut(event, 's', { shift: true })) {
+    return { kind: 'saveAs' };
+  }
+  if (matchesShortcut(event, 's')) {
+    return { kind: 'save' };
+  }
+  if (matchesShortcut(event, 'q')) {
+    return { kind: 'quit' };
+  }
+  if (matchesShortcut(event, 'w')) {
+    return { kind: 'closeTabOrWindow' };
+  }
+  if (matchesShortcut(event, 't', { shift: true })) {
+    return { kind: 'toggleTypewriterMode' };
+  }
+  return { kind: 'none' };
 }
 
 export function resolveTabShortcut(event: TabShortcutEvent): TabShortcutResolution | null {

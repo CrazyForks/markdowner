@@ -7,6 +7,7 @@ import {
   resolveFocusToggleShortcut,
   resolveModeChord,
   resolveModeNumberShortcut,
+  resolveShellShortcutAction,
   resolveTabShortcut,
   resolveTabShortcutAction,
   usesCommandModifier,
@@ -191,6 +192,87 @@ describe('resolveFindShortcutAction', () => {
     expect(
       resolveFindShortcutAction(shortcutEvent({ key: 'h', metaKey: true }), context),
     ).toBeNull();
+  });
+});
+
+describe('resolveShellShortcutAction', () => {
+  const context = {
+    activeDocumentOpen: true,
+    isSidebarOpen: false,
+    sidebarPanel: 'files',
+  } as const;
+
+  it.each([
+    [{ key: 'n', metaKey: true }, { kind: 'newDocument' }],
+    [{ key: 't', metaKey: true }, { kind: 'newDocument' }],
+    [{ key: 'O', metaKey: true, shiftKey: true }, { kind: 'openWorkspace' }],
+    [{ key: 'b', metaKey: true, shiftKey: true }, { kind: 'toggleSidebar' }],
+    [{ key: ',', metaKey: true }, { kind: 'toggleSettingsTab' }],
+    [{ key: '/', metaKey: true }, { kind: 'toggleShortcuts' }],
+    [{ key: 'd', metaKey: true, shiftKey: true }, { kind: 'openOutlinePanel' }],
+    [{ key: 'p', metaKey: true, shiftKey: true }, { kind: 'toggleCommandPalette' }],
+    [{ key: 'p', metaKey: true }, { kind: 'toggleQuickOpen' }],
+    [{ key: 'o', metaKey: true }, { kind: 'openDocument' }],
+    [{ key: 's', metaKey: true, shiftKey: true }, { kind: 'saveAs' }],
+    [{ key: 's', metaKey: true }, { kind: 'save' }],
+    [{ key: 'q', metaKey: true }, { kind: 'quit' }],
+    [{ key: 'w', metaKey: true }, { kind: 'closeTabOrWindow' }],
+    [{ key: 'T', metaKey: true, shiftKey: true }, { kind: 'toggleTypewriterMode' }],
+  ] as const)('resolves shell shortcut %o', (event, expected) => {
+    expect(resolveShellShortcutAction(shortcutEvent(event), context)).toEqual(expected);
+  });
+
+  it('routes Explorer shortcut to show or toggle based on the current sidebar panel', () => {
+    expect(
+      resolveShellShortcutAction(shortcutEvent({ key: 'e', metaKey: true, shiftKey: true }), {
+        ...context,
+        isSidebarOpen: false,
+        sidebarPanel: 'files',
+      }),
+    ).toEqual({ kind: 'showExplorerPanel' });
+
+    expect(
+      resolveShellShortcutAction(shortcutEvent({ key: 'e', metaKey: true, shiftKey: true }), {
+        ...context,
+        isSidebarOpen: true,
+        sidebarPanel: 'files',
+      }),
+    ).toEqual({ kind: 'toggleSidebar' });
+
+    expect(
+      resolveShellShortcutAction(shortcutEvent({ key: 'e', metaKey: true, shiftKey: true }), {
+        ...context,
+        isSidebarOpen: true,
+        sidebarPanel: 'search',
+      }),
+    ).toEqual({ kind: 'showExplorerPanel' });
+  });
+
+  it('gates document stats on an active document', () => {
+    expect(
+      resolveShellShortcutAction(shortcutEvent({ key: 'i', metaKey: true, shiftKey: true }), {
+        ...context,
+        activeDocumentOpen: true,
+      }),
+    ).toEqual({ kind: 'toggleDocumentStats' });
+    expect(
+      resolveShellShortcutAction(shortcutEvent({ key: 'i', metaKey: true, shiftKey: true }), {
+        ...context,
+        activeDocumentOpen: false,
+      }),
+    ).toEqual({ kind: 'none' });
+  });
+
+  it('ignores alt-modified or already-prevented shell shortcuts', () => {
+    expect(
+      resolveShellShortcutAction(shortcutEvent({ key: 'n', metaKey: true, altKey: true }), context),
+    ).toEqual({ kind: 'none' });
+    expect(
+      resolveShellShortcutAction(
+        shortcutEvent({ key: 'n', metaKey: true, defaultPrevented: true }),
+        context,
+      ),
+    ).toEqual({ kind: 'none' });
   });
 });
 
