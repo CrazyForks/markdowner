@@ -93,6 +93,7 @@ import {
   searchWorkspace,
 } from './lib/desktop';
 import { calculateDocumentStats } from './lib/documentStats';
+import { isDiscardCloseDecision, isSaveCloseDecision } from './lib/closeDecision';
 import {
   findTextMatches,
   replaceAllMatches,
@@ -420,28 +421,6 @@ function countLiteralOccurrencesBefore(source: string, needle: string, endOffset
   }
 
   return count;
-}
-
-function normalizeCloseDecision(decision: unknown) {
-  return typeof decision === 'string'
-    ? decision.trim().toLowerCase().replace(/[’']/g, "'")
-    : decision;
-}
-
-function isSaveCloseDecision(decision: unknown) {
-  const normalized = normalizeCloseDecision(decision);
-  return normalized === true || normalized === 'save' || normalized === 'yes';
-}
-
-function isDiscardCloseDecision(decision: unknown) {
-  const normalized = normalizeCloseDecision(decision);
-  return (
-    normalized === false ||
-    normalized === 'no' ||
-    normalized === "don't save" ||
-    normalized === 'dont save' ||
-    normalized === 'discard'
-  );
 }
 
 function getErrorMessage(error: unknown, fallback = 'Operation failed') {
