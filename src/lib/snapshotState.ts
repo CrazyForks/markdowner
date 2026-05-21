@@ -1,4 +1,4 @@
-import type { AppSnapshot } from './desktop';
+import type { AppSnapshot, EditorMode } from './desktop';
 
 export function clearActiveDocumentSnapshot(snapshot: AppSnapshot): AppSnapshot {
   return {
@@ -9,6 +9,17 @@ export function clearActiveDocumentSnapshot(snapshot: AppSnapshot): AppSnapshot 
     activeDocumentDirty: false,
     lastError: null,
   };
+}
+
+export function setSnapshotMode(snapshot: AppSnapshot, mode: EditorMode): AppSnapshot {
+  return { ...snapshot, mode };
+}
+
+export function setSnapshotLastError(
+  snapshot: AppSnapshot,
+  lastError: string | null,
+): AppSnapshot {
+  return { ...snapshot, lastError };
 }
 
 export function resolveSyncedDraftSnapshot(

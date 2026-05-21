@@ -127,6 +127,8 @@ import { nextCursorPositionFromStatistics } from './lib/cursorPosition';
 import {
   clearActiveDocumentSnapshot,
   resolveSyncedDraftSnapshot,
+  setSnapshotLastError,
+  setSnapshotMode,
 } from './lib/snapshotState';
 import {
   SETTINGS_TAB_ID,
@@ -1708,14 +1710,14 @@ export default function App() {
 
   const applyModeOptimistically = (mode: EditorMode) => {
     startTransition(() => {
-      setSnapshot((current) => ({ ...current, mode }));
+      setSnapshot((current) => setSnapshotMode(current, mode));
     });
   };
 
   const reportOperationError = (error: unknown, fallback?: string) => {
     const message = getErrorMessage(error, fallback);
     startTransition(() => {
-      setSnapshot((current) => ({ ...current, lastError: message }));
+      setSnapshot((current) => setSnapshotLastError(current, message));
     });
     return message;
   };

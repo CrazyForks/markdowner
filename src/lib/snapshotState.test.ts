@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   clearActiveDocumentSnapshot,
+  setSnapshotLastError,
+  setSnapshotMode,
   resolveSyncedDraftSnapshot,
 } from './snapshotState';
 import type { AppSnapshot } from './desktop';
@@ -41,6 +43,24 @@ describe('clearActiveDocumentSnapshot', () => {
       recentDocuments: ['/tmp/notes.md'],
       workspaceDocuments: ['/tmp/notes.md'],
       rootDir: '/tmp',
+    });
+  });
+});
+
+describe('setSnapshotMode', () => {
+  it('updates the editor mode without changing document or shell state', () => {
+    expect(setSnapshotMode(snapshot(), 'SplitView')).toEqual({
+      ...snapshot(),
+      mode: 'SplitView',
+    });
+  });
+});
+
+describe('setSnapshotLastError', () => {
+  it('updates the last operation error without changing document or shell state', () => {
+    expect(setSnapshotLastError(snapshot({ lastError: null }), 'Could not save')).toEqual({
+      ...snapshot({ lastError: null }),
+      lastError: 'Could not save',
     });
   });
 });
