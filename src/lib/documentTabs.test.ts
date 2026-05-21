@@ -4,6 +4,7 @@ import {
   SETTINGS_TAB_ID,
   SETTINGS_TAB_NAME,
   createDocumentTab,
+  createDocumentTabFromSnapshot,
   createSettingsTab,
   documentTabMetadataFromSnapshot,
   findDocumentTabByPath,
@@ -92,6 +93,52 @@ describe('createDocumentTab', () => {
       draft: '',
       missing: true,
     });
+  });
+});
+
+describe('createDocumentTabFromSnapshot', () => {
+  it('creates a restored document tab from snapshot metadata', () => {
+    expect(
+      createDocumentTabFromSnapshot({
+        id: 'restored-1',
+        snapshot: {
+          activeDocumentPath: '/tmp/renamed.md',
+          activeDocumentName: 'renamed.md',
+          activeDocumentSource: '# Restored',
+        },
+        fallbackPath: '/tmp/original.md',
+        fallbackName: 'original.md',
+      }),
+    ).toEqual(
+      createDocumentTab({
+        id: 'restored-1',
+        path: '/tmp/renamed.md',
+        name: 'renamed.md',
+        source: '# Restored',
+      }),
+    );
+  });
+
+  it('uses restore fallbacks when snapshot metadata is incomplete', () => {
+    expect(
+      createDocumentTabFromSnapshot({
+        id: 'restored-2',
+        snapshot: {
+          activeDocumentPath: null,
+          activeDocumentName: null,
+          activeDocumentSource: null,
+        },
+        fallbackPath: '/tmp/original.md',
+        fallbackName: 'original.md',
+      }),
+    ).toEqual(
+      createDocumentTab({
+        id: 'restored-2',
+        path: '/tmp/original.md',
+        name: 'original.md',
+        source: '',
+      }),
+    );
   });
 });
 

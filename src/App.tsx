@@ -132,6 +132,7 @@ import {
 } from './lib/snapshotState';
 import {
   createDocumentTab,
+  createDocumentTabFromSnapshot,
   documentTabMetadataFromSnapshot,
   findDocumentTabByPath,
   generateDocumentTabId,
@@ -1826,11 +1827,11 @@ export default function App() {
             try {
               const opened = await openDocument(path);
               restored.push(
-                createDocumentTab({
+                createDocumentTabFromSnapshot({
                   id: generateDocumentTabId(),
-                  path: opened.activeDocumentPath ?? path,
-                  name: opened.activeDocumentName ?? displayFileName(path),
-                  source: opened.activeDocumentSource ?? '',
+                  snapshot: opened,
+                  fallbackPath: path,
+                  fallbackName: displayFileName(path),
                 }),
               );
             } catch {

@@ -30,6 +30,13 @@ type CreateDocumentTabInput = {
   missing?: boolean;
 };
 
+type CreateDocumentTabFromSnapshotInput = {
+  id: string;
+  snapshot: DocumentTabSnapshotMetadataInput;
+  fallbackPath: string | null;
+  fallbackName?: string | null;
+};
+
 type DocumentTabSnapshotMetadataInput = {
   activeDocumentPath: string | null;
   activeDocumentName: string | null;
@@ -181,6 +188,17 @@ export function createDocumentTab(input: CreateDocumentTabInput): DocumentTab {
     draft: input.draft ?? source,
     missing: input.missing ?? false,
   };
+}
+
+export function createDocumentTabFromSnapshot(
+  input: CreateDocumentTabFromSnapshotInput,
+): DocumentTab {
+  return createDocumentTab({
+    id: input.id,
+    path: input.snapshot.activeDocumentPath ?? input.fallbackPath,
+    name: input.snapshot.activeDocumentName ?? input.fallbackName ?? 'Untitled',
+    source: input.snapshot.activeDocumentSource ?? '',
+  });
 }
 
 export function createSettingsTab(): DocumentTab {
