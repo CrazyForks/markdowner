@@ -6,8 +6,7 @@ use std::{
 };
 
 use markdowner_core::{
-    EditorMode, EditorRuntime, ThemeKind, ThemeSelection, WorkspaceState,
-    storage::CursorPosition,
+    EditorMode, EditorRuntime, ThemeKind, ThemeSelection, WorkspaceState, storage::CursorPosition,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -19,6 +18,7 @@ use tauri::{
 use tauri_plugin_cli::CliExt;
 
 mod diagnostics;
+mod link_actions;
 
 const MENU_COMMAND_EVENT: &str = "markdowner://menu-command";
 const MENU_FILE_ID: &str = "file";
@@ -759,7 +759,11 @@ fn line_column_for_offset(source: &str, offset: usize) -> (u32, u32) {
     (line, (column_chars as u32) + 1)
 }
 
-fn preview_window(line_text: &str, match_start_in_line: usize, match_end_in_line: usize) -> (String, usize, usize) {
+fn preview_window(
+    line_text: &str,
+    match_start_in_line: usize,
+    match_end_in_line: usize,
+) -> (String, usize, usize) {
     let char_indices: Vec<(usize, char)> = line_text.char_indices().collect();
     let start_char_idx = char_indices
         .iter()
@@ -843,7 +847,10 @@ fn search_file_contents(
     matches
 }
 
-fn compile_search_pattern(query: &str, options: &WorkspaceSearchOptions) -> Result<regex::Regex, String> {
+fn compile_search_pattern(
+    query: &str,
+    options: &WorkspaceSearchOptions,
+) -> Result<regex::Regex, String> {
     let escaped = if options.regex {
         query.to_string()
     } else {
@@ -957,9 +964,7 @@ fn cli_binary_directory_is_in_path(install_path: &Path) -> bool {
     let parent_str = parent.to_string_lossy();
     env::var_os("PATH")
         .map(|raw| {
-            env::split_paths(&raw).any(|candidate| {
-                candidate.to_string_lossy() == parent_str
-            })
+            env::split_paths(&raw).any(|candidate| candidate.to_string_lossy() == parent_str)
         })
         .unwrap_or(false)
 }
@@ -1019,9 +1024,8 @@ fn run_privileged_shell_command(_shell_command: &str) -> Result<(), String> {
 
 fn write_cli_binary_script(install_path: &Path, script: &str) -> Result<(), String> {
     if let Some(parent) = install_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            format!("Could not create {}: {error}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
     }
     std::fs::write(install_path, script).map_err(|error| error.to_string())?;
     set_executable_permission(install_path).map_err(|error| error.to_string())?;
@@ -1077,9 +1081,8 @@ fn install_cli_binary_at(
         std::process::id(),
         chrono_nanos_or_zero(),
     ));
-    std::fs::write(&tmp_path, &script).map_err(|error| {
-        format!("Could not stage wrapper script: {error}")
-    })?;
+    std::fs::write(&tmp_path, &script)
+        .map_err(|error| format!("Could not stage wrapper script: {error}"))?;
 
     let parent = install_path
         .parent()
@@ -1089,8 +1092,14 @@ fn install_cli_binary_at(
     let shell_command = format!(
         "mkdir -p {parent} && mv {tmp} {dest} && chmod 755 {dest}",
         parent = double_quote_shell_value(&parent.to_string_lossy()),
-        tmp = format_args!("\"{}\"", double_quote_shell_value(&tmp_path.to_string_lossy())),
-        dest = format_args!("\"{}\"", double_quote_shell_value(&install_path.to_string_lossy())),
+        tmp = format_args!(
+            "\"{}\"",
+            double_quote_shell_value(&tmp_path.to_string_lossy())
+        ),
+        dest = format_args!(
+            "\"{}\"",
+            double_quote_shell_value(&install_path.to_string_lossy())
+        ),
     );
 
     let escalation_result = run_privileged_shell_command(&shell_command);
@@ -1723,6 +1732,9 @@ pub fn run() {
             save_open_tabs,
             open_dropped_path,
             quit_app,
+            link_actions::resolve_markdown_link,
+            link_actions::open_external_url,
+            link_actions::open_path_in_default_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Markdowner desktop shell");
@@ -2366,7 +2378,8 @@ mod tests {
         let temp = tempdir().unwrap();
         let absolute = temp.path().join("notes.md");
 
-        let resolved = resolve_cli_path(absolute.to_str().unwrap(), Some(Path::new("/tmp/ignored")));
+        let resolved =
+            resolve_cli_path(absolute.to_str().unwrap(), Some(Path::new("/tmp/ignored")));
 
         assert_eq!(resolved, absolute);
     }

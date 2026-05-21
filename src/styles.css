@@ -838,10 +838,46 @@ section[data-minimap='on'] .editor-pane-preview {
   right: 6px;
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
   padding: 0;
   border-bottom: none;
   user-select: none;
   z-index: 1;
+}
+.code-block-copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  width: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--background) 80%, transparent);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  transition: background-color 80ms ease, color 80ms ease;
+}
+.code-block-copy-button:hover {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+.code-block-copy-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+/* Hide the copy/language chrome until the user hovers the code block — keeps
+   the editor surface visually quiet while leaving the affordances one
+   movement away (Typora/Zed pattern). */
+.code-block-view .code-block-toolbar {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.code-block-view:hover .code-block-toolbar,
+.code-block-view:focus-within .code-block-toolbar {
+  opacity: 1;
 }
 .code-block-language-select {
   background: color-mix(in oklab, var(--background) 80%, transparent);

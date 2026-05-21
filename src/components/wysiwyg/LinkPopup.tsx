@@ -13,11 +13,20 @@ import { getMarkRange } from '@tiptap/core';
 import { Check, Copy, ExternalLink, Unlink } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { openMarkdownLink } from '@/lib/linkOpener';
+import { subscribeEditorEvent } from '@/lib/editorEvents';
 
 interface Props {
   editor: Editor | null;
   /** When false, listeners are detached and nothing is rendered. */
   enabled?: boolean;
+  /**
+   * Absolute path of the active document. Used to resolve relative link
+   * targets like `../other.md`. When null, relative links cannot be opened.
+   */
+  activeDocumentPath?: string | null;
+  /** Called after we open a markdown file from the popup. */
+  onMarkdownOpened?: () => void;
 }
 
 type Placement = 'above' | 'below';
@@ -52,7 +61,12 @@ type FocusKey = (typeof FOCUS_ORDER)[number];
  * and the action buttons inside the popup; Tab from the editor enters the
  * popup; Escape returns focus to the editor.
  */
-export function LinkPopup({ editor, enabled = true }: Props) {
+export function LinkPopup({
+  editor,
+  enabled = true,
+  activeDocumentPath = null,
+  onMarkdownOpened,
+}: Props) {
   const [state, setState] = useState<PopupState>({ open: false });
   const [placement, setPlacement] = useState<Placement>('above');
   const [draft, setDraft] = useState('');
@@ -308,7 +322,14 @@ export function LinkPopup({ editor, enabled = true }: Props) {
     (rawHref: string) => {
       if (!editor || !state.open) return;
       const trimmed = rawHref.trim();
-      if (trimmed === '') {
+      // Empty + "scheme only" placeholders both mean "no URL entered" — treat
+      // them as cancellation and drop the link mark. Otherwise a quick click
+      // on the Link button followed by a blur would leave a broken `[text]()`
+      // or `[text](https://)` behind. Matches `https://`, `mailto:`, `tel:`,
+      // etc. — any `scheme:` (optionally followed by 1-2 slashes) with no
+      // body. A real URL always has something after the scheme separator.
+      const isProtocolPlaceholder = /^[a-z][a-z0-9+.-]*:\/{0,2}$/i.test(trimmed);
+      if (trimmed === '' || isProtocolPlaceholder) {
         editor
           .chain()
           .focus()
@@ -358,12 +379,17 @@ export function LinkPopup({ editor, enabled = true }: Props) {
     if (!state.open) return;
     const target = draft.trim();
     if (!target) return;
-    try {
-      window.open(target, '_blank', 'noopener,noreferrer');
-    } catch {
-      // No-op: the Tauri webview may block this without a shell plugin. The
-      // copy button is still available as a fallback.
-    }
+    // Route through the Rust shell so we get default-browser opening for web
+    // URLs and editor tab opening for markdown files. window.open is silently
+    // blocked inside the Tauri webview without the shell plugin.
+    void openMarkdownLink(target, activeDocumentPath, {
+      onMarkdownOpened: () => {
+        setState({ open: false });
+        onMarkdownOpened?.();
+      },
+    }).catch(() => {
+      // Swallow errors — the copy button + manual paste remain as a fallback.
+    });
   };
 
   const handleKeyDownInItem = (key: FocusKey) => (event: ReactKeyboardEvent) => {
@@ -391,6 +417,30 @@ export function LinkPopup({ editor, enabled = true }: Props) {
       }
     }
   };
+
+  // External "edit link" trigger (e.g. the Link button in the selection
+  // toolbar) — focus the URL input so the user can type immediately without
+  // a second click. The popup itself is opened by the selection-update
+  // listener once the toolbar applies the link; toggle a state ticker so the
+  // focus effect below runs once the input is actually mounted.
+  const [focusRequestToken, setFocusRequestToken] = useState(0);
+  useEffect(() => {
+    return subscribeEditorEvent('link:edit-request', (payload) => {
+      if (!payload.focusInput) return;
+      setFocusRequestToken((value) => value + 1);
+    });
+  }, []);
+  useEffect(() => {
+    if (!state.open || focusRequestToken === 0) return;
+    // requestAnimationFrame defers the focus until after React commits and
+    // the portal mounts the input. Selecting the text lets the user type
+    // straight over the placeholder.
+    const handle = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [focusRequestToken, state.open]);
 
   // Hide popup when clicking outside both popup and editor.
   useEffect(() => {

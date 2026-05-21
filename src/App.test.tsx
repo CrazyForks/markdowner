@@ -139,6 +139,7 @@ vi.mock('@uiw/react-codemirror', () => ({
     updateListener: {
       of: (listener: unknown) => ({ listener }),
     },
+    domEventHandlers: (handlers: unknown) => ({ domEventHandlers: handlers }),
   },
 }));
 

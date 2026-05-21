@@ -13,6 +13,7 @@ import {
   NodeViewWrapper,
   type NodeViewProps,
 } from '@tiptap/react';
+import { Check, Copy } from 'lucide-react';
 
 // Curated set kept short on purpose — these are the languages bundled in the
 // common subset of highlight.js / lowlight, plus the handful most users will
@@ -343,6 +344,47 @@ export function CodeBlockView(props: NodeViewProps) {
     ? `${pickerId}-option-${activeIndex}`
     : undefined;
 
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    const text = node.textContent ?? '';
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Last-resort path for environments where the Clipboard API is
+        // missing (older WebKit builds, isolated frames). Mirrors the
+        // synchronous execCommand fallback used elsewhere in shadcn-style UI.
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.top = '0';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopied(false);
+      }, 1200);
+    } catch {
+      // Clipboard API can throw without permission. Silently degrade.
+    }
+  };
+
   return (
     <NodeViewWrapper className="code-block-view" data-language={language}>
       <pre>
@@ -369,6 +411,15 @@ export function CodeBlockView(props: NodeViewProps) {
           }}
         >
           <span className="code-block-language-label">{currentOption.label}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={copied ? 'Code copied' : 'Copy code'}
+          title={copied ? 'Copied' : 'Copy code'}
+          className="code-block-copy-button"
+          onClick={handleCopy}
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
         </button>
       </div>
       {isOpen && popupRect && typeof document !== 'undefined'

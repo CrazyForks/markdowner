@@ -82,6 +82,35 @@ export async function quitApp() {
   return invoke<void>('quit_app');
 }
 
+/**
+ * Outcome of asking the Rust shell to classify a markdown link's href.
+ * Mirrors the `ResolvedLink` enum in `src-tauri/src/link_actions.rs`.
+ */
+export type ResolvedLink =
+  | { kind: 'markdown'; absolutePath: string }
+  | { kind: 'file'; absolutePath: string }
+  | { kind: 'external'; href: string }
+  | { kind: 'anchor'; fragment: string }
+  | { kind: 'unresolved'; reason: string };
+
+export async function resolveMarkdownLink(
+  href: string,
+  basePath: string | null,
+): Promise<ResolvedLink> {
+  return invoke<ResolvedLink>('resolve_markdown_link', {
+    href,
+    basePath,
+  });
+}
+
+export async function openExternalUrl(href: string): Promise<void> {
+  return invoke<void>('open_external_url', { href });
+}
+
+export async function openPathInDefaultApp(path: string): Promise<void> {
+  return invoke<void>('open_path_in_default_app', { path });
+}
+
 export interface WorkspaceSearchOptions {
   caseSensitive: boolean;
   wholeWord: boolean;

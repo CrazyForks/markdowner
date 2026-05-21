@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { publishEditorEvent } from '@/lib/editorEvents';
 
 interface Props {
   editor: Editor | null;
@@ -138,22 +139,25 @@ export function SelectionToolbar({ editor, enabled = true }: Props) {
     }
   };
 
-  const promptForLink = () => {
+  // Trigger the inline link editor (the floating LinkPopup component) instead
+  // of falling back to window.prompt — the prompt is jarring inside a desktop
+  // app and steals focus across windows. The popup handles editing existing
+  // links naturally; for fresh selections we attach an `https://` placeholder
+  // so TipTap's link extension definitely applies the mark, then ask the
+  // popup to focus + select its URL input so the user immediately types over
+  // the placeholder.
+  const editLink = () => {
     if (!editor) return;
-    const existing = editor.getAttributes('link').href as string | undefined;
-    const next = window.prompt('Enter URL', existing ?? 'https://');
-    if (next === null) return;
-    const trimmed = next.trim();
-    if (trimmed === '') {
-      editor.chain().focus().unsetLink().run();
-      return;
+    const hasLink = editor.isActive('link');
+    if (!hasLink) {
+      editor
+        .chain()
+        .focus()
+        .extendMarkRange('link')
+        .setLink({ href: 'https://' })
+        .run();
     }
-    editor
-      .chain()
-      .focus()
-      .extendMarkRange('link')
-      .setLink({ href: trimmed })
-      .run();
+    publishEditorEvent('link:edit-request', { focusInput: true });
   };
 
   if (!enabled || !visible) return null;
@@ -210,7 +214,7 @@ export function SelectionToolbar({ editor, enabled = true }: Props) {
       <ToolbarButton
         label="Link"
         active={isActive('link')}
-        onClick={promptForLink}
+        onClick={editLink}
       >
         <LinkIcon className="size-4" />
       </ToolbarButton>

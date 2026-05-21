@@ -127,6 +127,8 @@ import {
   MARKDOWN_CONTENT_SCOPE_CLASS,
   scopeImportedStylesheet,
 } from './lib/themeScope';
+import { isOpenLinkClick, openMarkdownLink } from './lib/linkOpener';
+import { createSourceLinkClickExtension } from './lib/sourceLinkClick';
 import {
   findWysiwygTextMatches,
   isWysiwygFindMatch,
@@ -949,6 +951,11 @@ export default function App() {
   // current editor — without this, `editor` inside `compositionend` would be
   // null after we stabilise the editorProps reference below.
   const editorInstanceRef = useRef<TiptapEditor | null>(null);
+  // Live mirror of the active document path. The WYSIWYG link click handler
+  // captures it via this ref (instead of closing over snapshot) so we don't
+  // need to re-create editorProps on every snapshot change — that would
+  // shred ProseMirror's plugin state mid-IME.
+  const activeDocumentPathRef = useRef<string | null>(null);
   // Remembered caret per absolute file path. Filled from the persisted
   // session on launch, updated as the user moves the caret (both modes),
   // and re-persisted via saveOpenTabs on a small debounce.
@@ -1845,6 +1852,22 @@ export default function App() {
     if (currentMode !== 'SplitView') return;
     if (!(event.target instanceof Element)) return;
 
+    // Clicks on rendered links open the target — markdown files in this
+    // editor, everything else in the OS default handler. Plain text in the
+    // preview still focuses the corresponding source line via the rest of
+    // this handler.
+    const anchor = event.target.closest('a') as HTMLAnchorElement | null;
+    if (anchor && event.currentTarget.contains(anchor)) {
+      const href = anchor.getAttribute('href');
+      if (href) {
+        event.preventDefault();
+        void openMarkdownLink(href, snapshot.activeDocumentPath).catch(() => {
+          // Ignored — user can also open via the source editor.
+        });
+        return;
+      }
+    }
+
     const sourceLineElement = event.target.closest<HTMLElement>('[data-source-line]');
     if (!sourceLineElement || !event.currentTarget.contains(sourceLineElement)) return;
 
@@ -1949,6 +1972,12 @@ export default function App() {
   }, [isResizingSidebar, sidebarWidth]);
 
   const currentMode = snapshot.mode;
+
+  // Keep the active document path mirrored in a ref so handlers captured
+  // inside stable editorProps closures can resolve relative markdown links.
+  useEffect(() => {
+    activeDocumentPathRef.current = snapshot.activeDocumentPath;
+  }, [snapshot.activeDocumentPath]);
 
   const publishWysiwygMarkdownDraft = useEffectEvent((markdown: string) => {
     lastEditorMarkdownRef.current = markdown;
@@ -2111,6 +2140,24 @@ export default function App() {
     () => ({
       attributes: {
         class: `editor-surface tiptap-surface ${MARKDOWN_CONTENT_SCOPE_CLASS}`,
+      },
+      // Cmd/Ctrl+Click on a link inside the WYSIWYG surface should open the
+      // target: markdown files become a new editor tab, everything else goes
+      // through the OS default handler (browser, mail, Preview, ...).
+      // Plain clicks fall through so the user can still position the caret
+      // inside the link text to edit it.
+      handleClick: (_view: any, _pos: number, event: MouseEvent) => {
+        if (!isOpenLinkClick(event)) return false;
+        const target = event.target as Element | null;
+        const anchor = target?.closest?.('a') as HTMLAnchorElement | null;
+        if (!anchor) return false;
+        const href = anchor.getAttribute('href');
+        if (!href) return false;
+        event.preventDefault();
+        void openMarkdownLink(href, activeDocumentPathRef.current).catch(() => {
+          // Ignored — non-fatal; user can fall back to the popup's open button.
+        });
+        return true;
       },
       handleKeyDown: (view: any, event: KeyboardEvent) => {
         // CJK IME guard: ProseMirror's readDOMChange synthesises an Enter
@@ -3020,6 +3067,11 @@ export default function App() {
   const sourceEditorExtensions = useMemo(
     () => [
       markdown(),
+      // Cmd/Ctrl+Click on `[text](url)` in the source editor opens the link
+      // through the unified linkOpener flow (browser for URLs, editor tab
+      // for markdown files). Plain clicks keep CodeMirror's default
+      // caret-positioning behavior.
+      createSourceLinkClickExtension(() => activeDocumentPathRef.current),
       ...(settings.editorLineWrap ? [EditorView.lineWrapping] : []),
       ...(settings.focusModeEnabled ? [sourceFocusModeExtension] : []),
       ...(settings.typewriterModeEnabled ? [sourceTypewriterModeExtension] : []),
@@ -5055,7 +5107,11 @@ export default function App() {
             <EditorContent editor={editor} />
             <SlashCommandMenu editor={editor} enabled={currentMode === 'Wysiwyg'} />
             <SelectionToolbar editor={editor} enabled={currentMode === 'Wysiwyg'} />
-            <LinkPopup editor={editor} enabled={currentMode === 'Wysiwyg'} />
+            <LinkPopup
+              editor={editor}
+              enabled={currentMode === 'Wysiwyg'}
+              activeDocumentPath={snapshot.activeDocumentPath}
+            />
             <TableToolbar editor={editor} enabled={currentMode === 'Wysiwyg'} />
           </>
         }

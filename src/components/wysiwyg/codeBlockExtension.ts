@@ -11,13 +11,14 @@ const lowlight = createLowlight(common);
 
 // Move keyboard focus to the language picker rendered by the NodeView at the
 // given document position. Returns true when the focus actually moved so the
-// caller can `preventDefault` the originating arrow keypress.
+// caller can `preventDefault` the originating arrow keypress. The picker is
+// rendered as an HTMLButtonElement (custom listbox), not a native <select>.
 function focusLanguageSelectorAtPos(editor: Editor, pos: number): boolean {
   const dom = editor.view.nodeDOM(pos);
   if (!(dom instanceof HTMLElement)) return false;
-  const select = dom.querySelector('[data-code-block-language-select]');
-  if (select instanceof HTMLSelectElement && !select.disabled) {
-    select.focus();
+  const trigger = dom.querySelector('[data-code-block-language-select]');
+  if (trigger instanceof HTMLButtonElement && !trigger.disabled) {
+    trigger.focus();
     return true;
   }
   return false;

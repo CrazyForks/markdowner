@@ -9,6 +9,8 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  Image as ImageIcon,
+  Link as LinkIcon,
   List,
   ListOrdered,
   Minus,
@@ -19,6 +21,7 @@ import {
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { publishEditorEvent } from '@/lib/editorEvents';
 
 type SlashItem = {
   id: string;
@@ -126,6 +129,48 @@ const SLASH_ITEMS: SlashItem[] = [
     keywords: ['inline', 'code', 'mark'],
     icon: Hash,
     run: (editor) => editor.chain().focus().toggleCode().run(),
+  },
+  {
+    id: 'image',
+    title: 'Image',
+    description: 'Embed an image by URL.',
+    keywords: ['image', 'img', 'picture', 'photo'],
+    icon: ImageIcon,
+    run: (editor) => {
+      const url = window.prompt('Image URL', 'https://');
+      if (!url) return;
+      const trimmed = url.trim();
+      if (!trimmed) return;
+      editor.chain().focus().setImage({ src: trimmed }).run();
+    },
+  },
+  {
+    id: 'link',
+    title: 'Link',
+    description: 'Insert or convert text into a link.',
+    keywords: ['link', 'url', 'hyperlink', 'anchor'],
+    icon: LinkIcon,
+    run: (editor) => {
+      // Apply a placeholder link mark on whatever the caret currently covers,
+      // then ask the floating LinkPopup to focus its URL input so the user
+      // can type immediately. Mirrors the selection-toolbar Link flow.
+      const { from, to } = editor.state.selection;
+      if (from === to) {
+        editor
+          .chain()
+          .focus()
+          .insertContent('link')
+          .setTextSelection({ from, to: from + 4 })
+          .run();
+      }
+      editor
+        .chain()
+        .focus()
+        .extendMarkRange('link')
+        .setLink({ href: 'https://' })
+        .run();
+      publishEditorEvent('link:edit-request', { focusInput: true });
+    },
   },
 ];
 
