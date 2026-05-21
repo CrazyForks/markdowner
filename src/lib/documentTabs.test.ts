@@ -15,6 +15,7 @@ import {
   refreshSwitchedDocumentTab,
   resolveCloseTabTransition,
   resolveSettingsTabToggle,
+  resolveSwitchTabTransition,
   stashDocumentTabDraft,
   upsertDocumentTab,
   type DocumentTab,
@@ -545,6 +546,90 @@ describe('resolveSettingsTabToggle', () => {
       tabs: [document, createSettingsTab()],
       activeTabId: SETTINGS_TAB_ID,
       preSettingsDocTabId: 'doc',
+    });
+  });
+});
+
+describe('resolveSwitchTabTransition', () => {
+  it('does nothing when the target tab is already active or missing', () => {
+    const active = documentTab({ id: 'active' });
+
+    expect(
+      resolveSwitchTabTransition({
+        tabs: [active],
+        activeTabId: 'active',
+        targetId: 'active',
+      }),
+    ).toEqual({ kind: 'noop' });
+    expect(
+      resolveSwitchTabTransition({
+        tabs: [active],
+        activeTabId: 'active',
+        targetId: 'missing',
+      }),
+    ).toEqual({ kind: 'noop' });
+  });
+
+  it('activates settings and missing document tabs without opening a document', () => {
+    const missing = documentTab({
+      id: 'missing',
+      path: '/tmp/missing.md',
+      missing: true,
+    });
+    const settings = createSettingsTab();
+
+    expect(
+      resolveSwitchTabTransition({
+        tabs: [missing, settings],
+        activeTabId: 'missing',
+        targetId: SETTINGS_TAB_ID,
+      }),
+    ).toEqual({
+      kind: 'activateSettings',
+      target: settings,
+    });
+    expect(
+      resolveSwitchTabTransition({
+        tabs: [missing, settings],
+        activeTabId: SETTINGS_TAB_ID,
+        targetId: 'missing',
+      }),
+    ).toEqual({
+      kind: 'activateMissing',
+      target: missing,
+    });
+  });
+
+  it('requests the right native document operation for saved and untitled documents', () => {
+    const saved = documentTab({
+      id: 'saved',
+      path: '/tmp/saved.md',
+    });
+    const untitled = documentTab({
+      id: 'untitled',
+      path: null,
+    });
+
+    expect(
+      resolveSwitchTabTransition({
+        tabs: [saved, untitled],
+        activeTabId: 'untitled',
+        targetId: 'saved',
+      }),
+    ).toEqual({
+      kind: 'openPath',
+      target: saved,
+      path: '/tmp/saved.md',
+    });
+    expect(
+      resolveSwitchTabTransition({
+        tabs: [saved, untitled],
+        activeTabId: 'saved',
+        targetId: 'untitled',
+      }),
+    ).toEqual({
+      kind: 'newDocument',
+      target: untitled,
     });
   });
 });

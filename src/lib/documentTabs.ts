@@ -88,6 +88,12 @@ type ResolveSettingsTabToggleInput = {
   activeTabId: string | null;
 };
 
+type ResolveSwitchTabTransitionInput = {
+  tabs: readonly DocumentTab[];
+  activeTabId: string | null;
+  targetId: string;
+};
+
 type RefreshActiveDocumentTabInput = {
   tabs: readonly DocumentTab[];
   activeTabId: string | null;
@@ -133,6 +139,13 @@ type SettingsTabToggleTransition =
       activeTabId: string;
       preSettingsDocTabId: string | null;
     };
+
+type SwitchTabTransition =
+  | { kind: 'noop' }
+  | { kind: 'activateSettings'; target: DocumentTab }
+  | { kind: 'activateMissing'; target: DocumentTab }
+  | { kind: 'openPath'; target: DocumentTab; path: string }
+  | { kind: 'newDocument'; target: DocumentTab };
 
 export function generateDocumentTabId(entropy: TabIdEntropy = {}): string {
   const randomUUID =
@@ -366,6 +379,33 @@ export function resolveSettingsTabToggle(
     activeTabId: SETTINGS_TAB_ID,
     preSettingsDocTabId: input.activeTabId,
   };
+}
+
+export function resolveSwitchTabTransition(
+  input: ResolveSwitchTabTransitionInput,
+): SwitchTabTransition {
+  if (input.targetId === input.activeTabId) {
+    return { kind: 'noop' };
+  }
+
+  const target = input.tabs.find((tab) => tab.id === input.targetId);
+  if (!target) {
+    return { kind: 'noop' };
+  }
+
+  if (target.kind === 'settings') {
+    return { kind: 'activateSettings', target };
+  }
+
+  if (target.missing && target.path) {
+    return { kind: 'activateMissing', target };
+  }
+
+  if (target.path) {
+    return { kind: 'openPath', target, path: target.path };
+  }
+
+  return { kind: 'newDocument', target };
 }
 
 function selectTabAfterClose(input: {

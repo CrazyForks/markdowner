@@ -142,6 +142,7 @@ import {
   refreshSwitchedDocumentTab,
   resolveCloseTabTransition,
   resolveSettingsTabToggle,
+  resolveSwitchTabTransition,
   stashDocumentTabDraft,
   upsertDocumentTab,
   type DocumentTab,
@@ -2813,9 +2814,9 @@ export default function App() {
   // active document to the target's path (or a fresh untitled), then restores
   // the target tab's previously stashed draft as the live editor content.
   const switchToTab = useEffectEvent(async (targetId: string) => {
-    if (targetId === activeTabId) return;
-    const target = tabs.find((tab) => tab.id === targetId);
-    if (!target) return;
+    const transition = resolveSwitchTabTransition({ tabs, activeTabId, targetId });
+    if (transition.kind === 'noop') return;
+    const target = transition.target;
 
     const token = nextEditorOpRequest();
     await withBusy(async () => {
@@ -2824,25 +2825,23 @@ export default function App() {
       if (isEditorOpStale(token)) return;
 
       try {
-        if (target.kind === 'settings') {
+        if (transition.kind === 'activateSettings') {
           // Settings is a UI-only surface — stay on the current snapshot but
           // hand the active-tab pointer to the settings tab so the editor
           // area swaps to SettingsPanel.
-          setActiveTabId(target.id);
+          setActiveTabId(transition.target.id);
           return;
         }
-        if (target.missing && target.path) {
+        if (transition.kind === 'activateMissing') {
           // Missing files: stay on the empty editor; do not call into Rust.
-          setActiveTabId(target.id);
+          setActiveTabId(transition.target.id);
           setLocalDraft('');
           return;
         }
-        let next: AppSnapshot;
-        if (target.path) {
-          next = await openDocument(target.path);
-        } else {
-          next = await newDocument();
-        }
+        const next =
+          transition.kind === 'openPath'
+            ? await openDocument(transition.path)
+            : await newDocument();
         if (isEditorOpStale(token)) return;
         // preserveDraft so we can immediately swap to the stashed draft
         applySnapshot(next, true);
