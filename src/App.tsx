@@ -52,7 +52,7 @@ import { TableToolbar } from '@/components/wysiwyg/TableToolbar';
 import { cn } from '@/lib/utils';
 import { ActivityBar } from '@/shell/ActivityBar';
 import { AppMenu } from '@/shell/AppMenu';
-import { CommandPalette, type CommandPaletteCommand } from '@/shell/CommandPalette';
+import { CommandPalette } from '@/shell/CommandPalette';
 import { DocumentStatsDialog } from '@/shell/DocumentStatsDialog';
 import { EditorArea } from '@/shell/EditorArea';
 import { FindReplaceBar } from '@/shell/FindReplaceBar';
@@ -67,6 +67,7 @@ import {
 } from '@/shell/SideBar';
 import { StatusBar } from '@/shell/StatusBar';
 import { SettingsPanel } from '@/shell/SettingsPanel';
+import { buildCommandPaletteCommands } from '@/shell/commandPaletteCommands';
 
 import {
   type AppSnapshot,
@@ -3702,135 +3703,26 @@ export default function App() {
     }
   };
 
-  const paletteCommands: CommandPaletteCommand[] = [
-    {
-      id: 'file.new',
-      category: 'File',
-      label: 'New Document',
-      shortcut: '⌘N',
-      run: () => void handleNewDocument(),
-    },
-    {
-      id: 'file.open',
-      category: 'File',
-      label: 'Open File…',
-      shortcut: '⌘O',
-      run: () => void handleOpenDocument(),
-    },
-    {
-      id: 'file.openWorkspace',
-      category: 'File',
-      label: 'Open Workspace…',
-      shortcut: '⌘⇧O',
-      run: () => void handleOpenWorkspace(),
-    },
-    {
-      id: 'file.save',
-      category: 'File',
-      label: 'Save',
-      shortcut: '⌘S',
-      disabled: !activeDocumentOpen,
-      run: () => void handleSave(),
-    },
-    {
-      id: 'file.saveAs',
-      category: 'File',
-      label: 'Save As…',
-      shortcut: '⌘⇧S',
-      disabled: !activeDocumentOpen,
-      run: () => void handleSaveAs(),
-    },
-    {
-      id: 'view.toggleSidebar',
-      category: 'View',
-      label: 'Toggle Sidebar',
-      shortcut: '⌘⇧B',
-      run: () => handleToggleSidebar(),
-    },
-    {
-      id: 'view.showExplorer',
-      category: 'View',
-      label: 'Show Explorer',
-      shortcut: '⌘⇧E',
-      run: () => {
-        handleShowExplorerPanel();
-        focusExplorerTree();
-      },
-    },
-    {
-      id: 'view.toggleOutline',
-      category: 'View',
-      label: 'Toggle Outline',
-      shortcut: '⌘⇧D',
-      run: () => handleOpenOutlinePanel(),
-    },
-    {
-      id: 'view.quickOpen',
-      category: 'View',
-      label: 'Quick Open File…',
-      shortcut: '⌘P',
-      run: () => setIsQuickOpenOpen(true),
-    },
-    {
-      id: 'view.searchInFiles',
-      category: 'View',
-      label: 'Search: Find in Files',
-      shortcut: '⌘⇧F',
-      run: () => handleFocusSearchPanel(),
-    },
-    {
-      id: 'view.findInFile',
-      category: 'View',
-      label: 'Find in Current File',
-      shortcut: '⌘F',
-      disabled: !activeDocumentOpen,
-      run: () => openFindReplace(false),
-    },
-    ...EDITOR_MODE_OPTIONS.map((option) => ({
-      id: `view.mode.${option.mode}`,
-      category: 'View',
-      label: `Mode: ${option.label}`,
-      shortcut: option.shortcutSymbol,
-      run: () => void handleSetMode(option.mode),
-    })),
-    {
-      id: 'preferences.toggleFocusMode',
-      category: 'Preferences',
-      label: settings.focusModeEnabled ? 'Disable Focus Mode' : 'Enable Focus Mode',
-      run: () => handleSettingsChange({ ...settings, focusModeEnabled: !settings.focusModeEnabled }),
-    },
-    {
-      id: 'preferences.toggleTypewriterMode',
-      category: 'Preferences',
-      label: settings.typewriterModeEnabled ? 'Disable Typewriter Mode' : 'Enable Typewriter Mode',
-      shortcut: '⌘⇧T',
-      run: () => handleSettingsChange({ ...settings, typewriterModeEnabled: !settings.typewriterModeEnabled }),
-    },
-    {
-      id: 'preferences.toggleWordWrap',
-      category: 'Preferences',
-      label: settings.editorLineWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
-      run: () =>
-        handleSettingsChange({ ...settings, editorLineWrap: !settings.editorLineWrap }),
-    },
-    {
-      id: 'preferences.toggleAutoSave',
-      category: 'Preferences',
-      label: settings.autoSave ? 'Disable Auto Save' : 'Enable Auto Save',
-      run: () => handleSettingsChange({ ...settings, autoSave: !settings.autoSave }),
-    },
-    {
-      id: 'app.settings',
-      category: 'Preferences',
-      label: 'Open Settings',
-      shortcut: '⌘,',
-      run: () => void toggleSettingsTab(),
-    },
-    {
-      id: 'app.installCliLauncher',
-      category: 'Preferences',
-      label: 'Install Markdowner in PATH',
-      run: () => {
+  const paletteCommands = buildCommandPaletteCommands({
+    activeDocumentOpen,
+    settings,
+    actions: {
+      newDocument: () => void handleNewDocument(),
+      openDocument: () => void handleOpenDocument(),
+      openWorkspace: () => void handleOpenWorkspace(),
+      save: () => void handleSave(),
+      saveAs: () => void handleSaveAs(),
+      toggleSidebar: () => handleToggleSidebar(),
+      showExplorerPanel: () => handleShowExplorerPanel(),
+      focusExplorerTree,
+      toggleOutline: () => handleOpenOutlinePanel(),
+      openQuickOpen: () => setIsQuickOpenOpen(true),
+      focusSearchPanel: () => handleFocusSearchPanel(),
+      openFindReplace,
+      setMode: (mode) => void handleSetMode(mode),
+      updateSettings: handleSettingsChange,
+      openSettings: () => void toggleSettingsTab(),
+      installCliLauncher: () => {
         void (async () => {
           try {
             const result = await installCliLauncher();
@@ -3844,46 +3736,12 @@ export default function App() {
           }
         })();
       },
+      openDocumentStats: () => setIsDocumentStatsOpen(true),
+      setTheme: (themeKind) => void handleSetTheme(themeKind),
+      followSystemTheme: () => void handleFollowSystemTheme(),
+      importTheme: () => void handleImportTheme(),
     },
-    {
-      id: 'app.documentStats',
-      category: 'Preferences',
-      label: 'Open Document Stats',
-      shortcut: '⌘⇧I',
-      disabled: !activeDocumentOpen,
-      run: () => setIsDocumentStatsOpen(true),
-    },
-    {
-      id: 'preferences.resetDefaults',
-      category: 'Preferences',
-      label: 'Reset Settings to Defaults',
-      run: () => handleSettingsChange({ ...DEFAULT_SETTINGS }),
-    },
-    {
-      id: 'theme.light',
-      category: 'Theme',
-      label: 'Theme: Light',
-      run: () => void handleSetTheme('BuiltInLight'),
-    },
-    {
-      id: 'theme.dark',
-      category: 'Theme',
-      label: 'Theme: Dark',
-      run: () => void handleSetTheme('BuiltInDark'),
-    },
-    {
-      id: 'theme.system',
-      category: 'Theme',
-      label: 'Theme: Follow System',
-      run: () => void handleFollowSystemTheme(),
-    },
-    {
-      id: 'theme.import',
-      category: 'Theme',
-      label: 'Import CSS Theme…',
-      run: () => void handleImportTheme(),
-    },
-  ];
+  });
 
   return (
     <div
