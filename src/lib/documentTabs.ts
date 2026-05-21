@@ -73,6 +73,18 @@ type MergeRestoredDocumentTabsResult = {
   nextActiveTab: DocumentTab | null;
 };
 
+type RestorePersistedDocumentTabsInput = {
+  paths: readonly string[];
+  openPath: (path: string) => Promise<DocumentTabSnapshotMetadataInput>;
+  createTabId: () => string;
+  displayNameForPath: (path: string) => string;
+  shouldAbort?: () => boolean;
+};
+
+type RestorePersistedDocumentTabsResult =
+  | { kind: 'ready'; tabs: DocumentTab[] }
+  | { kind: 'aborted' };
+
 type UpsertDocumentTabInput = {
   currentTabs: readonly DocumentTab[];
   currentActiveId: string | null;
@@ -289,6 +301,46 @@ export function mergeRestoredDocumentTabs(
     : null;
 
   return { mergedTabs, nextActiveId, nextActiveTab };
+}
+
+export async function restorePersistedDocumentTabs(
+  input: RestorePersistedDocumentTabsInput,
+): Promise<RestorePersistedDocumentTabsResult> {
+  const tabs: DocumentTab[] = [];
+
+  for (const path of input.paths) {
+    if (input.shouldAbort?.()) {
+      return { kind: 'aborted' };
+    }
+
+    try {
+      const snapshot = await input.openPath(path);
+      if (input.shouldAbort?.()) {
+        return { kind: 'aborted' };
+      }
+      tabs.push(
+        createDocumentTabFromSnapshot({
+          id: input.createTabId(),
+          snapshot,
+          fallbackPath: path,
+          fallbackName: input.displayNameForPath(path),
+        }),
+      );
+    } catch {
+      if (input.shouldAbort?.()) {
+        return { kind: 'aborted' };
+      }
+      tabs.push(
+        createMissingDocumentTab({
+          id: input.createTabId(),
+          path,
+          name: input.displayNameForPath(path),
+        }),
+      );
+    }
+  }
+
+  return { kind: 'ready', tabs };
 }
 
 export function upsertDocumentTab(input: UpsertDocumentTabInput): UpsertDocumentTabResult {

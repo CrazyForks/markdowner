@@ -131,8 +131,6 @@ import {
   setSnapshotMode,
 } from './lib/snapshotState';
 import {
-  createDocumentTabFromSnapshot,
-  createMissingDocumentTab,
   findDocumentTabByPath,
   generateDocumentTabId,
   isDocumentTabDirty,
@@ -143,6 +141,7 @@ import {
   resolveCloseTabTransition,
   resolveSettingsTabToggle,
   resolveSwitchTabTransition,
+  restorePersistedDocumentTabs,
   stashDocumentTabDraft,
   upsertDocumentTabFromSnapshot,
   type DocumentTab,
@@ -1819,30 +1818,15 @@ export default function App() {
             setStartupTabsReady(true);
             return;
           }
-          const restored: DocumentTab[] = [];
-          for (const path of persistedTabs.openTabs) {
-            try {
-              const opened = await openDocument(path);
-              restored.push(
-                createDocumentTabFromSnapshot({
-                  id: generateDocumentTabId(),
-                  snapshot: opened,
-                  fallbackPath: path,
-                  fallbackName: displayFileName(path),
-                }),
-              );
-            } catch {
-              // File is gone — keep the tab as a missing-file placeholder.
-              restored.push(
-                createMissingDocumentTab({
-                  id: generateDocumentTabId(),
-                  path,
-                  name: displayFileName(path),
-                }),
-              );
-            }
-          }
-          if (cancelled) return;
+          const restoreResult = await restorePersistedDocumentTabs({
+            paths: persistedTabs.openTabs,
+            openPath: openDocument,
+            createTabId: generateDocumentTabId,
+            displayNameForPath: displayFileName,
+            shouldAbort: () => cancelled,
+          });
+          if (restoreResult.kind === 'aborted' || cancelled) return;
+          const restored = restoreResult.tabs;
           const activePath = persistedTabs.activeTabPath;
           const restoredMerge = mergeRestoredDocumentTabs({
             currentTabs: tabsRef.current,

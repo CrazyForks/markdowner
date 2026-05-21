@@ -20,6 +20,7 @@ import {
   resolveCloseTabTransition,
   resolveSettingsTabToggle,
   resolveSwitchTabTransition,
+  restorePersistedDocumentTabs,
   stashDocumentTabDraft,
   upsertDocumentTab,
   upsertDocumentTabFromSnapshot,
@@ -344,6 +345,68 @@ describe('mergeRestoredDocumentTabs', () => {
     expect(result.mergedTabs).toEqual([restoredFirst, restoredSecond]);
     expect(result.nextActiveId).toBe('restored-first');
     expect(result.nextActiveTab).toBe(restoredFirst);
+  });
+});
+
+describe('restorePersistedDocumentTabs', () => {
+  it('opens persisted paths into restored tabs and keeps missing files as placeholders', async () => {
+    const ids = ['restored-1', 'missing-1'];
+    const result = await restorePersistedDocumentTabs({
+      paths: ['/tmp/restored.md', '/tmp/missing.md'],
+      openPath: async (path) => {
+        if (path.endsWith('missing.md')) {
+          throw new Error('not found');
+        }
+        return {
+          activeDocumentPath: path,
+          activeDocumentName: 'restored.md',
+          activeDocumentSource: '# Restored',
+        };
+      },
+      createTabId: () => ids.shift() ?? 'extra',
+      displayNameForPath: (path) => path.split('/').pop() ?? path,
+    });
+
+    expect(result).toEqual({
+      kind: 'ready',
+      tabs: [
+        createDocumentTabFromSnapshot({
+          id: 'restored-1',
+          snapshot: {
+            activeDocumentPath: '/tmp/restored.md',
+            activeDocumentName: 'restored.md',
+            activeDocumentSource: '# Restored',
+          },
+          fallbackPath: '/tmp/restored.md',
+          fallbackName: 'restored.md',
+        }),
+        createMissingDocumentTab({
+          id: 'missing-1',
+          path: '/tmp/missing.md',
+          name: 'missing.md',
+        }),
+      ],
+    });
+  });
+
+  it('aborts without returning partially restored tabs when cancellation is requested', async () => {
+    let cancelled = false;
+    const result = await restorePersistedDocumentTabs({
+      paths: ['/tmp/first.md', '/tmp/second.md'],
+      openPath: async (path) => {
+        cancelled = true;
+        return {
+          activeDocumentPath: path,
+          activeDocumentName: path.split('/').pop() ?? path,
+          activeDocumentSource: '# Restored',
+        };
+      },
+      createTabId: () => 'unused',
+      displayNameForPath: (path) => path.split('/').pop() ?? path,
+      shouldAbort: () => cancelled,
+    });
+
+    expect(result).toEqual({ kind: 'aborted' });
   });
 });
 
