@@ -10,6 +10,9 @@ type ModeChordEvent = Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
 type EditorFontSizeShortcutEvent = CommandModifierEvent &
   Pick<KeyboardEvent, 'altKey' | 'code' | 'shiftKey'>;
 
+type FindShortcutEvent = CommandModifierEvent &
+  Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
+
 type TabShortcutEvent = CommandModifierEvent &
   Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
 
@@ -25,12 +28,28 @@ type FocusToggleContext = {
   focusInsideExplorer: boolean;
 };
 
+type FindShortcutContext = {
+  activeDocumentOpen: boolean;
+  findReplaceOpen: boolean;
+  focusInsideExplorer: boolean;
+  isSidebarOpen: boolean;
+  sidebarPanel: 'files' | 'outline' | 'search';
+};
+
 export type ModeChordResolution =
   | { kind: 'pendingModifier' }
   | { kind: 'mode'; mode: EditorMode }
   | { kind: 'cancel' };
 
 export type EditorFontSizeShortcutResolution = { kind: 'increase' } | { kind: 'decrease' };
+
+export type FindShortcutAction =
+  | { kind: 'closeFindReplace' }
+  | { kind: 'focusExplorerFilter' }
+  | { kind: 'focusSearchPanel' }
+  | { kind: 'openFind' }
+  | { kind: 'openReplace' }
+  | { kind: 'toggleSidebar' };
 
 export type TabShortcutResolution =
   | { kind: 'selectNext' }
@@ -105,6 +124,54 @@ export function resolveEditorFontSizeShortcut(
   if (event.code === 'Minus' && !event.shiftKey) {
     return { kind: 'decrease' };
   }
+  return null;
+}
+
+export function resolveFindShortcutAction(
+  event: FindShortcutEvent,
+  context: FindShortcutContext,
+): FindShortcutAction | null {
+  const key = event.key.toLowerCase();
+  const hasCommandModifier = usesCommandModifier(event);
+
+  if (
+    key === 'escape' &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey &&
+    context.findReplaceOpen
+  ) {
+    return { kind: 'closeFindReplace' };
+  }
+
+  if (hasCommandModifier && event.altKey && !event.shiftKey && key === 'f') {
+    return { kind: 'openReplace' };
+  }
+
+  if (
+    event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    !event.shiftKey &&
+    key === 'h'
+  ) {
+    return { kind: 'openReplace' };
+  }
+
+  if (hasCommandModifier && !event.altKey && event.shiftKey && key === 'f') {
+    return context.isSidebarOpen && context.sidebarPanel === 'search'
+      ? { kind: 'toggleSidebar' }
+      : { kind: 'focusSearchPanel' };
+  }
+
+  if (hasCommandModifier && !event.altKey && !event.shiftKey && key === 'f') {
+    if (context.focusInsideExplorer) {
+      return { kind: 'focusExplorerFilter' };
+    }
+    return context.activeDocumentOpen ? { kind: 'openFind' } : { kind: 'focusSearchPanel' };
+  }
+
   return null;
 }
 

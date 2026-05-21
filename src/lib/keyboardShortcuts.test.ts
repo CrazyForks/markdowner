@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
+  resolveFindShortcutAction,
   resolveFocusToggleShortcut,
   resolveModeChord,
   resolveModeNumberShortcut,
@@ -109,6 +110,87 @@ describe('resolveEditorFontSizeShortcut', () => {
       resolveEditorFontSizeShortcut(shortcutEvent({ code: 'Equal', metaKey: true, altKey: true })),
     ).toBeNull();
     expect(resolveEditorFontSizeShortcut(shortcutEvent({ code: 'Equal' }))).toBeNull();
+  });
+});
+
+describe('resolveFindShortcutAction', () => {
+  const context = {
+    activeDocumentOpen: true,
+    findReplaceOpen: false,
+    focusInsideExplorer: false,
+    isSidebarOpen: false,
+    sidebarPanel: 'files',
+  } as const;
+
+  it('closes Find/Replace on unmodified Escape only when it is open', () => {
+    expect(
+      resolveFindShortcutAction(shortcutEvent({ key: 'Escape' }), {
+        ...context,
+        findReplaceOpen: true,
+      }),
+    ).toEqual({ kind: 'closeFindReplace' });
+    expect(resolveFindShortcutAction(shortcutEvent({ key: 'Escape' }), context)).toBeNull();
+    expect(
+      resolveFindShortcutAction(shortcutEvent({ key: 'Escape', metaKey: true }), {
+        ...context,
+        findReplaceOpen: true,
+      }),
+    ).toBeNull();
+  });
+
+  it('opens replace from command-option-f or ctrl-h', () => {
+    expect(
+      resolveFindShortcutAction(shortcutEvent({ key: 'f', metaKey: true, altKey: true }), context),
+    ).toEqual({ kind: 'openReplace' });
+    expect(resolveFindShortcutAction(shortcutEvent({ key: 'h', ctrlKey: true }), context)).toEqual({
+      kind: 'openReplace',
+    });
+  });
+
+  it('routes command-shift-f to search panel focus or sidebar toggle', () => {
+    expect(
+      resolveFindShortcutAction(shortcutEvent({ key: 'F', metaKey: true, shiftKey: true }), {
+        ...context,
+        isSidebarOpen: false,
+      }),
+    ).toEqual({ kind: 'focusSearchPanel' });
+    expect(
+      resolveFindShortcutAction(shortcutEvent({ key: 'f', metaKey: true, shiftKey: true }), {
+        ...context,
+        isSidebarOpen: true,
+        sidebarPanel: 'search',
+      }),
+    ).toEqual({ kind: 'toggleSidebar' });
+  });
+
+  it('routes command-f based on explorer focus and document availability', () => {
+    expect(
+      resolveFindShortcutAction(shortcutEvent({ key: 'f', metaKey: true }), {
+        ...context,
+        focusInsideExplorer: true,
+      }),
+    ).toEqual({ kind: 'focusExplorerFilter' });
+    expect(resolveFindShortcutAction(shortcutEvent({ key: 'f', metaKey: true }), context)).toEqual({
+      kind: 'openFind',
+    });
+    expect(
+      resolveFindShortcutAction(shortcutEvent({ key: 'f', metaKey: true }), {
+        ...context,
+        activeDocumentOpen: false,
+      }),
+    ).toEqual({ kind: 'focusSearchPanel' });
+  });
+
+  it('ignores unsupported modifier combinations', () => {
+    expect(
+      resolveFindShortcutAction(
+        shortcutEvent({ key: 'f', metaKey: true, altKey: true, shiftKey: true }),
+        context,
+      ),
+    ).toBeNull();
+    expect(
+      resolveFindShortcutAction(shortcutEvent({ key: 'h', metaKey: true }), context),
+    ).toBeNull();
   });
 });
 

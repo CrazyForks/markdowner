@@ -188,12 +188,12 @@ import {
 import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
+  resolveFindShortcutAction,
   resolveFocusToggleShortcut,
   resolveModeChord,
   resolveModeNumberShortcut,
   resolveTabShortcut,
   resolveTabShortcutAction,
-  usesCommandModifier,
 } from './lib/keyboardShortcuts';
 import { parseMarkdownOutline, type OutlineItem } from './lib/outline';
 import { syncScrollPosition } from './lib/scrollSync';
@@ -3025,17 +3025,14 @@ export default function App() {
         return;
       }
 
-      // Global Escape: dismiss the Find/Replace bar from anywhere. The bar's
-      // own container handler stops propagation when focus is inside it, so
-      // this branch only runs when focus is elsewhere (editor, sidebar, etc.).
-      if (
-        event.key === 'Escape' &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.shiftKey &&
-        isFindReplaceOpenRef.current
-      ) {
+      const closeFindShortcutAction = resolveFindShortcutAction(event, {
+        activeDocumentOpen,
+        findReplaceOpen: isFindReplaceOpenRef.current,
+        focusInsideExplorer: false,
+        isSidebarOpen,
+        sidebarPanel,
+      });
+      if (closeFindShortcutAction?.kind === 'closeFindReplace') {
         event.preventDefault();
         setIsFindReplaceOpen(false);
         return;
@@ -3109,61 +3106,39 @@ export default function App() {
         return;
       }
 
-      if (
-        usesCommandModifier(event) &&
-        event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === 'f'
-      ) {
-        event.preventDefault();
-        openFindReplace(true);
-        return;
-      }
-
-      if (matchesShortcut(event, 'f', { shift: true })) {
-        event.preventDefault();
-        // VS Code parity: when Search is already visible, collapse the sidebar;
-        // otherwise show it and refocus the search input.
-        if (isSidebarOpen && sidebarPanel === 'search') {
-          handleToggleSidebar();
-        } else {
-          handleFocusSearchPanel();
-        }
-        return;
-      }
-
       if (matchesShortcut(event, 'd', { shift: true })) {
         event.preventDefault();
         handleOpenOutlinePanel();
         return;
       }
 
-      if (matchesShortcut(event, 'f')) {
+      const findShortcutAction = resolveFindShortcutAction(event, {
+        activeDocumentOpen,
+        findReplaceOpen: isFindReplaceOpenRef.current,
+        focusInsideExplorer: isFocusInsideExplorer(),
+        isSidebarOpen,
+        sidebarPanel,
+      });
+      if (findShortcutAction) {
         event.preventDefault();
-        // VS Code parity: when focus is inside the Explorer, Cmd+F filters
-        // the file tree by name instead of opening the document find widget.
-        const activeElement = document.activeElement as HTMLElement | null;
-        if (activeElement?.closest('[data-explorer-root]')) {
-          focusExplorerFilter();
-          return;
+        switch (findShortcutAction.kind) {
+          case 'focusExplorerFilter':
+            focusExplorerFilter();
+            return;
+          case 'focusSearchPanel':
+            handleFocusSearchPanel();
+            return;
+          case 'openFind':
+            openFindReplace(false);
+            return;
+          case 'openReplace':
+            openFindReplace(true);
+            return;
+          case 'toggleSidebar':
+            handleToggleSidebar();
+            return;
+          default:
         }
-        if (activeDocumentOpen) {
-          openFindReplace(false);
-        } else {
-          handleFocusSearchPanel();
-        }
-        return;
-      }
-
-      if (
-        event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === 'h'
-      ) {
-        event.preventDefault();
-        openFindReplace(true);
         return;
       }
 
