@@ -1,6 +1,6 @@
 import type { AppSnapshot } from './desktop';
 import {
-  createDocumentTab,
+  createDocumentTabFromSnapshot,
   findDocumentTabByPath,
   type DocumentTab,
 } from './documentTabs';
@@ -10,6 +10,7 @@ type OpenSelectedDocumentTabsInput = {
   currentTabs: readonly DocumentTab[];
   openPath: (path: string) => Promise<AppSnapshot>;
   createTabId: () => string;
+  displayNameForPath?: (path: string) => string;
   shouldAbort?: () => boolean;
 };
 
@@ -61,11 +62,11 @@ export async function openSelectedDocumentTabs(
       return { kind: 'aborted' };
     }
 
-    const tab = createDocumentTab({
+    const tab = createDocumentTabFromSnapshot({
       id: input.createTabId(),
-      path: next.activeDocumentPath ?? path,
-      name: next.activeDocumentName ?? path,
-      source: next.activeDocumentSource ?? '',
+      snapshot: next,
+      fallbackPath: path,
+      fallbackName: input.displayNameForPath?.(path) ?? path,
     });
     additions.push(tab);
     lastSnapshot = next;

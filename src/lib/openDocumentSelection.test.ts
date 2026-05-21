@@ -111,6 +111,33 @@ describe('openSelectedDocumentTabs', () => {
     );
   });
 
+  it('uses a provided display-name fallback when snapshot metadata has no document name', async () => {
+    const openPath = vi.fn(async () => ({
+      ...snapshotFor('/tmp/project/requested.md'),
+      activeDocumentName: null,
+      activeDocumentPath: null,
+      activeDocumentSource: null,
+    }));
+
+    const result = await openSelectedDocumentTabs({
+      paths: ['/tmp/project/requested.md'],
+      currentTabs: [],
+      openPath,
+      createTabId: () => 'tab-requested',
+      displayNameForPath: (path) => path.split('/').pop() ?? path,
+    });
+
+    if (result.kind !== 'ready') throw new Error('expected ready result');
+    expect(result.additions[0]).toEqual(
+      createDocumentTab({
+        id: 'tab-requested',
+        path: '/tmp/project/requested.md',
+        name: 'requested.md',
+        source: '',
+      }),
+    );
+  });
+
   it('aborts without committing additions when the editor operation becomes stale', async () => {
     let stale = false;
     const openPath = vi.fn(async (path: string) => {

@@ -2372,6 +2372,7 @@ export default function App() {
         currentTabs: tabs,
         openPath: openDocument,
         createTabId: generateDocumentTabId,
+        displayNameForPath: displayFileName,
         shouldAbort: () => isEditorOpStale(token),
       });
       const openTransition = resolveOpenSelectedDocumentTabsTransition({
