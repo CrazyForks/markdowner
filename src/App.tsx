@@ -181,6 +181,7 @@ import {
 } from './lib/sourcePreviewClick';
 import { createSourceLinkClickExtension } from './lib/sourceLinkClick';
 import { sourceLineMarkdownComponents } from './lib/sourceLineComponents';
+import { parseNativeMenuCommand } from './lib/nativeMenuCommand';
 import {
   buildSourceLineStartOffsets,
   clampSourceOffset,
@@ -244,8 +245,6 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
 const MARKDOWN_FILE_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd'];
 const MENU_COMMAND_EVENT = 'markdowner://menu-command';
 const SNAPSHOT_UPDATE_EVENT = 'markdowner://update-snapshot';
-const MENU_COMMAND_CLOSE_WINDOW = 'close-window';
-const MENU_COMMAND_QUIT_APP = 'quit-app';
 const STARTUP_OPEN_TABS_RETRY_MS = 100;
 
 type CloseTarget = 'window' | 'app';
@@ -2942,41 +2941,35 @@ export default function App() {
       return;
     }
 
-    if (command.startsWith('open-recent-document:')) {
-      await handleOpenRecentDocument(command.slice('open-recent-document:'.length));
-      return;
-    }
+    const parsedCommand = parseNativeMenuCommand(command);
 
-    switch (command) {
-      case 'new-document':
+    switch (parsedCommand.kind) {
+      case 'newDocument':
         await handleNewDocument();
         return;
-      case 'open-document':
+      case 'openDocument':
         await handleOpenDocument();
         return;
-      case 'open-workspace':
+      case 'openWorkspace':
         await handleOpenWorkspace();
         return;
-      case 'save-active-document':
+      case 'saveActiveDocument':
         await handleSave();
         return;
-      case 'save-active-document-as':
+      case 'saveActiveDocumentAs':
         await handleSaveAs();
         return;
-      case MENU_COMMAND_CLOSE_WINDOW:
+      case 'closeWindow':
         await handleCloseTabOrWindow();
         return;
-      case MENU_COMMAND_QUIT_APP:
+      case 'quitApp':
         await handleQuitCommand();
         return;
-      case 'mode-wysiwyg':
-        await handleSetMode('Wysiwyg');
+      case 'setMode':
+        await handleSetMode(parsedCommand.mode);
         return;
-      case 'mode-editor':
-        await handleSetMode('Editor');
-        return;
-      case 'mode-splitview':
-        await handleSetMode('SplitView');
+      case 'openRecentDocument':
+        await handleOpenRecentDocument(parsedCommand.path);
         return;
       default:
     }
