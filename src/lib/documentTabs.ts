@@ -30,6 +30,18 @@ type CreateDocumentTabInput = {
   missing?: boolean;
 };
 
+type DocumentTabSnapshotMetadataInput = {
+  activeDocumentPath: string | null;
+  activeDocumentName: string | null;
+  activeDocumentSource: string | null;
+};
+
+type DocumentTabSnapshotMetadata = {
+  path: string | null;
+  name: string;
+  source: string;
+};
+
 type TabDirtyContext = {
   activeTabId: string | null;
   localDraft: string;
@@ -161,6 +173,16 @@ export function createSettingsTab(): DocumentTab {
     source: '',
     draft: '',
     missing: false,
+  };
+}
+
+export function documentTabMetadataFromSnapshot(
+  snapshot: DocumentTabSnapshotMetadataInput,
+): DocumentTabSnapshotMetadata {
+  return {
+    path: snapshot.activeDocumentPath ?? null,
+    name: snapshot.activeDocumentName ?? 'Untitled',
+    source: snapshot.activeDocumentSource ?? '',
   };
 }
 

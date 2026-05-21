@@ -5,6 +5,7 @@ import {
   SETTINGS_TAB_NAME,
   createDocumentTab,
   createSettingsTab,
+  documentTabMetadataFromSnapshot,
   findDocumentTabByPath,
   generateDocumentTabId,
   isDocumentTabDirty,
@@ -102,6 +103,36 @@ describe('createSettingsTab', () => {
       source: '',
       draft: '',
       missing: false,
+    });
+  });
+});
+
+describe('documentTabMetadataFromSnapshot', () => {
+  it('maps active document snapshot fields to tab metadata', () => {
+    expect(
+      documentTabMetadataFromSnapshot({
+        activeDocumentPath: '/tmp/notes.md',
+        activeDocumentName: 'notes.md',
+        activeDocumentSource: '# Notes',
+      }),
+    ).toEqual({
+      path: '/tmp/notes.md',
+      name: 'notes.md',
+      source: '# Notes',
+    });
+  });
+
+  it('falls back to untitled document metadata when snapshot fields are empty', () => {
+    expect(
+      documentTabMetadataFromSnapshot({
+        activeDocumentPath: null,
+        activeDocumentName: null,
+        activeDocumentSource: null,
+      }),
+    ).toEqual({
+      path: null,
+      name: 'Untitled',
+      source: '',
     });
   });
 });

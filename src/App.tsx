@@ -132,6 +132,7 @@ import {
 } from './lib/snapshotState';
 import {
   createDocumentTab,
+  documentTabMetadataFromSnapshot,
   findDocumentTabByPath,
   generateDocumentTabId,
   isDocumentTabDirty,
@@ -553,16 +554,12 @@ export default function App() {
       preserveSettingsActive?: boolean;
     } = {},
   ) => {
-    const path = next.activeDocumentPath ?? null;
-    const name = next.activeDocumentName ?? 'Untitled';
-    const source = next.activeDocumentSource ?? '';
+    const metadata = documentTabMetadataFromSnapshot(next);
     const reuseId = options.reuseTabId ?? null;
     const result = upsertDocumentTab({
       currentTabs: tabsRef.current,
       currentActiveId: activeTabIdRef.current,
-      path,
-      name,
-      source,
+      ...metadata,
       reuseTabId: reuseId,
       preserveSettingsActive: options.preserveSettingsActive,
     });
@@ -584,17 +581,13 @@ export default function App() {
   // tabs are never the target of a snapshot refresh.
   const refreshActiveTabFromSnapshot = (next: AppSnapshot) => {
     if (!activeTabId) return;
-    const path = next.activeDocumentPath ?? null;
-    const name = next.activeDocumentName ?? 'Untitled';
-    const source = next.activeDocumentSource ?? '';
+    const metadata = documentTabMetadataFromSnapshot(next);
     startTransition(() => {
       setTabs((prev) =>
         refreshActiveDocumentTab({
           tabs: prev,
           activeTabId,
-          path,
-          name,
-          source,
+          ...metadata,
         }),
       );
     });
