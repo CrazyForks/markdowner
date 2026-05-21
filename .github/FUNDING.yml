@@ -1,0 +1,19 @@
+# Funding configuration draft for GitHub's Sponsor button.
+# Uncomment and replace the placeholder values after the funding accounts are ready.
+
+# GitHub Sponsors: one organization and up to four sponsored developers.
+github: [channprj]
+
+# External funding platforms.
+# patreon: channprj
+# open_collective: channprj
+# ko_fi: channprj
+# buy_me_a_coffee: chann
+# thanks_dev: u/gh/channprj
+
+# Tidelift uses PLATFORM-NAME/PACKAGE-NAME, for example npm/babel.
+# Enable only after a public package is available for this project.
+# tidelift: npm/markdowner-desktop
+
+# Up to four custom funding URLs. Quote URLs that include ":".
+# custom: ["https://example.com/channprj"]
