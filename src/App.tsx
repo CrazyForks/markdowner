@@ -137,6 +137,12 @@ import {
 } from './lib/linkOpener';
 import { matchesShortcut, usesCommandModifier } from './lib/keyboardShortcuts';
 import { parseMarkdownOutline, type OutlineItem } from './lib/outline';
+import {
+  estimateRenderedTextOffset,
+  getRenderedTextOffset,
+  mapRenderedTextOffsetToSourceOffset,
+  readSourceNumber,
+} from './lib/sourcePreviewClick';
 import { createSourceLinkClickExtension } from './lib/sourceLinkClick';
 import {
   buildSourceLineStartOffsets,
@@ -242,14 +248,6 @@ type MarkdownSourceNode = {
 type MarkdownSourceLineProps = {
   node?: MarkdownSourceNode;
 };
-type CaretDocument = Document & {
-  caretPositionFromPoint?: (
-    x: number,
-    y: number,
-  ) => { offsetNode: Node; offset: number } | null;
-  caretRangeFromPoint?: (x: number, y: number) => Range | null;
-};
-
 function resolveOsTheme(): ThemeKind {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return 'BuiltInDark';
@@ -313,101 +311,6 @@ function syncScrollPosition(source: HTMLElement, target: HTMLElement | null) {
   if (target.scrollTop !== nextScrollTop) {
     target.scrollTop = nextScrollTop;
   }
-}
-
-function readSourceNumber(element: HTMLElement, key: keyof DOMStringMap) {
-  const value = element.dataset[key];
-  if (value === undefined) return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function getTextLength(node: Node): number {
-  return node.textContent?.length ?? 0;
-}
-
-function getTextOffsetWithinElement(root: HTMLElement, targetNode: Node, targetOffset: number) {
-  if (!root.contains(targetNode)) return null;
-
-  const nodeFilter = root.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
-  const walker = root.ownerDocument.createTreeWalker(root, nodeFilter);
-  let offset = 0;
-
-  while (walker.nextNode()) {
-    const currentNode = walker.currentNode;
-    if (currentNode === targetNode) {
-      return offset + Math.max(0, Math.min(targetOffset, getTextLength(currentNode)));
-    }
-    offset += getTextLength(currentNode);
-  }
-
-  if (targetNode instanceof HTMLElement && root.contains(targetNode)) {
-    return Array.from(targetNode.childNodes)
-      .slice(0, targetOffset)
-      .reduce((total, childNode) => total + getTextLength(childNode), offset);
-  }
-
-  return null;
-}
-
-function getRenderedTextOffset(element: HTMLElement, clientX: number, clientY: number) {
-  const ownerDocument = element.ownerDocument as CaretDocument;
-  const caretPosition = ownerDocument.caretPositionFromPoint?.(clientX, clientY);
-  if (caretPosition) {
-    const offset = getTextOffsetWithinElement(
-      element,
-      caretPosition.offsetNode,
-      caretPosition.offset,
-    );
-    if (offset !== null) return offset;
-  }
-
-  const caretRange = ownerDocument.caretRangeFromPoint?.(clientX, clientY);
-  if (caretRange) {
-    const offset = getTextOffsetWithinElement(
-      element,
-      caretRange.startContainer,
-      caretRange.startOffset,
-    );
-    if (offset !== null) return offset;
-  }
-
-  return null;
-}
-
-function estimateRenderedTextOffset(
-  element: HTMLElement,
-  event: ReactMouseEvent<HTMLDivElement>,
-  renderedTextLength: number,
-) {
-  if (renderedTextLength <= 0) return 0;
-  const rect = element.getBoundingClientRect();
-  if (rect.width <= 0) return 0;
-
-  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-  return Math.round(ratio * renderedTextLength);
-}
-
-function mapRenderedTextOffsetToSourceOffset(
-  element: HTMLElement,
-  source: string,
-  sourceOffset: number,
-  sourceEndOffset: number,
-  renderedOffset: number,
-) {
-  const renderedText = element.textContent ?? '';
-  const rawStart = clampSourceOffset(sourceOffset, source.length);
-  const rawEnd = Math.max(rawStart, clampSourceOffset(sourceEndOffset, source.length));
-  const rawText = source.slice(rawStart, rawEnd);
-
-  if (renderedText.length > 0) {
-    const renderedTextStart = rawText.indexOf(renderedText);
-    if (renderedTextStart >= 0) {
-      return clampSourceOffset(rawStart + renderedTextStart + renderedOffset, source.length);
-    }
-  }
-
-  return clampSourceOffset(rawStart + renderedOffset, source.length);
 }
 
 type EditorModeOption = {
