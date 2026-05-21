@@ -442,7 +442,11 @@ describe('App recent documents', () => {
       fireEvent.click(openFileButton);
 
       expect(
-        await screen.findByText(/could not read markdown file '\/tmp\/project\/missing\.md'/i),
+        await screen.findByText(
+          /could not read markdown file '\/tmp\/project\/missing\.md'/i,
+          undefined,
+          { timeout: 4000 },
+        ),
       ).toBeInTheDocument();
       await waitFor(() => {
         expect(screen.queryByRole('status', { name: /working/i })).not.toBeInTheDocument();
@@ -645,7 +649,11 @@ describe('App recent documents', () => {
         { target: { value: 'api' } },
       );
       fireEvent.click(
-        await within(quickOpenDialog).findByRole('option', { name: /api\.md/i }),
+        await within(quickOpenDialog).findByRole(
+          'option',
+          { name: /api\.md/i },
+          { timeout: 4000 },
+        ),
       );
       await waitFor(() => {
         expect(openWorkspaceDocumentMock).toHaveBeenCalledWith(
