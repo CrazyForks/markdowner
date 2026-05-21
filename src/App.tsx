@@ -204,6 +204,7 @@ import {
   type WorkspaceTreeNode,
 } from './lib/workspaceTree';
 import { buildQuickOpenItems } from './lib/quickOpenItems';
+import { buildWorkspaceSearchPaths } from './lib/workspaceSearchScope';
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -865,22 +866,10 @@ export default function App() {
     setSearchError(null);
 
     try {
-      // Combine workspace files with open tab paths so the search also covers
-      // documents the user opened from outside the workspace folder.
-      const seen = new Set<string>();
-      const paths: string[] = [];
-      for (const path of snapshot.workspaceDocuments) {
-        if (path && !seen.has(path)) {
-          seen.add(path);
-          paths.push(path);
-        }
-      }
-      for (const tab of tabs) {
-        if (tab.path && !seen.has(tab.path)) {
-          seen.add(tab.path);
-          paths.push(tab.path);
-        }
-      }
+      const paths = buildWorkspaceSearchPaths({
+        workspaceDocuments: snapshot.workspaceDocuments,
+        tabs,
+      });
       const result = await searchWorkspace(searchQuery, searchOptions, paths);
       if (searchRequestIdRef.current !== requestId) return;
       setSearchResults(result.files);
