@@ -93,7 +93,7 @@ import {
   searchWorkspace,
 } from './lib/desktop';
 import { calculateDocumentStats } from './lib/documentStats';
-import { isDiscardCloseDecision, isSaveCloseDecision } from './lib/closeDecision';
+import { resolveCloseDecisionAction } from './lib/closeDecision';
 import {
   buildCloseConfirmationDialog,
   resolveActiveClosePromptState,
@@ -2497,8 +2497,9 @@ export default function App() {
     try {
       const confirmation = buildCloseConfirmationDialog(snapshot.activeDocumentName, WINDOW_TITLE);
       const decision = await message(confirmation.message, confirmation.options);
+      const closeDecisionAction = resolveCloseDecisionAction(decision);
 
-      if (isSaveCloseDecision(decision)) {
+      if (closeDecisionAction.kind === 'save') {
         await withBusy(async () => {
           const saved = await saveActiveDocumentForClose();
           if (saved) {
@@ -2508,13 +2509,13 @@ export default function App() {
         return;
       }
 
-      if (isDiscardCloseDecision(decision)) {
+      if (closeDecisionAction.kind === 'discard') {
         clearActiveDocumentSurface();
         return;
       }
 
-      if (decision !== undefined) {
-        console.warn('Unrecognized close decision:', decision);
+      if (closeDecisionAction.kind === 'warn') {
+        console.warn('Unrecognized close decision:', closeDecisionAction.decision);
       }
     } catch (error) {
       reportOperationError(error, 'Could not close tab');
@@ -3359,8 +3360,9 @@ export default function App() {
           WINDOW_TITLE,
         );
         const decision = await message(confirmation.message, confirmation.options);
+        const closeDecisionAction = resolveCloseDecisionAction(decision);
 
-        if (isSaveCloseDecision(decision)) {
+        if (closeDecisionAction.kind === 'save') {
           await withBusy(async () => {
             const saved = await saveActiveDocumentForClose();
             if (saved) {
@@ -3370,14 +3372,14 @@ export default function App() {
           return;
         }
 
-        if (isDiscardCloseDecision(decision)) {
+        if (closeDecisionAction.kind === 'discard') {
           await closeTarget(target);
           return;
         }
 
-        if (decision !== undefined) {
+        if (closeDecisionAction.kind === 'warn') {
           // Unrecognized decision (e.g., Cancel or unexpected platform value) — keep window open.
-          console.warn('Unrecognized close decision:', decision);
+          console.warn('Unrecognized close decision:', closeDecisionAction.decision);
         }
       } catch (error) {
         reportOperationError(error, 'Could not close Markdowner');

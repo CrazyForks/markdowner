@@ -19,3 +19,22 @@ export function isDiscardCloseDecision(decision: unknown): boolean {
     normalized === 'discard'
   );
 }
+
+export type CloseDecisionAction =
+  | { kind: 'save' }
+  | { kind: 'discard' }
+  | { kind: 'ignore' }
+  | { kind: 'warn'; decision: unknown };
+
+export function resolveCloseDecisionAction(decision: unknown): CloseDecisionAction {
+  if (isSaveCloseDecision(decision)) {
+    return { kind: 'save' };
+  }
+  if (isDiscardCloseDecision(decision)) {
+    return { kind: 'discard' };
+  }
+  if (decision === undefined) {
+    return { kind: 'ignore' };
+  }
+  return { kind: 'warn', decision };
+}
