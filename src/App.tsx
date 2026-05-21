@@ -132,6 +132,7 @@ import {
   isOpenLinkClick,
   openMarkdownLink,
 } from './lib/linkOpener';
+import { matchesShortcut, usesCommandModifier } from './lib/keyboardShortcuts';
 import { parseMarkdownOutline, type OutlineItem } from './lib/outline';
 import { createSourceLinkClickExtension } from './lib/sourceLinkClick';
 import {
@@ -251,10 +252,6 @@ function resolveOsTheme(): ThemeKind {
     return 'BuiltInDark';
   }
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'BuiltInDark' : 'BuiltInLight';
-}
-
-function usesCommandModifier(event: KeyboardEvent) {
-  return event.metaKey || event.ctrlKey;
 }
 
 function createSourceLineComponent(tagName: keyof HTMLElementTagNameMap) {
@@ -408,18 +405,6 @@ function mapRenderedTextOffsetToSourceOffset(
   }
 
   return clampSourceOffset(rawStart + renderedOffset, source.length);
-}
-
-function matchesShortcut(
-  event: KeyboardEvent,
-  key: string,
-  options: { shift?: boolean } = {},
-) {
-  if (event.defaultPrevented || event.altKey || !usesCommandModifier(event)) {
-    return false;
-  }
-
-  return event.key.toLowerCase() === key && event.shiftKey === (options.shift ?? false);
 }
 
 function countLiteralOccurrencesBefore(source: string, needle: string, endOffset: number) {
