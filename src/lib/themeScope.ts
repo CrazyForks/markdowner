@@ -1,10 +1,42 @@
+import type { ThemeKind } from './desktop';
+
 export const MARKDOWN_CONTENT_SCOPE_CLASS = 'markdowner-content';
+export const IMPORTED_THEME_STYLE_ID = 'markdowner-imported-theme';
 
 const MARKDOWN_CONTENT_SCOPE_SELECTOR = `.${MARKDOWN_CONTENT_SCOPE_CLASS}`;
 const NESTED_SCOPE_AT_RULE_PREFIXES = ['@container', '@document', '@layer', '@media', '@scope', '@supports'];
 
+type ImportedThemeSnapshot = {
+  theme: {
+    kind: ThemeKind;
+    stylesheet: string | null;
+  };
+};
+
 export function scopeImportedStylesheet(stylesheet: string) {
   return scopeCssBlock(stylesheet, MARKDOWN_CONTENT_SCOPE_SELECTOR);
+}
+
+export function applyThemeSelection(themeKind: ThemeKind, doc: Document = document) {
+  doc.documentElement.dataset.theme = themeKind;
+}
+
+export function applyImportedStylesheet(
+  snapshot: ImportedThemeSnapshot,
+  doc: Document = document,
+) {
+  const existing = doc.getElementById(IMPORTED_THEME_STYLE_ID);
+  if (snapshot.theme.kind !== 'CustomCss' || !snapshot.theme.stylesheet) {
+    existing?.remove();
+    return;
+  }
+
+  const style = existing ?? doc.createElement('style');
+  style.id = IMPORTED_THEME_STYLE_ID;
+  style.textContent = scopeImportedStylesheet(snapshot.theme.stylesheet);
+  if (!existing) {
+    doc.head.appendChild(style);
+  }
 }
 
 function scopeCssBlock(css: string, scopeSelector: string) {

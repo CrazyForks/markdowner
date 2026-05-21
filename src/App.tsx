@@ -127,7 +127,8 @@ import {
 import { moveTab } from './lib/tabs';
 import {
   MARKDOWN_CONTENT_SCOPE_CLASS,
-  scopeImportedStylesheet,
+  applyImportedStylesheet,
+  applyThemeSelection,
 } from './lib/themeScope';
 import { WINDOW_TITLE, buildWindowTitle, formatThemeLabel } from './lib/shellDisplay';
 import {
@@ -341,25 +342,6 @@ const EDITOR_MODE_LABELS: Record<EditorMode, string> = EDITOR_MODE_OPTIONS.reduc
 
 function formatEditorMode(mode: EditorMode): string {
   return EDITOR_MODE_LABELS[mode] ?? mode;
-}
-
-function applyThemeSelection(themeKind: ThemeKind) {
-  document.documentElement.dataset.theme = themeKind;
-}
-
-function applyImportedStylesheet(snapshot: AppSnapshot) {
-  const existing = document.getElementById('markdowner-imported-theme');
-  if (snapshot.theme.kind !== 'CustomCss' || !snapshot.theme.stylesheet) {
-    existing?.remove();
-    return;
-  }
-
-  const style = existing ?? document.createElement('style');
-  style.id = 'markdowner-imported-theme';
-  style.textContent = scopeImportedStylesheet(snapshot.theme.stylesheet);
-  if (!existing) {
-    document.head.appendChild(style);
-  }
 }
 
 function centerSourceEditorLine(view: EditorView) {
