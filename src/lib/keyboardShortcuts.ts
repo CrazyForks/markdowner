@@ -16,6 +16,15 @@ type TabShortcutEvent = CommandModifierEvent &
 type ModeNumberShortcutEvent = CommandModifierEvent &
   Pick<KeyboardEvent, 'altKey' | 'code' | 'shiftKey'>;
 
+type FocusToggleShortcutEvent = CommandModifierEvent &
+  Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
+
+type FocusToggleContext = {
+  isSidebarOpen: boolean;
+  sidebarPanel: 'files' | 'outline' | 'search';
+  focusInsideExplorer: boolean;
+};
+
 export type ModeChordResolution =
   | { kind: 'pendingModifier' }
   | { kind: 'mode'; mode: EditorMode }
@@ -30,6 +39,11 @@ export type TabShortcutResolution =
   | { kind: 'moveActive'; direction: -1 | 1 };
 
 export type ModeNumberShortcutResolution = { kind: 'mode'; mode: EditorMode };
+
+export type FocusToggleShortcutResolution =
+  | { kind: 'focusOutline' }
+  | { kind: 'focusEditor' }
+  | { kind: 'showExplorer' };
 
 export function usesCommandModifier(event: CommandModifierEvent): boolean {
   return event.metaKey || event.ctrlKey;
@@ -139,4 +153,20 @@ export function resolveModeNumberShortcut(
     default:
       return null;
   }
+}
+
+export function resolveFocusToggleShortcut(
+  event: FocusToggleShortcutEvent,
+  context: FocusToggleContext,
+): FocusToggleShortcutResolution | null {
+  if (event.key !== '0' || !usesCommandModifier(event) || event.shiftKey || event.altKey) {
+    return null;
+  }
+  if (context.isSidebarOpen && context.sidebarPanel === 'outline') {
+    return { kind: 'focusOutline' };
+  }
+  if (context.focusInsideExplorer) {
+    return { kind: 'focusEditor' };
+  }
+  return { kind: 'showExplorer' };
 }

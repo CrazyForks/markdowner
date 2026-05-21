@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
+  resolveFocusToggleShortcut,
   resolveModeChord,
   resolveModeNumberShortcut,
   resolveTabShortcut,
@@ -180,5 +181,54 @@ describe('resolveModeNumberShortcut', () => {
       resolveModeNumberShortcut(shortcutEvent({ code: 'Digit1', altKey: true, metaKey: true })),
     ).toBeNull();
     expect(resolveModeNumberShortcut(shortcutEvent({ code: 'Digit1' }))).toBeNull();
+  });
+});
+
+describe('resolveFocusToggleShortcut', () => {
+  it('returns null for keys other than command+0', () => {
+    expect(
+      resolveFocusToggleShortcut(shortcutEvent({ key: '0' }), {
+        isSidebarOpen: false,
+        sidebarPanel: 'files',
+        focusInsideExplorer: false,
+      }),
+    ).toBeNull();
+    expect(
+      resolveFocusToggleShortcut(shortcutEvent({ key: '1', metaKey: true }), {
+        isSidebarOpen: false,
+        sidebarPanel: 'files',
+        focusInsideExplorer: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('focuses Outline when the Outline panel is already visible', () => {
+    expect(
+      resolveFocusToggleShortcut(shortcutEvent({ key: '0', metaKey: true }), {
+        isSidebarOpen: true,
+        sidebarPanel: 'outline',
+        focusInsideExplorer: false,
+      }),
+    ).toEqual({ kind: 'focusOutline' });
+  });
+
+  it('returns focusEditor when focus starts inside the Explorer', () => {
+    expect(
+      resolveFocusToggleShortcut(shortcutEvent({ key: '0', ctrlKey: true }), {
+        isSidebarOpen: true,
+        sidebarPanel: 'files',
+        focusInsideExplorer: true,
+      }),
+    ).toEqual({ kind: 'focusEditor' });
+  });
+
+  it('shows Explorer and focuses the tree otherwise', () => {
+    expect(
+      resolveFocusToggleShortcut(shortcutEvent({ key: '0', metaKey: true }), {
+        isSidebarOpen: false,
+        sidebarPanel: 'search',
+        focusInsideExplorer: false,
+      }),
+    ).toEqual({ kind: 'showExplorer' });
   });
 });

@@ -181,6 +181,7 @@ import {
 import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
+  resolveFocusToggleShortcut,
   resolveModeChord,
   resolveModeNumberShortcut,
   resolveTabShortcut,
@@ -3309,13 +3310,18 @@ export default function App() {
       // is already visible, it focuses the Outline rows instead of replacing
       // the current sidebar panel with Explorer. When focus is already inside
       // the Explorer, Cmd+0 sends focus back to the active editor surface.
-      if (event.key === '0' && usesCommandModifier(event) && !event.shiftKey && !event.altKey) {
+      const focusToggleShortcut = resolveFocusToggleShortcut(event, {
+        isSidebarOpen,
+        sidebarPanel,
+        focusInsideExplorer: isFocusInsideExplorer(),
+      });
+      if (focusToggleShortcut) {
         event.preventDefault();
-        if (isSidebarOpen && sidebarPanel === 'outline') {
+        if (focusToggleShortcut.kind === 'focusOutline') {
           focusOutlineTree();
           return;
         }
-        if (isFocusInsideExplorer()) {
+        if (focusToggleShortcut.kind === 'focusEditor') {
           focusActiveEditor();
         } else {
           handleShowExplorerPanel();
