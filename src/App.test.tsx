@@ -3277,6 +3277,104 @@ describe('App recent documents', () => {
     );
   });
 
+  it('keeps switched tab metadata when an older draft sync resolves later', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    const pendingSyncs: Array<(snapshot: AppSnapshot) => void> = [];
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      const isAlpha = path === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: isAlpha ? '# Alpha' : '# Beta',
+          mode: 'Editor',
+        }),
+      );
+    });
+    replaceActiveDocumentSourceMock.mockImplementation(
+      () =>
+        new Promise<AppSnapshot>((resolve) => {
+          pendingSyncs.push(resolve);
+        }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    const statusBar = document.querySelector('footer') as HTMLElement;
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha');
+      expect(screen.getByRole('tab', { name: /alpha\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      expect(within(statusBar).getAllByTitle(alphaPath).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.change(sourceEditor, { target: { value: '# Alpha edited' } });
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(pendingSyncs).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(pendingSyncs).toHaveLength(2);
+    });
+
+    await act(async () => {
+      pendingSyncs[1]?.(
+        baseSnapshot({
+          activeDocumentName: 'alpha.md',
+          activeDocumentPath: alphaPath,
+          activeDocumentSource: '# Alpha edited',
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta');
+      expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      expect(within(statusBar).getAllByTitle(betaPath).length).toBeGreaterThan(0);
+      expect(within(statusBar).queryByTitle(alphaPath)).not.toBeInTheDocument();
+    });
+
+    await act(async () => {
+      pendingSyncs[0]?.(
+        baseSnapshot({
+          activeDocumentName: 'alpha.md',
+          activeDocumentPath: alphaPath,
+          activeDocumentSource: '# Alpha stale',
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    expect(sourceEditor).toHaveValue('# Beta');
+    expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(within(statusBar).getAllByTitle(betaPath).length).toBeGreaterThan(0);
+    expect(within(statusBar).queryByTitle(alphaPath)).not.toBeInTheDocument();
+  });
+
   it('switches modes with the Cmd+K chord shortcuts (Cmd+K Cmd+E/W/S)', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

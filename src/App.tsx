@@ -532,6 +532,9 @@ export default function App() {
   const nextEditorOpRequest = () => ++editorOpRequestIdRef.current;
   const isEditorOpStale = (token: number) =>
     editorOpRequestIdRef.current !== token;
+  const editorOpAbortOptions = (token: number) => ({
+    shouldAbort: () => isEditorOpStale(token),
+  });
   // Tracks the document tab that was active immediately before the settings
   // tab was opened. Closing the settings tab restores this without
   // round-tripping through Rust (the snapshot never changed while settings
@@ -2267,7 +2270,7 @@ export default function App() {
 
   const syncActiveDraft = async (
     preserveMode: EditorMode = snapshot.mode,
-    options: { forFinalSave?: boolean } = {},
+    options: { forFinalSave?: boolean; shouldAbort?: () => boolean } = {},
   ) => {
     // In WYSIWYG mode, force the debounced flush so the persisted draft
     // includes any keystrokes that haven't crossed the debounce boundary yet.
@@ -2280,6 +2283,9 @@ export default function App() {
       forFinalSave: options.forFinalSave,
     });
     if (!plan) {
+      return;
+    }
+    if (options.shouldAbort?.()) {
       return;
     }
 
@@ -2298,12 +2304,18 @@ export default function App() {
     }
 
     const synced = await replaceActiveDocumentSource(plan.outgoingDraft);
+    if (options.shouldAbort?.()) {
+      return;
+    }
     applySnapshot({ ...synced, mode: preserveMode }, true);
   };
 
-  const syncActiveDraftBestEffort = async (preserveMode: EditorMode = snapshot.mode) => {
+  const syncActiveDraftBestEffort = async (
+    preserveMode: EditorMode = snapshot.mode,
+    options: { shouldAbort?: () => boolean } = {},
+  ) => {
     try {
-      await syncActiveDraft(preserveMode);
+      await syncActiveDraft(preserveMode, options);
     } catch {
       // The tab model already keeps the user's local draft. Navigation and
       // view changes should not get stuck behind a best-effort backend sync.
@@ -2323,7 +2335,7 @@ export default function App() {
     const token = nextEditorOpRequest();
     await withBusy(async () => {
       stashActiveTabDraft();
-      await syncActiveDraftBestEffort();
+      await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
       if (isEditorOpStale(token)) return;
       const next = await newDocument();
       if (isEditorOpStale(token)) return;
@@ -2368,7 +2380,7 @@ export default function App() {
     const token = nextEditorOpRequest();
     await withBusy(async () => {
       stashActiveTabDraft();
-      await syncActiveDraftBestEffort();
+      await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
       if (isEditorOpStale(token)) return;
 
       const openResult = await openSelectedDocumentTabs({
@@ -2424,7 +2436,7 @@ export default function App() {
 
     const token = nextEditorOpRequest();
     await withBusy(async () => {
-      await syncActiveDraftBestEffort();
+      await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
       if (isEditorOpStale(token)) return;
       const next = await openWorkspace(selected);
       if (isEditorOpStale(token)) return;
@@ -2443,9 +2455,12 @@ export default function App() {
 
     const token = nextEditorOpRequest();
     await withBusy(async () => {
-      await syncActiveDraft(undefined, { forFinalSave: true });
+      await syncActiveDraft(undefined, {
+        forFinalSave: true,
+        ...editorOpAbortOptions(token),
+      });
       if (isEditorOpStale(token)) return;
-      if (await hasExternalChanges({ shouldAbort: () => isEditorOpStale(token) })) {
+      if (await hasExternalChanges(editorOpAbortOptions(token))) {
         return;
       }
       if (isEditorOpStale(token)) return;
@@ -2613,7 +2628,10 @@ export default function App() {
 
     const token = nextEditorOpRequest();
     await withBusy(async () => {
-      await syncActiveDraft(undefined, { forFinalSave: true });
+      await syncActiveDraft(undefined, {
+        forFinalSave: true,
+        ...editorOpAbortOptions(token),
+      });
       if (isEditorOpStale(token)) return;
       const next = await saveActiveDocumentAs(selected);
       if (isEditorOpStale(token)) return;
@@ -2805,7 +2823,7 @@ export default function App() {
     let applied = false;
     await withBusy(async () => {
       stashActiveTabDraft();
-      await syncActiveDraftBestEffort();
+      await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
       if (isEditorOpStale(token)) return;
       const next = await openPath(pathTransition.path);
       if (isEditorOpStale(token)) return;
@@ -2848,7 +2866,7 @@ export default function App() {
     const token = nextEditorOpRequest();
     await withBusy(async () => {
       stashActiveTabDraft();
-      await syncActiveDraftBestEffort();
+      await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
       if (isEditorOpStale(token)) return;
 
       try {
@@ -3498,7 +3516,7 @@ export default function App() {
             const token = nextEditorOpRequest();
             await withBusy(async () => {
               stashActiveTabDraft();
-              await syncActiveDraftBestEffort();
+              await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
               if (isEditorOpStale(token)) return;
               const next = await openDroppedPath(firstPath);
               if (isEditorOpStale(token)) return;
