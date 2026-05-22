@@ -209,6 +209,10 @@ import {
   resolveTabShortcutAction,
 } from './lib/keyboardShortcuts';
 import type { OutlineItem } from './lib/outline';
+import {
+  resolveOutlineMatchByOccurrence,
+  resolveOutlineNavigationTarget,
+} from './lib/outlineNavigation';
 import { syncScrollPosition } from './lib/scrollSync';
 import {
   estimateRenderedTextOffset,
@@ -225,7 +229,6 @@ import {
 import {
   buildSourceLineStartOffsets,
   clampSourceOffset,
-  countLiteralOccurrencesBefore,
   lineTextFromOffset,
   sourceOffsetForLine,
 } from './lib/sourceText';
@@ -888,19 +891,18 @@ export default function App() {
   );
 
   const handleSelectOutlineItem = useEffectEvent((item: OutlineItem) => {
+    const outlineTarget = resolveOutlineNavigationTarget(localDraft, item);
+
     if (currentMode === 'Wysiwyg') {
-      const titleText = localDraft.slice(item.titleStart, item.titleEnd) || item.title;
-      const occurrenceIndex = countLiteralOccurrencesBefore(
-        localDraft,
-        titleText,
-        item.titleStart,
-      );
-      const matches = findWysiwygTextMatches(editor, titleText, {
+      const matches = findWysiwygTextMatches(editor, outlineTarget.titleText, {
         caseSensitive: true,
         wholeWord: false,
         regex: false,
       }).matches.filter(isWysiwygFindMatch);
-      const match = matches[occurrenceIndex] ?? matches[0];
+      const match = resolveOutlineMatchByOccurrence(
+        matches,
+        outlineTarget.titleOccurrenceIndex,
+      );
 
       if (match && editor) {
         const didSelect = editor.commands?.setTextSelection?.({
@@ -936,7 +938,9 @@ export default function App() {
       return;
     }
 
-    focusSourceSelection(item.titleStart, item.titleStart, { alignTop: true });
+    focusSourceSelection(outlineTarget.sourceOffset, outlineTarget.sourceOffset, {
+      alignTop: true,
+    });
   });
 
   const handleSplitSourceScroll = (event: ReactUIEvent<HTMLDivElement>) => {
