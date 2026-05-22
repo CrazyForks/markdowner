@@ -4,6 +4,7 @@ import { createDocumentTab, createSettingsTab } from './documentTabs';
 import {
   buildOpenTabsPayload,
   cursorPositionsMapFromOpenTabsPayload,
+  loadStartupCursorRestoreState,
   loadOpenTabsWithEmptyRetry,
 } from './openTabsSession';
 
@@ -99,6 +100,102 @@ describe('cursorPositionsMapFromOpenTabsPayload', () => {
     map.set('/tmp/other.md', { line: 1, column: 1 });
 
     expect(Object.keys(payload.cursorPositions)).toEqual(['/tmp/first.md']);
+  });
+});
+
+describe('loadStartupCursorRestoreState', () => {
+  it('loads persisted cursor positions and derives a restore target for the active path', async () => {
+    const result = await loadStartupCursorRestoreState({
+      activePath: '/tmp/active.md',
+      load: async () => ({
+        openTabs: ['/tmp/active.md'],
+        activeTabPath: '/tmp/active.md',
+        cursorPositions: {
+          '/tmp/active.md': { line: 8, column: 13 },
+          '/tmp/other.md': { line: 1, column: 1 },
+        },
+      }),
+    });
+
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') throw new Error('expected ready result');
+    expect([...result.cursorPositions.entries()]).toEqual([
+      ['/tmp/active.md', { line: 8, column: 13 }],
+      ['/tmp/other.md', { line: 1, column: 1 }],
+    ]);
+    expect(result.restoreTarget).toEqual({
+      path: '/tmp/active.md',
+      location: { line: 8, column: 13 },
+    });
+  });
+
+  it('uses a null restore location when the active path has no saved cursor', async () => {
+    await expect(
+      loadStartupCursorRestoreState({
+        activePath: '/tmp/active.md',
+        load: async () => ({
+          openTabs: ['/tmp/active.md'],
+          activeTabPath: '/tmp/active.md',
+          cursorPositions: {},
+        }),
+      }),
+    ).resolves.toMatchObject({
+      kind: 'ready',
+      restoreTarget: {
+        path: '/tmp/active.md',
+        location: null,
+      },
+    });
+  });
+
+  it('keeps cursor positions without a restore target when there is no active path', async () => {
+    const result = await loadStartupCursorRestoreState({
+      activePath: null,
+      load: async () => ({
+        openTabs: ['/tmp/recent.md'],
+        activeTabPath: null,
+        cursorPositions: {
+          '/tmp/recent.md': { line: 2, column: 4 },
+        },
+      }),
+    });
+
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') throw new Error('expected ready result');
+    expect([...result.cursorPositions.entries()]).toEqual([
+      ['/tmp/recent.md', { line: 2, column: 4 }],
+    ]);
+    expect(result.restoreTarget).toBeNull();
+  });
+
+  it('aborts after loading when cancellation is requested', async () => {
+    let cancelled = false;
+
+    const result = await loadStartupCursorRestoreState({
+      activePath: '/tmp/active.md',
+      load: async () => {
+        cancelled = true;
+        return {
+          openTabs: ['/tmp/active.md'],
+          activeTabPath: '/tmp/active.md',
+          cursorPositions: {},
+        };
+      },
+      shouldAbort: () => cancelled,
+    });
+
+    expect(result).toEqual({ kind: 'aborted' });
+  });
+
+  it('returns failed when persisted open tabs cannot be loaded', async () => {
+    await expect(
+      loadStartupCursorRestoreState({
+        activePath: '/tmp/active.md',
+        load: async () => {
+          throw new Error('load failed');
+        },
+      }),
+    ).resolves.toEqual({ kind: 'failed' });
   });
 });
 

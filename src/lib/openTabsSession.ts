@@ -18,6 +18,26 @@ type LoadOpenTabsWithEmptyRetryResult =
   | { kind: 'ready'; payload: OpenTabsPayload }
   | { kind: 'aborted' };
 
+type StartupCursorRestoreTarget = {
+  path: string;
+  location: SourceCursorLocation | null;
+};
+
+type LoadStartupCursorRestoreStateInput = {
+  load: () => Promise<OpenTabsPayload>;
+  activePath: string | null;
+  shouldAbort?: () => boolean;
+};
+
+type LoadStartupCursorRestoreStateResult =
+  | {
+      kind: 'ready';
+      cursorPositions: Map<string, SourceCursorLocation>;
+      restoreTarget: StartupCursorRestoreTarget | null;
+    }
+  | { kind: 'aborted' }
+  | { kind: 'failed' };
+
 export function buildOpenTabsPayload(
   input: BuildOpenTabsPayloadInput,
 ): OpenTabsPayload {
@@ -57,6 +77,33 @@ export function cursorPositionsMapFromOpenTabsPayload(
   payload: OpenTabsPayload,
 ): Map<string, SourceCursorLocation> {
   return new Map(Object.entries(payload.cursorPositions));
+}
+
+export async function loadStartupCursorRestoreState(
+  input: LoadStartupCursorRestoreStateInput,
+): Promise<LoadStartupCursorRestoreStateResult> {
+  let payload: OpenTabsPayload;
+  try {
+    payload = await input.load();
+  } catch {
+    return input.shouldAbort?.() ? { kind: 'aborted' } : { kind: 'failed' };
+  }
+
+  if (input.shouldAbort?.()) {
+    return { kind: 'aborted' };
+  }
+
+  const cursorPositions = cursorPositionsMapFromOpenTabsPayload(payload);
+  return {
+    kind: 'ready',
+    cursorPositions,
+    restoreTarget: input.activePath
+      ? {
+          path: input.activePath,
+          location: payload.cursorPositions[input.activePath] ?? null,
+        }
+      : null,
+  };
 }
 
 export async function loadOpenTabsWithEmptyRetry(

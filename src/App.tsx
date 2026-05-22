@@ -253,6 +253,7 @@ import { buildQuickOpenItems } from './lib/quickOpenItems';
 import {
   buildOpenTabsPayload,
   cursorPositionsMapFromOpenTabsPayload,
+  loadStartupCursorRestoreState,
   loadOpenTabsWithEmptyRetry,
 } from './lib/openTabsSession';
 import { buildWorkspaceSearchPaths } from './lib/workspaceSearchScope';
@@ -1785,19 +1786,17 @@ export default function App() {
           // Best-effort: also hydrate the persisted caret map so a CLI-opened
           // file (which short-circuits the persisted-tabs branch below) still
           // restores the remembered caret. Failure is non-fatal.
-          try {
-            const persistedTabs = await loadOpenTabs();
-            if (cancelled) return;
-            cursorByPathRef.current = cursorPositionsMapFromOpenTabsPayload(persistedTabs);
-            const activePath = next.activeDocumentPath;
-            if (activePath) {
-              startupRestoreRef.current = {
-                path: activePath,
-                location: persistedTabs.cursorPositions[activePath] ?? null,
-              };
+          const startupCursorState = await loadStartupCursorRestoreState({
+            load: loadOpenTabs,
+            activePath: next.activeDocumentPath,
+            shouldAbort: () => cancelled,
+          });
+          if (startupCursorState.kind === 'aborted') return;
+          if (startupCursorState.kind === 'ready') {
+            cursorByPathRef.current = startupCursorState.cursorPositions;
+            if (startupCursorState.restoreTarget) {
+              startupRestoreRef.current = startupCursorState.restoreTarget;
             }
-          } catch {
-            /* persistence is best-effort */
           }
           return;
         }
