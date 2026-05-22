@@ -161,6 +161,7 @@ import {
   focusOutlineTree as focusOutlineTreeTarget,
 } from './lib/focusTargets';
 import {
+  sourceEditorSelectionForLocation,
   wysiwygCursorMarkdownOffset,
   wysiwygCursorSourceLocation,
   wysiwygPositionAtMarkdownOffset,
@@ -1934,13 +1935,8 @@ export default function App() {
     const view = sourceEditorViewRef.current;
     if (!view) return;
     if (localDraft.length === 0 && pending.location) return;
-    const doc = view.state.doc;
-    const targetLine = Math.max(1, Math.min(location.line, doc.lines));
-    const lineInfo = doc.line(targetLine);
-    const targetColumn = Math.max(1, Math.min(location.column, lineInfo.length + 1));
-    const offset = lineInfo.from + (targetColumn - 1);
     view.dispatch({
-      selection: { anchor: offset, head: offset },
+      selection: sourceEditorSelectionForLocation(view.state.doc, location),
       scrollIntoView: true,
     });
     view.focus();

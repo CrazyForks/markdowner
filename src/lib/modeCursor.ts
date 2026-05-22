@@ -5,6 +5,41 @@ export interface SourceCursorLocation {
   column: number;
 }
 
+export interface SourceLineReader {
+  lines: number;
+  line: (lineNumber: number) => {
+    from: number;
+    length: number;
+  };
+}
+
+export interface SourceEditorSelection {
+  anchor: number;
+  head: number;
+}
+
+export function sourceEditorSelectionForLocation(
+  doc: SourceLineReader,
+  location: SourceCursorLocation,
+): SourceEditorSelection {
+  const maxLine = Math.max(1, doc.lines);
+  const targetLine =
+    Number.isFinite(location.line) && location.line >= 1
+      ? Math.min(location.line, maxLine)
+      : 1;
+  const lineInfo = doc.line(targetLine);
+  const targetColumn =
+    Number.isFinite(location.column) && location.column >= 1
+      ? Math.min(location.column, lineInfo.length + 1)
+      : 1;
+  const offset = lineInfo.from + (targetColumn - 1);
+
+  return {
+    anchor: offset,
+    head: offset,
+  };
+}
+
 // Returns the markdown source line + column corresponding to the current
 // WYSIWYG selection. Serialises the document prefix up to the cursor through
 // @tiptap/markdown and counts newlines for the line, and characters since the

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  sourceEditorSelectionForLocation,
   wysiwygCursorMarkdownOffset,
   wysiwygPositionAtMarkdownOffset,
 } from './modeCursor';
@@ -111,6 +112,62 @@ const trailingEmptyParagraph: FakeBlock = {
   nodeSize: 2,
   serialize: () => '',
 };
+
+function buildSourceDoc(lines: string[]) {
+  const starts: number[] = [];
+  let offset = 0;
+  lines.forEach((line, index) => {
+    starts[index] = offset;
+    offset += line.length + (index < lines.length - 1 ? 1 : 0);
+  });
+
+  return {
+    lines: lines.length,
+    line(lineNumber: number) {
+      const line = lines[lineNumber - 1] ?? '';
+      return {
+        from: starts[lineNumber - 1] ?? 0,
+        length: line.length,
+      };
+    },
+  };
+}
+
+describe('sourceEditorSelectionForLocation', () => {
+  it('maps a saved source line and column to a collapsed editor selection', () => {
+    expect(
+      sourceEditorSelectionForLocation(buildSourceDoc(['alpha', 'beta']), {
+        line: 2,
+        column: 3,
+      }),
+    ).toEqual({
+      anchor: 8,
+      head: 8,
+    });
+  });
+
+  it('clamps invalid or out-of-range source locations inside the document', () => {
+    expect(
+      sourceEditorSelectionForLocation(buildSourceDoc(['alpha', 'beta']), {
+        line: 99,
+        column: 99,
+      }),
+    ).toEqual({
+      anchor: 10,
+      head: 10,
+    });
+
+    expect(
+      sourceEditorSelectionForLocation(buildSourceDoc(['alpha']), {
+        line: Number.NaN,
+        column: Number.NEGATIVE_INFINITY,
+      }),
+    ).toEqual({
+      anchor: 0,
+      head: 0,
+    });
+  });
+});
 
 describe('wysiwygCursorMarkdownOffset', () => {
   it('returns 0 when the editor is null or the selection sits at the doc start', () => {
