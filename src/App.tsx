@@ -3495,10 +3495,13 @@ export default function App() {
           if (paths && paths.length > 0) {
             const firstPath = paths[0];
             if (!firstPath) return;
+            const token = nextEditorOpRequest();
             await withBusy(async () => {
               stashActiveTabDraft();
               await syncActiveDraftBestEffort();
+              if (isEditorOpStale(token)) return;
               const next = await openDroppedPath(firstPath);
+              if (isEditorOpStale(token)) return;
               const openedDocument =
                 next.activeDocumentSource !== null && next.activeDocumentPath === firstPath;
               applySnapshot(next, !openedDocument);

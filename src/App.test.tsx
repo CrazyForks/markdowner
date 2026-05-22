@@ -38,8 +38,12 @@ const startDraggingMock = vi.fn();
 const onCloseRequestedMock = vi.fn();
 const onDragDropEventMock = vi.fn().mockImplementation(() => Promise.resolve(vi.fn()));
 const listenMock = vi.fn();
+type DragDropEventPayload = { type: string; paths?: string[] };
 let closeRequestedHandler:
   | ((event: { preventDefault: () => void }) => Promise<void>)
+  | undefined;
+let dragDropHandler:
+  | ((event: { payload: DragDropEventPayload }) => void | Promise<void>)
   | undefined;
 let menuCommandHandler:
   | ((event: { payload: string }) => void | Promise<void>)
@@ -331,6 +335,7 @@ describe('App recent documents', () => {
     saveActiveDocumentAsMock.mockReset();
     setModeMock.mockReset();
     setThemeMock.mockReset();
+    openDroppedPathMock.mockReset();
     quitAppMock.mockReset();
     loadOpenTabsMock.mockReset();
     loadOpenTabsMock.mockResolvedValue({ openTabs: [], activeTabPath: null });
@@ -344,18 +349,24 @@ describe('App recent documents', () => {
     destroyWindowMock.mockReset();
     startDraggingMock.mockReset();
     onCloseRequestedMock.mockReset();
+    onDragDropEventMock.mockReset();
     listenMock.mockReset();
     hasActiveDocumentExternalChangesMock.mockReset();
     invokeMock.mockReset();
     tiptapMockState.editor = null;
     tiptapMockState.lastOptions = null;
     closeRequestedHandler = undefined;
+    dragDropHandler = undefined;
     menuCommandHandler = undefined;
     updateSnapshotHandler = undefined;
     window.localStorage.removeItem('markdowner.sidebarOpen');
     window.localStorage.removeItem('markdowner.sidebarWidth');
     onCloseRequestedMock.mockImplementation(async (handler) => {
       closeRequestedHandler = handler;
+      return vi.fn();
+    });
+    onDragDropEventMock.mockImplementation(async (handler) => {
+      dragDropHandler = handler;
       return vi.fn();
     });
     hasActiveDocumentExternalChangesMock.mockResolvedValue(false);
@@ -3189,6 +3200,81 @@ describe('App recent documents', () => {
 
     expect(screen.getByTitle('Workspace: project-b')).toBeInTheDocument();
     expect(screen.queryByTitle('Workspace: project-a')).not.toBeInTheDocument();
+  });
+
+  it('keeps the latest dropped document when an earlier drop resolves later', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    const pendingDrops = new Map<string, (snapshot: AppSnapshot) => void>();
+
+    bootstrapMock.mockResolvedValue(baseSnapshot({ mode: 'Editor' }));
+    openDroppedPathMock.mockImplementation(
+      (path: string) =>
+        new Promise<AppSnapshot>((resolve) => {
+          pendingDrops.set(path, resolve);
+        }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(dragDropHandler).toBeTypeOf('function');
+    });
+
+    const emitDrop = dragDropHandler as NonNullable<typeof dragDropHandler>;
+    const alphaDrop = emitDrop({ payload: { type: 'drop', paths: [alphaPath] } });
+
+    await waitFor(() => {
+      expect(openDroppedPathMock).toHaveBeenCalledWith(alphaPath);
+    });
+
+    const betaDrop = emitDrop({ payload: { type: 'drop', paths: [betaPath] } });
+
+    await waitFor(() => {
+      expect(openDroppedPathMock).toHaveBeenCalledWith(betaPath);
+    });
+
+    await act(async () => {
+      pendingDrops.get(betaPath)?.(
+        baseSnapshot({
+          activeDocumentName: 'beta.md',
+          activeDocumentPath: betaPath,
+          activeDocumentSource: '# Beta',
+          mode: 'Editor',
+        }),
+      );
+      await betaDrop;
+    });
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta');
+      expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    await act(async () => {
+      pendingDrops.get(alphaPath)?.(
+        baseSnapshot({
+          activeDocumentName: 'alpha.md',
+          activeDocumentPath: alphaPath,
+          activeDocumentSource: '# Alpha',
+          mode: 'Editor',
+        }),
+      );
+      await alphaDrop;
+    });
+
+    expect(sourceEditor).toHaveValue('# Beta');
+    expect(screen.queryByRole('tab', { name: /alpha\.md/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   it('switches modes with the Cmd+K chord shortcuts (Cmd+K Cmd+E/W/S)', async () => {
