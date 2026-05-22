@@ -14,7 +14,7 @@ import TableRow from '@tiptap/extension-table-row';
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import { Markdown } from '@tiptap/markdown';
-import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/react';
+import { useEditor, type Editor as TiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { createCodeBlockExtension } from '@/components/wysiwyg/codeBlockExtension';
 import { PreventTableHoverSelection } from '@/components/wysiwyg/preventTableHoverSelection';
@@ -42,10 +42,6 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { LinkPopup } from '@/components/wysiwyg/LinkPopup';
-import { SelectionToolbar } from '@/components/wysiwyg/SelectionToolbar';
-import { SlashCommandMenu } from '@/components/wysiwyg/SlashCommandMenu';
-import { TableToolbar } from '@/components/wysiwyg/TableToolbar';
 import { cn } from '@/lib/utils';
 import { ActivityBar } from '@/shell/ActivityBar';
 import { AppMenu } from '@/shell/AppMenu';
@@ -65,6 +61,7 @@ import { SidebarResizeHandle } from '@/shell/SidebarResizeHandle';
 import { StatusBar } from '@/shell/StatusBar';
 import { SettingsPanel } from '@/shell/SettingsPanel';
 import { WorkspaceTree } from '@/shell/WorkspaceTree';
+import { WysiwygEditorChrome } from '@/shell/WysiwygEditorChrome';
 import { buildCommandPaletteCommands } from '@/shell/commandPaletteCommands';
 
 import {
@@ -3787,17 +3784,11 @@ export default function App() {
         minimapScrollEl={minimapScrollEl}
         tableDensity={settings.tableDensity}
         editorContent={
-          <>
-            <EditorContent editor={editor} />
-            <SlashCommandMenu editor={editor} enabled={currentMode === 'Wysiwyg'} />
-            <SelectionToolbar editor={editor} enabled={currentMode === 'Wysiwyg'} />
-            <LinkPopup
-              editor={editor}
-              enabled={currentMode === 'Wysiwyg'}
-              activeDocumentPath={snapshot.activeDocumentPath}
-            />
-            <TableToolbar editor={editor} enabled={currentMode === 'Wysiwyg'} />
-          </>
+          <WysiwygEditorChrome
+            editor={editor}
+            enabled={currentMode === 'Wysiwyg'}
+            activeDocumentPath={snapshot.activeDocumentPath}
+          />
         }
         sourceEditor={
           <SourceEditorView
