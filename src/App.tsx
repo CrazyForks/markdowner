@@ -57,6 +57,7 @@ import { EditorArea } from '@/shell/EditorArea';
 import { FindReplaceBar } from '@/shell/FindReplaceBar';
 import { ShortcutsDialog } from '@/shell/ShortcutsDialog';
 import { Tabs } from '@/shell/Tabs';
+import { TitleBar } from '@/shell/TitleBar';
 import { QuickOpen } from '@/shell/QuickOpen';
 import {
   SideBar,
@@ -3596,38 +3597,27 @@ export default function App() {
       >
         {shellAnnouncement}
       </div>
-      <div
-        data-testid="app-titlebar"
-        className="flex h-[35px] shrink-0 items-center border-b border-border/60 bg-background"
-      >
-        <div
-          data-tauri-drag-region
-          className="h-full w-20 shrink-0"
-          onPointerDown={handleStartWindowDrag}
-        />
-        <div
-          data-tauri-drag-region
-          data-testid="app-titlebar-drag-region"
-          className="h-full min-w-0 flex-1"
-          onPointerDown={handleStartWindowDrag}
-        />
-        <AppMenu
-          className="mr-2"
-          busy={busy}
-          activeDocumentOpen={activeDocumentOpen}
-          currentMode={currentMode}
-          modeOptions={EDITOR_MODE_OPTIONS}
-          themeKind={snapshot.theme.kind}
-          themeMode={themeMode}
-          onSave={() => void handleSave()}
-          onSaveAs={() => void handleSaveAs()}
-          onImportTheme={() => void handleImportTheme()}
-          onSetMode={(mode) => void handleSetMode(mode)}
-          onSetTheme={(theme) => void handleSetTheme(theme)}
-          onFollowSystemTheme={() => void handleFollowSystemTheme()}
-          onOpenSettings={() => void toggleSettingsTab()}
-        />
-      </div>
+      <TitleBar
+        onStartWindowDrag={handleStartWindowDrag}
+        menu={
+          <AppMenu
+            className="mr-2"
+            busy={busy}
+            activeDocumentOpen={activeDocumentOpen}
+            currentMode={currentMode}
+            modeOptions={EDITOR_MODE_OPTIONS}
+            themeKind={snapshot.theme.kind}
+            themeMode={themeMode}
+            onSave={() => void handleSave()}
+            onSaveAs={() => void handleSaveAs()}
+            onImportTheme={() => void handleImportTheme()}
+            onSetMode={(mode) => void handleSetMode(mode)}
+            onSetTheme={(theme) => void handleSetTheme(theme)}
+            onFollowSystemTheme={() => void handleFollowSystemTheme()}
+            onOpenSettings={() => void toggleSettingsTab()}
+          />
+        }
+      />
       <div
         className={cn(
           'min-h-0 flex-1 grid',
