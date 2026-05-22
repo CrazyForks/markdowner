@@ -251,11 +251,43 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
   };
 
   const rebuildDoc = () => ({
+    content: { size: editor.markdown.length + 2 },
     descendants: (callback: (node: any, position: number) => void) => {
       mutableSegments.forEach((segment) => {
         callback({ isText: true, text: segment.text }, segment.from);
       });
     },
+    forEach: (callback: (node: any, offset: number) => void) => {
+      callback(
+        {
+          type: { name: 'paragraph' },
+          textContent: editor.markdown,
+          nodeSize: editor.markdown.length + 2,
+        },
+        0,
+      );
+    },
+    cut: (from: number, to: number) => ({
+      __markdownSlice: editor.markdown.slice(
+        Math.max(0, from),
+        Math.max(0, Math.min(to, editor.markdown.length)),
+      ),
+      descendants: (callback: (node: any, position: number) => void) => {
+        mutableSegments.forEach((segment) => {
+          callback({ isText: true, text: segment.text }, segment.from);
+        });
+      },
+      forEach: (callback: (node: any, offset: number) => void) => {
+        callback(
+          {
+            type: { name: 'paragraph' },
+            textContent: editor.markdown,
+            nodeSize: editor.markdown.length + 2,
+          },
+          0,
+        );
+      },
+    }),
   });
 
   const replaceRange = (from: number, to: number, text: string) => {
@@ -292,7 +324,11 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
 
   editor.state = {
     doc: rebuildDoc(),
-    selection: { head: segments[0]?.from ?? 0 },
+    selection: {
+      from: segments[0]?.from ?? 0,
+      to: segments[0]?.from ?? 0,
+      head: segments[0]?.from ?? 0,
+    },
     tr: transaction,
   };
   editor.view = {
@@ -302,15 +338,56 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
     coordsAtPos: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
   };
   editor.commands = {
-    setContent: vi.fn((content: string) => {
+    setContent: vi.fn((content: string, _options?: unknown) => {
       editor.markdown = content;
       return true;
     }),
-    setTextSelection: vi.fn((selection: { from: number; to: number }) => {
-      editor.lastSelection = selection;
-      editor.state.selection = { head: selection.to };
+    focus: vi.fn(() => true),
+    setTextSelection: vi.fn((selection: number | { from: number; to: number }) => {
+      const next =
+        typeof selection === 'number'
+          ? { from: selection, to: selection }
+          : selection;
+      const previousSelection = editor.state.selection ?? {};
+      const previousSelectionConstructor =
+        typeof previousSelection.constructor?.create === 'function'
+          ? previousSelection.constructor
+          : undefined;
+      editor.lastSelection = next;
+      editor.state.selection = {
+        ...(previousSelectionConstructor
+          ? { constructor: previousSelectionConstructor }
+          : {}),
+        from: next.from,
+        to: next.to,
+        anchor: next.from,
+        head: next.to,
+      };
       return true;
     }),
+  };
+  editor.chain = vi.fn(() => {
+    const chain = {
+      focus: vi.fn(() => chain),
+      run: vi.fn(() => true),
+      scrollIntoView: vi.fn(() => chain),
+      setContent: vi.fn((content: string, options?: unknown) => {
+        editor.commands.setContent(content, options);
+        return chain;
+      }),
+      setTextSelection: vi.fn((selection: number | { from: number; to: number }) => {
+        editor.commands.setTextSelection(selection);
+        return chain;
+      }),
+    };
+    return chain;
+  });
+  editor.storage = {
+    markdown: {
+      manager: {
+        serialize: vi.fn((slice: any) => slice?.__markdownSlice ?? editor.markdown),
+      },
+    },
   };
   editor.getMarkdown = vi.fn(() => editor.markdown);
 
@@ -3463,6 +3540,78 @@ describe('App recent documents', () => {
         mode: 'Editor',
       }),
     );
+  });
+
+  it('keeps the keyboard cursor at the WYSIWYG selection head when switching to Editor with Option+2', async () => {
+    const editor = createMockTiptapEditor('# Alpha', [{ text: 'Alpha', from: 2 }]);
+    editor.state.selection = { from: 2, to: 7, head: 7 };
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Alpha',
+        mode: 'Wysiwyg',
+      }),
+    );
+    setModeMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Alpha',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /meeting-notes\.md/i });
+
+    fireEvent.keyDown(window, { key: '™', code: 'Digit2', altKey: true });
+
+    const sourceEditor = await screen.findByRole('textbox', { name: /source editor/i });
+    await waitFor(() => {
+      expect(setModeMock).toHaveBeenCalledWith('Editor');
+      expect((sourceEditor as HTMLTextAreaElement).selectionStart).toBe(7);
+      expect((sourceEditor as HTMLTextAreaElement).selectionEnd).toBe(7);
+    });
+  });
+
+  it('keeps the keyboard cursor at the source caret when switching to WYSIWYG with Option+1', async () => {
+    const editor = createMockTiptapEditor('# Alpha', [{ text: '# Alpha', from: 1 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Alpha',
+        mode: 'Editor',
+      }),
+    );
+    setModeMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Alpha',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByRole('textbox', { name: /source editor/i });
+    (sourceEditor as HTMLTextAreaElement).setSelectionRange(7, 7);
+
+    fireEvent.keyDown(window, { key: '¡', code: 'Digit1', altKey: true });
+
+    await waitFor(() => {
+      expect(setModeMock).toHaveBeenCalledWith('Wysiwyg');
+      expect(editor.commands.setTextSelection).toHaveBeenCalledWith(8);
+    });
   });
 
   it('flips the optimistic mode before awaiting set_mode and skips replaceActiveDocumentSource on a clean draft', async () => {
@@ -6792,6 +6941,87 @@ describe('App recent documents', () => {
 
     const tablist = await screen.findByRole('tablist');
     expect(within(tablist).getAllByRole('tab')).toHaveLength(3);
+  });
+
+  it('collapses a carried source selection when opening a new document', async () => {
+    openDialogMock.mockResolvedValue('/tmp/project/next.md');
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'current.md',
+        activeDocumentPath: '/tmp/project/current.md',
+        activeDocumentSource: '0123456789',
+        mode: 'Editor',
+      }),
+    );
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'next.md',
+        activeDocumentPath: '/tmp/project/next.md',
+        activeDocumentSource: 'abcdefghij',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByRole('textbox', { name: /source editor/i });
+    const sourceTextarea = sourceEditor as HTMLTextAreaElement;
+    sourceTextarea.setSelectionRange(0, sourceTextarea.value.length);
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+
+    await waitFor(() => {
+      expect(sourceTextarea).toHaveValue('abcdefghij');
+      expect(sourceTextarea.selectionStart).toBe(sourceTextarea.selectionEnd);
+      expect(`${sourceTextarea.selectionStart}:${sourceTextarea.selectionEnd}`).not.toBe(
+        `0:${sourceTextarea.value.length}`,
+      );
+    });
+  });
+
+  it('collapses WYSIWYG editor state selection when opening a different document', async () => {
+    const editor = createMockTiptapEditor('0123456789', [{ text: '0123456789', from: 1 }]);
+    editor.state.selection = { from: 0, to: 10, head: 10 };
+    tiptapMockState.editor = editor;
+    openDialogMock.mockResolvedValue('/tmp/project/next.md');
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'current.md',
+        activeDocumentPath: '/tmp/project/current.md',
+        activeDocumentSource: '0123456789',
+        mode: 'Wysiwyg',
+      }),
+    );
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'next.md',
+        activeDocumentPath: '/tmp/project/next.md',
+        activeDocumentSource: 'abcdefghij',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /current\.md/i });
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /next\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      expect(editor.commands.setContent).toHaveBeenCalledWith('abcdefghij', {
+        contentType: 'markdown',
+        emitUpdate: false,
+      });
+      expect(editor.commands.setTextSelection).toHaveBeenCalledWith({ from: 0, to: 0 });
+    });
   });
 
   it('opens a recent document from the native menu event', async () => {

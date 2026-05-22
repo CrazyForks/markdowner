@@ -18,6 +18,15 @@ export interface SourceEditorSelection {
   head: number;
 }
 
+type WysiwygSelection = {
+  from: number;
+  head?: number;
+};
+
+function wysiwygSelectionHead(selection: WysiwygSelection): number {
+  return typeof selection.head === 'number' ? selection.head : selection.from;
+}
+
 export function sourceEditorSelectionForLocation(
   doc: SourceLineReader,
   location: SourceCursorLocation,
@@ -51,10 +60,10 @@ export function sourceEditorSelectionForLocation(
 export function wysiwygCursorSourceLocation(editor: TiptapEditor | null): SourceCursorLocation {
   if (!editor) return { line: 1, column: 1 };
   const selection = editor.state.selection;
-  const from = selection.from;
-  if (from <= 0) return { line: 1, column: 1 };
+  const head = wysiwygSelectionHead(selection);
+  if (head <= 0) return { line: 1, column: 1 };
   try {
-    const slice = editor.state.doc.cut(0, from);
+    const slice = editor.state.doc.cut(0, head);
     const serializer = getMarkdownSerializer(editor);
     if (!serializer) return { line: 1, column: 1 };
     const markdown = serializer.serialize(slice);
@@ -165,15 +174,15 @@ export function wysiwygPositionAtSourceLine(
 
 // Returns the markdown character offset of the WYSIWYG cursor — "where would
 // the cursor be if you dropped me into the markdown source at this point".
-// Computed by serializing the doc prefix up to selection.from and taking its
-// length, so it's symmetric with the source editor's native character-offset
+// Computed by serializing the doc prefix up to the active selection head and
+// taking its length, so it's symmetric with the source editor's native character-offset
 // cursor model (which is what we need for an exact mode-switch round-trip).
 export function wysiwygCursorMarkdownOffset(editor: TiptapEditor | null): number {
   if (!editor) return 0;
-  const from = editor.state.selection.from;
-  if (from <= 0) return 0;
+  const head = wysiwygSelectionHead(editor.state.selection);
+  if (head <= 0) return 0;
   try {
-    const slice = editor.state.doc.cut(0, from);
+    const slice = editor.state.doc.cut(0, head);
     const serializer = getMarkdownSerializer(editor);
     if (!serializer) return 0;
     return serializer.serialize(slice).length;
@@ -183,17 +192,12 @@ export function wysiwygCursorMarkdownOffset(editor: TiptapEditor | null): number
 }
 
 // Inverse of `wysiwygCursorMarkdownOffset`: returns the ProseMirror position
-// that corresponds to the given markdown character offset. Walks top-level
-// blocks, serializing the cumulative prefix at each step; lands inside the
-// block whose serialized markdown brackets the target offset. Within
-// paragraphs and headings the residual offset advances through text content;
-// for everything else (lists, blockquotes, tables, code fences) the caret
-// snaps to the block's start, since their inner structure can't be safely
-// advanced from a flat character count.
-//
-// Block separators: prosemirror-markdown consistently emits "\n\n" between
-// top-level blocks via closeBlock(). The first block has no preceding
-// separator. We account for both when computing the residual offset.
+// that corresponds to the given markdown character offset. Binary-searches
+// the doc for the smallest position whose serialized prefix length matches
+// the target — by asking the markdown serializer at each step, we get
+// pixel-perfect handoff inside any block the serializer round-trips
+// (paragraphs, headings, lists, blockquotes, code fences, tables, …)
+// without baking block-specific prefix arithmetic into this file.
 export function wysiwygPositionAtMarkdownOffset(
   editor: TiptapEditor | null,
   targetOffset: number,
@@ -204,74 +208,65 @@ export function wysiwygPositionAtMarkdownOffset(
   if (!serializer) return null;
 
   const doc = editor.state.doc;
-  type BlockNode = { type?: { name?: string }; attrs?: { level?: number }; textContent: string };
-  let prevCumulativeLength = 0;
-  let positionAfterPreviousBlocks = 0;
-  let candidatePos: number | null = null;
-  let candidateNode: BlockNode | null = null;
-  let candidateRemaining = 0;
+  const docSize = doc.content.size;
+  if (docSize <= 0) return 0;
 
   try {
-    doc.forEach((node, offset) => {
-      if (candidatePos !== null) return;
-      const blockOpenPosition = offset + 1; // skip past the opening token
-      const sliceEnd = offset + node.nodeSize;
-      const cumulativeLength = serializer.serialize(doc.cut(0, sliceEnd)).length;
+    const fullLength = serializer.serialize(doc).length;
+    // `docSize - 1` is the last position that sits *inside* a block's text
+    // (just before its closing token); `docSize` itself is after the doc's
+    // last child and Tiptap can refuse to land a selection there.
+    const lastTextPosition = Math.max(0, docSize - 1);
+    if (targetOffset >= fullLength) return lastTextPosition;
 
-      if (cumulativeLength >= targetOffset) {
-        // Target lands within this block's contribution to the cumulative
-        // serialization (which may include the "\n\n" separator before it).
-        const blockOnlyLength = serializer.serialize(doc.cut(offset, sliceEnd)).length;
-        // 0 for the first block (no preceding separator), otherwise 2 chars
-        // for "\n\n". Derived rather than hard-coded so any future serializer
-        // tweak surfaces here instead of silently mis-aligning the caret.
-        const separatorLength =
-          prevCumulativeLength === 0
-            ? 0
-            : Math.max(0, cumulativeLength - prevCumulativeLength - blockOnlyLength);
-        // Residual offset relative to this block's own markdown. Clamps to 0
-        // when the target sits inside the separator itself (between blocks).
-        candidatePos = blockOpenPosition;
-        candidateNode = node as BlockNode;
-        candidateRemaining = Math.max(0, targetOffset - prevCumulativeLength - separatorLength);
-        return;
+    // Smallest position `pos` such that serialize(cut(0, pos)).length >= target.
+    let low = 0;
+    let high = docSize;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      const prefixLength = serializer.serialize(doc.cut(0, mid)).length;
+      if (prefixLength < targetOffset) {
+        low = mid + 1;
+      } else {
+        high = mid;
       }
-      prevCumulativeLength = cumulativeLength;
-      positionAfterPreviousBlocks = sliceEnd;
-    });
+    }
+    return Math.min(low, lastTextPosition);
   } catch {
     return null;
   }
-
-  if (candidatePos === null || candidateNode === null) {
-    // Target offset extends past every block — land at the last valid text
-    // position (inside the closing token of the last block).
-    return Math.max(0, positionAfterPreviousBlocks - 1);
-  }
-
-  const node: BlockNode = candidateNode;
-  const typeName = node.type?.name;
-  let prefixLength = 0;
-  if (typeName === 'heading') {
-    const level = Math.max(1, Math.min(6, node.attrs?.level ?? 1));
-    prefixLength = level + 1; // e.g. "## "
-  } else if (typeName !== 'paragraph') {
-    return candidatePos;
-  }
-
-  const maxAdvance = Math.max(0, node.textContent.length);
-  const advance = Math.min(Math.max(0, candidateRemaining - prefixLength), maxAdvance);
-  return candidatePos + advance;
 }
 
 type Serializer = {
   serialize: (doc: unknown) => string;
 };
 
+// Adapter around @tiptap/markdown's `MarkdownManager.serialize(json)`.
+// The manager is exposed at `editor.storage.markdown.manager` and accepts
+// Tiptap JSON content, not a ProseMirror Node — so we toJSON() the slice
+// before forwarding. Earlier revisions of this helper looked for a
+// `storage.markdown.serializer` field, which never existed on the live
+// extension and made every offset computation collapse to 0 (the silent
+// fallback inside wysiwygCursorMarkdownOffset). That cascaded into the
+// mode-switch handoff sending the source caret to position 0 every time
+// the user pressed Option+2 from a non-trivial caret position.
 function getMarkdownSerializer(editor: TiptapEditor): Serializer | null {
-  const storage = editor.storage as unknown as
-    | Record<string, unknown>
+  const storage = editor.storage as
+    | { markdown?: { manager?: { serialize?: (json: unknown) => string } } }
     | undefined;
-  const markdown = storage?.markdown as { serializer?: Serializer } | undefined;
-  return markdown?.serializer ?? null;
+  const manager = storage?.markdown?.manager;
+  if (!manager || typeof manager.serialize !== 'function') return null;
+  return {
+    serialize(doc: unknown) {
+      const json =
+        doc && typeof (doc as { toJSON?: () => unknown }).toJSON === 'function'
+          ? (doc as { toJSON: () => unknown }).toJSON()
+          : doc;
+      try {
+        return manager.serialize!(json);
+      } catch {
+        return '';
+      }
+    },
+  };
 }

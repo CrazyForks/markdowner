@@ -442,6 +442,7 @@ export default function App() {
     path: string;
     location: SourceCursorLocation | null;
   } | null>(null);
+  const lastSourceSelectionDocumentKeyRef = useRef<string | null>(null);
   useEffect(() => {
     isFindReplaceOpenRef.current = isFindReplaceOpen;
   }, [isFindReplaceOpen]);
@@ -670,6 +671,25 @@ export default function App() {
       }
       sourceTextarea.setSelectionRange(nextSelectionStart, nextSelectionEnd);
     }
+  };
+
+  const sourceMarkdownOffsetFromCurrentSelection = () => {
+    const view = sourceEditorViewRef.current;
+    if (view) {
+      return clampSourceOffset(view.state.selection.main.head, localDraft.length);
+    }
+
+    const sourceTextarea = sourceEditorContainerRef.current?.querySelector('textarea');
+    if (sourceTextarea instanceof HTMLTextAreaElement) {
+      const selectionHead =
+        sourceTextarea.selectionDirection === 'backward'
+          ? sourceTextarea.selectionStart
+          : sourceTextarea.selectionEnd;
+      return clampSourceOffset(selectionHead, localDraft.length);
+    }
+
+    const lineStart = getSourceOffsetForLine(cursorPosition.line);
+    return clampSourceOffset(lineStart + Math.max(0, cursorPosition.column - 1), localDraft.length);
   };
 
   const handleStartWindowDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1257,6 +1277,14 @@ export default function App() {
   // (Option+1/2/3) can hand the caret to the new editor at the equivalent
   // logical position.
   const wysiwygCursorLocationRef = useRef<SourceCursorLocation>({ line: 1, column: 1 });
+  // Same idea as `wysiwygCursorLocationRef` but stores the markdown character
+  // offset directly. The mode-switch handoff prefers this over reading
+  // `editor.state.selection.head` live, because the live read can race with
+  // intermediate transactions (display:none → blur, debounced flushes, the
+  // localDraft sync effect) that briefly reset ProseMirror selection to 0.
+  // The cached value is always the offset Tiptap reported the last time the
+  // user actually moved the caret, which is what the user wants preserved.
+  const wysiwygCursorOffsetRef = useRef<number>(0);
   // Scroll container the minimap should mirror. Picked from the active editor
   // pane on every mode/lifecycle change.
   const [minimapScrollEl, setMinimapScrollEl] = useState<HTMLElement | null>(null);
@@ -1465,6 +1493,7 @@ export default function App() {
       // logical position.
       const location = wysiwygCursorSourceLocation(nextEditor);
       wysiwygCursorLocationRef.current = location;
+      wysiwygCursorOffsetRef.current = wysiwygCursorMarkdownOffset(nextEditor);
       // Persist the caret per file path (parallels the source-mode path) so
       // the next launch restores into the same block.
       const activeTab = tabsRef.current.find((tab) => tab.id === activeTabIdRef.current);
@@ -1899,6 +1928,34 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!activeDocumentOpen) return;
+
+    const documentKey = `${activeTabId ?? 'none'}:${snapshot.activeDocumentPath ?? 'untitled'}`;
+    if (lastSourceSelectionDocumentKeyRef.current === documentKey) return;
+    // Track the document identity unconditionally so a later mode switch
+    // (Wysiwyg → Source) on the *same* doc doesn't re-enter this branch and
+    // fight the cursor-handoff effect for the caret position.
+    const isInitialObservation = lastSourceSelectionDocumentKeyRef.current === null;
+    lastSourceSelectionDocumentKeyRef.current = documentKey;
+    if (currentMode === 'Wysiwyg') return;
+    // Initial mount is handled by the startup-restore effect; skip restoring
+    // again here so we don't dispatch a competing selection on first paint.
+    if (isInitialObservation) return;
+
+    const savedLocation = snapshot.activeDocumentPath
+      ? cursorByPathRef.current.get(snapshot.activeDocumentPath)
+      : null;
+    const location = savedLocation ?? { line: 1, column: 1 };
+    const targetOffset = getSourceOffsetForLine(location.line) + Math.max(0, location.column - 1);
+    const frame = window.requestAnimationFrame(() => {
+      focusSourceSelection(targetOffset, targetOffset, { focusEditor: false });
+    });
+    return () => window.cancelAnimationFrame(frame);
+    // This effect is keyed by the active document identity, not cursor motion.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDocumentOpen, activeTabId, currentMode, snapshot.activeDocumentPath, sourceEditorViewToken]);
+
   // One-shot startup focus + caret restore. The bootstrap path stashes the
   // target tab's path (and optionally its remembered SourceCursorLocation)
   // into startupRestoreRef once it picks an active tab. This effect waits
@@ -2158,39 +2215,55 @@ export default function App() {
     // re-trigger this effect indefinitely (React error #185).
     lastEditorMarkdownRef.current = localDraft;
     lastEditorActiveTabIdRef.current = activeTabId;
-    editor.commands.setContent(localDraft || '', {
+    const nextContent = localDraft || '';
+    const setContentOptions = {
       contentType: 'markdown',
       emitUpdate: false,
-    });
+    } as const;
+
     if (syncAction.shouldClearDomSelection) {
+      const editorDom = editor.view?.dom;
+      const rangeApiHasGeometry =
+        typeof editorDom?.ownerDocument?.createRange === 'function' &&
+        typeof editorDom.ownerDocument.createRange().getClientRects === 'function';
+      const canCollapseViaEditor =
+        typeof HTMLElement === 'undefined' ||
+        !(editorDom instanceof HTMLElement) ||
+        rangeApiHasGeometry;
+      const collapsedViaEditor = canCollapseViaEditor
+        ? editor
+            .chain()
+            .setContent(nextContent, setContentOptions)
+            .setTextSelection({ from: 0, to: 0 })
+            .run() !== false
+        : false;
+      if (!canCollapseViaEditor) {
+        editor.commands.setContent(nextContent, setContentOptions);
+      }
       // ProseMirror's transaction mapper carries the previous tab's
       // selection through the doc replacement above — when the prior
       // selection covered a range (Cmd+A, drag-selected paragraph, a find
       // hit, a node-selected image) the new tab can open with WebKit
       // visibly rendering that range against the new content. Collapse
-      // the DOM selection to a single caret position so the focus call
+      // ProseMirror state to a single caret so the focus call
       // that follows (in focusActiveEditor / the user's first click)
       // doesn't paint the entire freshly-loaded file as highlighted.
-      //
-      // We touch the DOM selection directly instead of dispatching a
-      // ProseMirror transaction because dispatching here would re-enter
-      // the editor's DOMObserver flush path, which in JSDOM hits a
-      // missing-getClientRects branch and shows up as an unhandled error
-      // in tests. The real ProseMirror state has *also* been mapped to
-      // a point already (setContent's default selection mapping snaps to
-      // atStart when the previous range falls outside the new doc), so
-      // clearing the DOM range alone is enough to remove the visible
-      // highlight without contradicting the editor's internal state.
-      const win = typeof window !== 'undefined' ? window : null;
-      const selection = win?.getSelection?.();
-      if (selection && selection.rangeCount > 0) {
-        try {
-          selection.removeAllRanges();
-        } catch {
-          // Some embedded WebViews throw on removeAllRanges when the
-          // selection's anchorNode has been detached. Non-fatal.
+      // JSDOM lacks Range#getClientRects; in that environment we keep the
+      // old DOM-only fallback to avoid ProseMirror's scroll-to-selection path.
+      if (!collapsedViaEditor) {
+        const win = typeof window !== 'undefined' ? window : null;
+        const selection = win?.getSelection?.();
+        if (selection && selection.rangeCount > 0) {
+          try {
+            selection.removeAllRanges();
+          } catch {
+            // Some embedded WebViews throw on removeAllRanges when the
+            // selection's anchorNode has been detached. Non-fatal.
+          }
         }
       }
+    } else {
+      editor.commands.setContent(nextContent, setContentOptions);
     }
   }, [editor, localDraft, activeTabId]);
 
@@ -2728,15 +2801,53 @@ export default function App() {
     if (!activeDocumentOpen) return;
 
     const editorInstance = editorInstanceRef.current;
-    // Resolve the cursor's markdown offset in the mode we're *leaving*. For
-    // WYSIWYG we serialize the doc prefix; for source / split view we
-    // translate the (line, column) tuple CodeMirror already gave us.
+    // Resolve the cursor's markdown offset in the mode we're *leaving*.
+    //
+    // For WYSIWYG we consult three sources in order of trust:
+    //   1. The cached (line, column) the selection-update handler captured
+    //      on every Tiptap selection change. This is the only path that
+    //      uses ProseMirror's `state.selection.head` at the moment the
+    //      caret last moved, so it can't be perturbed by intermediate
+    //      transactions (flushWysiwygDraftNow's blur, the localDraft sync
+    //      effect, applyModeOptimistically) between keydown and effect.
+    //   2. The cached markdown character offset (same provenance, parallel
+    //      data path).
+    //   3. A live recomputation via the markdown serialiser as a last
+    //      resort — useful right after mount, before any selection event
+    //      has populated the refs.
+    //
+    // The line+column path has a known one-character drift only at the
+    // very end of the document when WYSIWYG's TrailingNode appends an
+    // empty paragraph that doesn't exist on disk, and we clamp into the
+    // source below; mapping mid-document positions is exact. We use it
+    // first because the "cursor jumps to offset 0" failures we've seen
+    // in production all trace back to the markdown serialiser returning
+    // an empty string for some slices, which collapses paths (2)/(3) but
+    // leaves (1) intact.
     let markdownOffset: number;
     if (previousMode === 'Wysiwyg') {
-      markdownOffset = wysiwygCursorMarkdownOffset(editorInstance);
+      const savedLoc = wysiwygCursorLocationRef.current;
+      if (
+        savedLoc &&
+        Number.isFinite(savedLoc.line) &&
+        savedLoc.line >= 1 &&
+        Number.isFinite(savedLoc.column) &&
+        savedLoc.column >= 1 &&
+        (savedLoc.line > 1 || savedLoc.column > 1)
+      ) {
+        const lineStart = getSourceOffsetForLine(savedLoc.line);
+        markdownOffset = lineStart + Math.max(0, savedLoc.column - 1);
+      } else {
+        const cached = wysiwygCursorOffsetRef.current;
+        if (Number.isFinite(cached) && cached > 0) {
+          markdownOffset = cached;
+        } else {
+          const live = wysiwygCursorMarkdownOffset(editorInstance);
+          markdownOffset = Number.isFinite(live) && live > 0 ? live : 0;
+        }
+      }
     } else {
-      const lineStart = getSourceOffsetForLine(cursorPosition.line);
-      markdownOffset = lineStart + Math.max(0, cursorPosition.column - 1);
+      markdownOffset = sourceMarkdownOffsetFromCurrentSelection();
     }
     if (!Number.isFinite(markdownOffset) || markdownOffset < 0) return;
 
@@ -2774,6 +2885,31 @@ export default function App() {
     // so concurrent menu, palette, and keyboard chord paths agree on the truth.
     if (snapshot.mode === nextMode) {
       return;
+    }
+
+    // Snapshot the outgoing caret position BEFORE we kick off any state work
+    // (the optimistic mode flip and the awaited setMode round-trip can both
+    // race with intermediate selection updates). Reading it here, while
+    // ProseMirror's state.selection.head is still pointed at whatever the
+    // user last clicked / arrowed onto, gives the handoff effect a reliable
+    // value to consume — independent of whether onSelectionUpdate happened
+    // to fire between the user's caret move and the mode-switch keypress.
+    if (snapshot.mode === 'Wysiwyg' && nextMode !== 'Wysiwyg') {
+      const ed = editorInstanceRef.current;
+      if (ed) {
+        const liveLocation = wysiwygCursorSourceLocation(ed);
+        if (
+          liveLocation &&
+          Number.isFinite(liveLocation.line) &&
+          liveLocation.line >= 1
+        ) {
+          wysiwygCursorLocationRef.current = liveLocation;
+        }
+        const liveOffset = wysiwygCursorMarkdownOffset(ed);
+        if (Number.isFinite(liveOffset) && liveOffset > 0) {
+          wysiwygCursorOffsetRef.current = liveOffset;
+        }
+      }
     }
 
     // Capture any pending WYSIWYG keystrokes before switching — the source

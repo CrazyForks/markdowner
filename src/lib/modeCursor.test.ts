@@ -18,8 +18,48 @@ interface FakeBlock {
   serialize: () => string;
 }
 
-function buildDoc(blocks: FakeBlock[]) {
+// Map a ProseMirror position to the markdown character offset that the doc
+// serializer would emit up to that position. Models the contract production
+// relies on: serializer prefix length is monotonically non-decreasing in
+// position, blocks join with "\n\n", and only the block-local prefix
+// (e.g. "# " for an h1) precedes content.
+function markdownLengthAtPosition(blocks: FakeBlock[], pos: number): number {
+  let pmCursor = 0;
+  let mdOffset = 0;
+  for (let i = 0; i < blocks.length; i += 1) {
+    const block = blocks[i];
+    const blockStart = pmCursor;
+    const blockEnd = pmCursor + block.nodeSize;
+    const fullMd = block.serialize();
+    const prefixLen = fullMd.length - block.textContent.length;
+    const separator = i === 0 ? 0 : 2;
+    if (pos <= blockStart) return mdOffset;
+    if (pos >= blockEnd) {
+      mdOffset += separator + fullMd.length;
+      pmCursor = blockEnd;
+      continue;
+    }
+    const innerPos = pos - blockStart;
+    const contentChars = Math.min(Math.max(0, innerPos - 1), block.textContent.length);
+    return mdOffset + separator + prefixLen + contentChars;
+  }
+  return mdOffset;
+}
+
+function buildEditor(
+  blocks: FakeBlock[],
+  selection:
+    | number
+    | {
+        from: number;
+        to?: number;
+        head?: number;
+      },
+) {
+  const totalSize = blocks.reduce((sum, b) => sum + b.nodeSize, 0);
+  const fullMarkdownLength = markdownLengthAtPosition(blocks, totalSize);
   const doc = {
+    content: { size: totalSize },
     forEach(callback: (node: FakeBlock, offset: number) => void) {
       let offset = 0;
       for (const block of blocks) {
@@ -28,60 +68,38 @@ function buildDoc(blocks: FakeBlock[]) {
       }
     },
     cut(from: number, to: number) {
-      // The helpers only need the slice's forEach + serialize-via-serializer
-      // semantics. Construct a doc-shaped sub-slice covering the cut range.
-      let cursor = 0;
-      const subBlocks: FakeBlock[] = [];
-      for (const block of blocks) {
-        const blockStart = cursor;
-        const blockEnd = cursor + block.nodeSize;
-        // Either fully or partially inside the cut range — for the
-        // partial-prefix case (from = 0, to inside block content), produce
-        // a derived block whose serialization is the substring of the
-        // block's own serialization.
-        if (from <= blockStart && to >= blockEnd) {
-          subBlocks.push(block);
-        } else if (to > blockStart && to <= blockEnd && from <= blockStart) {
-          // Partial: capture the visible text portion of this block.
-          const consumed = to - blockStart;
-          // For headings/paragraphs the prefix ("## " / "") and text are
-          // serialized contiguously; for our test blocks we drive the
-          // serializer with the cumulative-length contract directly.
-          subBlocks.push({
-            ...block,
-            nodeSize: consumed,
-            serialize: () => block.serialize().slice(0, Math.max(0, consumed - 1)),
-          });
-        }
-        cursor = blockEnd;
-      }
-      return buildDoc(subBlocks);
+      return { __from: from, __to: to } as unknown as ReturnType<typeof buildEditor>;
     },
   };
-  return doc as never;
-}
-
-function buildEditor(blocks: FakeBlock[], selectionFrom: number) {
-  const doc = buildDoc(blocks);
+  const selectionState =
+    typeof selection === 'number'
+      ? { from: selection, to: selection, head: selection }
+      : {
+          from: selection.from,
+          to: selection.to ?? selection.from,
+          head: selection.head ?? selection.to ?? selection.from,
+        };
   return {
     state: {
       doc,
-      selection: { from: selectionFrom },
+      selection: selectionState,
     },
     storage: {
       markdown: {
-        serializer: {
-          serialize(slice: ReturnType<typeof buildDoc>) {
-            const chunks: string[] = [];
-            (slice as {
-              forEach(cb: (node: FakeBlock, offset: number) => void): void;
-            }).forEach((node) => {
-              chunks.push(node.serialize());
-            });
-            // prosemirror-markdown uses closeBlock() to separate top-level
-            // blocks with "\n\n". Mirror that here so our offset math
-            // matches production.
-            return chunks.join('\n\n');
+        manager: {
+          serialize(slice: unknown) {
+            if (
+              slice &&
+              typeof slice === 'object' &&
+              '__from' in (slice as Record<string, unknown>) &&
+              '__to' in (slice as Record<string, unknown>)
+            ) {
+              const range = slice as { __from: number; __to: number };
+              const start = markdownLengthAtPosition(blocks, range.__from);
+              const end = markdownLengthAtPosition(blocks, range.__to);
+              return 'x'.repeat(Math.max(0, end - start));
+            }
+            return 'x'.repeat(fullMarkdownLength);
           },
         },
       },
@@ -111,6 +129,20 @@ const trailingEmptyParagraph: FakeBlock = {
   textContent: '',
   nodeSize: 2,
   serialize: () => '',
+};
+
+// A simplified structural block — its serialization includes content but the
+// markdown prefix per line ("- ") sits between the block-open token and the
+// text. The block reports `textContent` matching the full visible markdown so
+// the test mock can map PM positions to markdown offsets without modelling
+// the full nested listItem/paragraph hierarchy. The point is to exercise the
+// "non-paragraph, non-heading" case the previous implementation snapped to
+// the block start.
+const bulletListTwoItems: FakeBlock = {
+  type: { name: 'bulletList' },
+  textContent: '- Item 1\n- Item 2',
+  nodeSize: '- Item 1\n- Item 2'.length + 2,
+  serialize: () => '- Item 1\n- Item 2',
 };
 
 function buildSourceDoc(lines: string[]) {
@@ -181,6 +213,12 @@ describe('wysiwygCursorMarkdownOffset', () => {
     const editor = buildEditor([headingHello], 7);
     expect(wysiwygCursorMarkdownOffset(editor)).toBe('# Hello'.length);
   });
+
+  it('uses the active selection head instead of the range start as the cursor', () => {
+    const editor = buildEditor([headingHello], { from: 1, to: 7, head: 7 });
+
+    expect(wysiwygCursorMarkdownOffset(editor)).toBe('# Hello'.length);
+  });
 });
 
 describe('wysiwygPositionAtMarkdownOffset', () => {
@@ -228,5 +266,20 @@ describe('wysiwygPositionAtMarkdownOffset', () => {
     expect(wysiwygPositionAtMarkdownOffset(editor, 9999)).toBe(
       headingHello.nodeSize + paragraphWorld.nodeSize - 1,
     );
+  });
+
+  it('descends into structural blocks instead of snapping to the block start', () => {
+    // Regression: cursors inside lists/blockquotes/code fences used to jump
+    // to the block's opening token, because the previous algorithm refused
+    // to advance through any block that wasn't a paragraph or heading. The
+    // binary search variant walks the serializer's contract directly and
+    // lands inside the structural block at the matching markdown offset.
+    const editor = buildEditor([bulletListTwoItems], 1);
+    // Markdown "- Item 1\n- Item 2" (length 17). Offset 17 (end-of-list)
+    // should map to the last valid text position inside the block, not
+    // back to its opening token.
+    const endPosition = wysiwygPositionAtMarkdownOffset(editor, 17);
+    expect(endPosition).toBeGreaterThan(1);
+    expect(endPosition).toBe(bulletListTwoItems.nodeSize - 1);
   });
 });
