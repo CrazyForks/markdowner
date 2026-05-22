@@ -2274,6 +2274,83 @@ describe('App recent documents', () => {
     );
   });
 
+  it('keeps a switched tab active when an earlier Save resolves later', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    let resolveSave: ((snapshot: AppSnapshot) => void) | undefined;
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      const isAlpha = path === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: isAlpha ? '# Alpha' : '# Beta',
+          mode: 'Editor',
+        }),
+      );
+    });
+    saveActiveDocumentMock.mockImplementation(
+      () =>
+        new Promise<AppSnapshot>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /alpha\.md/i });
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    const statusBar = document.querySelector('footer') as HTMLElement;
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha');
+      expect(within(statusBar).getAllByTitle(alphaPath).length).toBeGreaterThan(0);
+    });
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(saveActiveDocumentMock).toHaveBeenCalled();
+      expect(resolveSave).toBeTypeOf('function');
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta');
+      expect(within(statusBar).getAllByTitle(betaPath).length).toBeGreaterThan(0);
+      expect(within(statusBar).queryByTitle(alphaPath)).not.toBeInTheDocument();
+    });
+
+    await act(async () => {
+      resolveSave?.(
+        baseSnapshot({
+          activeDocumentName: 'alpha.md',
+          activeDocumentPath: alphaPath,
+          activeDocumentSource: '# Alpha saved',
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    expect(sourceEditor).toHaveValue('# Beta');
+    expect(within(statusBar).getAllByTitle(betaPath).length).toBeGreaterThan(0);
+    expect(within(statusBar).queryByTitle(alphaPath)).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
   it('exposes keyboard-shortcut tooltips on app menu file actions', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
