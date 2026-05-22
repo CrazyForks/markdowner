@@ -2351,6 +2351,77 @@ describe('App recent documents', () => {
     );
   });
 
+  it('does not show a stale external-change warning after switching tabs during Save', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    let resolveExternalCheck: ((changed: boolean) => void) | undefined;
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      const isAlpha = path === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: isAlpha ? '# Alpha' : '# Beta',
+          mode: 'Editor',
+        }),
+      );
+    });
+    hasActiveDocumentExternalChangesMock.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveExternalCheck = resolve;
+        }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /alpha\.md/i });
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha');
+    });
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(hasActiveDocumentExternalChangesMock).toHaveBeenCalled();
+      expect(resolveExternalCheck).toBeTypeOf('function');
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta');
+      expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    await act(async () => {
+      resolveExternalCheck?.(true);
+    });
+
+    expect(sourceEditor).toHaveValue('# Beta');
+    expect(
+      screen.queryByText(/Could not save 'alpha\.md' because it changed on disk\./i),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
   it('exposes keyboard-shortcut tooltips on app menu file actions', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

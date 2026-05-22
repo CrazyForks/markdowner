@@ -2234,14 +2234,19 @@ export default function App() {
     }
   };
 
-  const hasExternalChanges = async () => {
+  const hasExternalChanges = async (
+    options: { shouldAbort?: () => boolean } = {},
+  ) => {
     if (!activeDocumentOpen || !snapshot.activeDocumentPath) {
-      clearExternalChangeState();
+      if (!options.shouldAbort?.()) {
+        clearExternalChangeState();
+      }
       return false;
     }
 
     try {
       const changed = await hasActiveDocumentExternalChanges();
+      if (options.shouldAbort?.()) return false;
       if (!changed) {
         clearExternalChangeState();
         return false;
@@ -2250,6 +2255,7 @@ export default function App() {
       applyExternalChangeState(externalChangeDetectedState(snapshot.activeDocumentName));
       return true;
     } catch (error) {
+      if (options.shouldAbort?.()) return false;
       const reason = error instanceof Error ? error.message : String(error);
       applyExternalChangeState(
         externalChangeVerificationErrorState(snapshot.activeDocumentName, reason),
@@ -2438,7 +2444,7 @@ export default function App() {
     await withBusy(async () => {
       await syncActiveDraft(undefined, { forFinalSave: true });
       if (isEditorOpStale(token)) return;
-      if (await hasExternalChanges()) {
+      if (await hasExternalChanges({ shouldAbort: () => isEditorOpStale(token) })) {
         return;
       }
       if (isEditorOpStale(token)) return;
