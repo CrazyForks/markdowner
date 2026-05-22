@@ -15,6 +15,12 @@ type QuickOpenSnapshot = {
   rootDir: string | null;
 };
 
+export type QuickOpenViewState = {
+  items: QuickOpenFileItem[];
+  workspacePathSet: ReadonlySet<string>;
+  signature: string;
+};
+
 export function buildQuickOpenItems(snapshot: QuickOpenSnapshot): QuickOpenFileItem[] {
   const seen = new Set<string>();
   const items: QuickOpenFileItem[] = [];
@@ -35,4 +41,29 @@ export function buildQuickOpenItems(snapshot: QuickOpenSnapshot): QuickOpenFileI
   accumulate(snapshot.workspaceDocuments, 'workspace');
   accumulate(snapshot.recentDocuments, 'recent');
   return items;
+}
+
+export function buildQuickOpenSignature(snapshot: QuickOpenSnapshot): string {
+  return [
+    snapshot.rootDir ?? '',
+    'workspace',
+    ...snapshot.workspaceDocuments,
+    'recent',
+    ...snapshot.recentDocuments,
+  ].join('\u0000');
+}
+
+export function resolveQuickOpenViewState(snapshot: QuickOpenSnapshot): QuickOpenViewState {
+  return {
+    items: buildQuickOpenItems(snapshot),
+    workspacePathSet: new Set(snapshot.workspaceDocuments.filter(Boolean)),
+    signature: buildQuickOpenSignature(snapshot),
+  };
+}
+
+export function resolveQuickOpenSelectionKind(
+  path: string,
+  workspacePathSet: ReadonlySet<string>,
+): QuickOpenItemKind {
+  return workspacePathSet.has(path) ? 'workspace' : 'recent';
 }

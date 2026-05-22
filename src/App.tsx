@@ -249,7 +249,11 @@ import {
   resolveWorkspaceTreeViewState,
   toggleWorkspaceFolderKey,
 } from './lib/workspaceTree';
-import { buildQuickOpenItems } from './lib/quickOpenItems';
+import {
+  buildQuickOpenSignature,
+  resolveQuickOpenSelectionKind,
+  resolveQuickOpenViewState,
+} from './lib/quickOpenItems';
 import {
   buildOpenTabsPayload,
   cursorPositionsMapFromOpenTabsPayload,
@@ -3508,10 +3512,18 @@ export default function App() {
     width: sidebarWidth,
     isResizing: isResizingSidebar,
   });
-  const quickOpenItems = buildQuickOpenItems(snapshot);
+  const quickOpenSignature = buildQuickOpenSignature(snapshot);
+  // The signature covers the exact snapshot fields Quick Open needs; other
+  // active-document snapshot changes should not rebuild large file lists.
+  const quickOpenView = useMemo(
+    () => resolveQuickOpenViewState(snapshot),
+    [quickOpenSignature],
+  );
+  const { items: quickOpenItems, workspacePathSet: quickOpenWorkspacePathSet } =
+    quickOpenView;
 
   const handleQuickOpenSelect = (path: string) => {
-    if (snapshot.workspaceDocuments.includes(path)) {
+    if (resolveQuickOpenSelectionKind(path, quickOpenWorkspacePathSet) === 'workspace') {
       void handleOpenWorkspaceDocument(path);
     } else {
       void handleOpenRecentDocument(path);
