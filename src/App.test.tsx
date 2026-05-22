@@ -2473,6 +2473,89 @@ describe('App recent documents', () => {
     });
   });
 
+  it('keeps a switched tab active when an earlier disk reload resolves later', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    let deferAlphaReload = false;
+    let resolveAlphaReload: ((snapshot: AppSnapshot) => void) | undefined;
+
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      if (path === alphaPath && deferAlphaReload) {
+        return new Promise<AppSnapshot>((resolve) => {
+          resolveAlphaReload = resolve;
+        });
+      }
+      const isAlpha = path === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: isAlpha ? '# Alpha' : '# Beta',
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /alpha\.md/i });
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha');
+      expect(screen.getByRole('tab', { name: /alpha\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^save$/i }));
+
+    const reloadButton = await screen.findByRole('button', { name: /reload from disk/i });
+    deferAlphaReload = true;
+    fireEvent.click(reloadButton);
+
+    await waitFor(() => {
+      expect(resolveAlphaReload).toBeTypeOf('function');
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta');
+      expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    await act(async () => {
+      resolveAlphaReload?.(
+        baseSnapshot({
+          activeDocumentName: 'alpha.md',
+          activeDocumentPath: alphaPath,
+          activeDocumentSource: '# Alpha reloaded',
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    expect(sourceEditor).toHaveValue('# Beta');
+    expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
   it('lets the user keep local edits when external changes are detected', async () => {
     hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
     bootstrapMock.mockResolvedValue(

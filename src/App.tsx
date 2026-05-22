@@ -2530,8 +2530,11 @@ export default function App() {
       return;
     }
 
+    const path = snapshot.activeDocumentPath;
+    const token = nextEditorOpRequest();
     await withBusy(async () => {
-      const next = await openDocument(snapshot.activeDocumentPath ?? '');
+      const next = await openDocument(path);
+      if (isEditorOpStale(token)) return;
       applySnapshot(next);
     });
   };
