@@ -3,14 +3,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import {
-  CaseSensitive,
   ChevronDown,
   FilePlus,
   FileText,
   FolderOpen,
   ListCollapse,
-  Regex,
-  WholeWord,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -21,9 +18,15 @@ import {
   ReactNode,
   useCallback,
   useEffect,
-  useRef,
   useState,
 } from 'react';
+import {
+  SearchPanel,
+  type SearchResultFile,
+  type SearchResultMatch,
+} from './SearchPanel';
+
+export type { SearchResultFile, SearchResultMatch } from './SearchPanel';
 
 type ExplorerSectionId = 'editors' | 'workspace' | 'recent';
 
@@ -51,20 +54,6 @@ function readCollapsedSections(): Record<ExplorerSectionId, boolean> {
 }
 
 export type SideBarPanel = 'files' | 'search' | 'outline';
-
-export interface SearchResultMatch {
-  line: number;
-  column: number;
-  preview: string;
-  matchStart: number;
-  matchEnd: number;
-  absoluteOffset: number;
-}
-
-export interface SearchResultFile {
-  path: string;
-  matches: SearchResultMatch[];
-}
 
 export interface OpenEditorItem {
   id: string;
@@ -158,7 +147,6 @@ export function SideBar({
   const showSearch = panel === 'search';
   const showExplorer = !showOutline && !showSearch;
   const outlinePaddingY = Math.max(2, outlineRowSpacing + 2);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const workspaceSectionTitle = workspaceName ? workspaceName.toUpperCase() : 'NO FOLDER OPENED';
 
   const [collapsedSections, setCollapsedSections] = useState<Record<ExplorerSectionId, boolean>>(
@@ -284,14 +272,6 @@ export function SideBar({
     rows[nextIndex]?.focus();
   };
 
-  useEffect(() => {
-    if (!isOpen || !showSearch) return;
-    searchInputRef.current?.focus();
-    searchInputRef.current?.select();
-  }, [isOpen, showSearch, searchAutoFocusToken]);
-
-  const totalMatches = searchResults.reduce((sum, file) => sum + file.matches.length, 0);
-
   return (
     <aside
       aria-label={showOutline ? 'Outline' : showSearch ? 'Search' : 'Explorer'}
@@ -352,158 +332,22 @@ export function SideBar({
           </section>
         </div>
       ) : showSearch ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex h-9 shrink-0 items-center px-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground">
-              SEARCH
-            </div>
-          </div>
-          <section
-            data-testid="sidebar-search-panel"
-            className="explorer-section flex min-h-0 flex-1 flex-col border-t border-sidebar-border/70"
-          >
-            <div className="explorer-section-header">Search</div>
-            <Input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(event) => onSearchQueryChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  onRunSearch();
-                }
-              }}
-              placeholder="Search across workspace"
-              aria-label="Search across workspace"
-              data-testid="sidebar-search-input"
-              className="mx-3 mb-2 h-7 w-[calc(100%-1.5rem)] rounded-sm text-xs"
-            />
-            <div className="flex items-center gap-1 px-3">
-              <Button
-                type="button"
-                variant={searchOptions.caseSensitive ? 'secondary' : 'ghost'}
-                size="icon-sm"
-                aria-label="Match case"
-                aria-pressed={searchOptions.caseSensitive}
-                title="Match case"
-                onClick={() =>
-                  onSearchOptionsChange({
-                    ...searchOptions,
-                    caseSensitive: !searchOptions.caseSensitive,
-                  })
-                }
-              >
-                <CaseSensitive className="size-4" />
-              </Button>
-              <Button
-                type="button"
-                variant={searchOptions.wholeWord ? 'secondary' : 'ghost'}
-                size="icon-sm"
-                aria-label="Whole word"
-                aria-pressed={searchOptions.wholeWord}
-                title="Whole word"
-                onClick={() =>
-                  onSearchOptionsChange({
-                    ...searchOptions,
-                    wholeWord: !searchOptions.wholeWord,
-                  })
-                }
-              >
-                <WholeWord className="size-4" />
-              </Button>
-              <Button
-                type="button"
-                variant={searchOptions.regex ? 'secondary' : 'ghost'}
-                size="icon-sm"
-                aria-label="Use regular expression"
-                aria-pressed={searchOptions.regex}
-                title="Use regular expression"
-                onClick={() =>
-                  onSearchOptionsChange({
-                    ...searchOptions,
-                    regex: !searchOptions.regex,
-                  })
-                }
-              >
-                <Regex className="size-4" />
-              </Button>
-            </div>
-            {searchError ? (
-              <p
-                role="alert"
-                data-testid="sidebar-search-error"
-                className="px-3 pt-2 text-xs text-destructive"
-              >
-                {searchError}
-              </p>
-            ) : null}
-            {searchBusy ? (
-              <p className="px-3 pt-2 text-xs text-muted-foreground">Searching…</p>
-            ) : searchHasRun ? (
-              totalMatches === 0 ? (
-                <p
-                  data-testid="sidebar-search-empty"
-                  className="px-3 pt-2 text-xs text-muted-foreground"
-                >
-                  No results
-                </p>
-              ) : (
-                <p
-                  data-testid="sidebar-search-summary"
-                  className="px-3 pt-2 text-xs text-muted-foreground"
-                >
-                  {totalMatches} {totalMatches === 1 ? 'result' : 'results'} in {searchResults.length}{' '}
-                  {searchResults.length === 1 ? 'file' : 'files'}
-                </p>
-              )
-            ) : (
-              <p className="px-3 pt-2 text-xs text-muted-foreground">Type to search workspace and open files</p>
-            )}
-            {searchResults.length > 0 ? (
-              <ScrollArea className="mt-2 min-h-0 flex-1">
-                <div className="flex flex-col gap-2 py-1">
-                  {searchResults.map((file) => (
-                    <div key={file.path} className="flex flex-col gap-0.5">
-                      <button
-                        type="button"
-                        className="explorer-tree-row flex min-w-0 flex-col items-start truncate text-left hover:bg-accent hover:text-accent-foreground"
-                        title={file.path}
-                        onClick={() => onSelectSearchMatch(file, file.matches[0])}
-                      >
-                        <span className="truncate text-xs font-semibold">
-                          {displayFileName(file.path)}
-                        </span>
-                        <span className="w-full truncate text-[10px] text-muted-foreground">
-                          {displayWorkspacePath(file.path, rootDir)}
-                        </span>
-                      </button>
-                      <div className="flex flex-col gap-0.5 pl-2">
-                        {file.matches.map((match, idx) => (
-                          <button
-                            key={`${file.path}-${match.absoluteOffset}-${idx}`}
-                            type="button"
-                            data-testid="sidebar-search-match"
-                            className="explorer-tree-row flex items-baseline gap-2 text-left text-xs hover:bg-accent hover:text-accent-foreground"
-                            onClick={() => onSelectSearchMatch(file, match)}
-                            title={`Line ${match.line}`}
-                          >
-                            <span className="shrink-0 tabular-nums text-muted-foreground">
-                              {match.line}
-                            </span>
-                            <span className="min-w-0 truncate">
-                              {renderPreviewWithHighlight(match)}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            ) : null}
-          </section>
-        </div>
+        <SearchPanel
+          query={searchQuery}
+          options={searchOptions}
+          results={searchResults}
+          busy={searchBusy}
+          error={searchError}
+          hasRun={searchHasRun}
+          autoFocusToken={searchAutoFocusToken}
+          rootDir={rootDir}
+          onQueryChange={onSearchQueryChange}
+          onOptionsChange={onSearchOptionsChange}
+          onRunSearch={onRunSearch}
+          onSelectMatch={onSelectSearchMatch}
+          displayFileName={displayFileName}
+          displayWorkspacePath={displayWorkspacePath}
+        />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex h-9 shrink-0 items-center justify-between px-3">
@@ -741,21 +585,5 @@ export function SideBar({
         </div>
       )}
     </aside>
-  );
-}
-
-function renderPreviewWithHighlight(match: SearchResultMatch) {
-  const { preview, matchStart, matchEnd } = match;
-  const safeStart = Math.max(0, Math.min(matchStart, preview.length));
-  const safeEnd = Math.max(safeStart, Math.min(matchEnd, preview.length));
-  const before = preview.slice(0, safeStart);
-  const hit = preview.slice(safeStart, safeEnd);
-  const after = preview.slice(safeEnd);
-  return (
-    <>
-      <span className="text-muted-foreground">{before}</span>
-      <mark className="rounded bg-yellow-500/20 px-0.5 text-foreground">{hit}</mark>
-      <span className="text-muted-foreground">{after}</span>
-    </>
   );
 }
