@@ -248,6 +248,7 @@ import {
   shouldSuppressDuplicateImeTextInput,
   shouldSuppressSyntheticImeEnter,
 } from './lib/wysiwygKeyboard';
+import { resolveWysiwygContentSyncAction } from './lib/wysiwygEditorSync';
 import {
   collectWorkspaceFolderKeys,
   displayFileName,
@@ -2085,7 +2086,14 @@ export default function App() {
       return;
     }
 
-    const tabChanged = activeTabId !== lastEditorActiveTabIdRef.current;
+    const syncAction = resolveWysiwygContentSyncAction({
+      activeTabId,
+      lastSyncedTabId: lastEditorActiveTabIdRef.current,
+      localDraft,
+      lastEditorMarkdown: lastEditorMarkdownRef.current,
+      isComposing: isWysiwygComposingRef.current,
+      viewComposing: editor.view?.composing,
+    });
 
     // Only push localDraft into the editor when it changed *externally* (file
     // load, undo from menu, drag-and-drop, …). Editor-authored updates are
@@ -2097,16 +2105,10 @@ export default function App() {
     // tabs with identical markdown (two empty drafts, two copies of the same
     // file, …) would leave the editor showing the previous tab's ProseMirror
     // state — which is exactly the "previous file's content reappears" bug.
-    if (!tabChanged && localDraft === lastEditorMarkdownRef.current) {
-      return;
-    }
-
-    // Same-tab CJK IME safety net: replacing the doc mid-composition tears
-    // down the ProseMirror docView and reseats the cursor — Korean syllables
-    // after the first one then land in a new paragraph below the heading. The
-    // flush scheduled by compositionend will re-trigger this effect with both
-    // values realigned once composition actually finishes.
-    if (!tabChanged && (isWysiwygComposingRef.current || editor.view?.composing)) {
+    // Same-tab CJK IME safety is part of the skip decision: replacing the doc
+    // mid-composition tears down ProseMirror's docView, while a tab change
+    // must still proceed after finalizing the IME below.
+    if (syncAction.kind === 'skip') {
       return;
     }
 
@@ -2120,7 +2122,7 @@ export default function App() {
     // we ship to; we drop our internal composing flag and clear the pending
     // flush timer so the late compositionend can't overwrite the just-applied
     // new content.
-    if (tabChanged && (isWysiwygComposingRef.current || editor.view?.composing)) {
+    if (syncAction.shouldFinalizeComposition) {
       const dom = editor.view?.dom as HTMLElement | undefined;
       dom?.blur?.();
       isWysiwygComposingRef.current = false;
@@ -2139,7 +2141,7 @@ export default function App() {
       contentType: 'markdown',
       emitUpdate: false,
     });
-    if (tabChanged) {
+    if (syncAction.shouldClearDomSelection) {
       // ProseMirror's transaction mapper carries the previous tab's
       // selection through the doc replacement above — when the prior
       // selection covered a range (Cmd+A, drag-selected paragraph, a find
