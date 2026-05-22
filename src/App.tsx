@@ -2564,8 +2564,10 @@ export default function App() {
       return;
     }
 
+    const requestId = nextThemeRequest();
     await withBusy(async () => {
       const next = await importTheme(selected);
+      if (isThemeRequestStale(requestId)) return;
       applySnapshot(next, true);
     });
   };

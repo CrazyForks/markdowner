@@ -1953,6 +1953,105 @@ describe('App recent documents', () => {
     }
   });
 
+  it('keeps a manual theme selection when an earlier imported theme resolves later', async () => {
+    let resolveImportTheme: ((snapshot: AppSnapshot) => void) | undefined;
+    const pendingThemeResolutions = new Map<
+      AppSnapshot['theme']['kind'],
+      (snapshot: AppSnapshot) => void
+    >();
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          themeFollowSystem: false,
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        theme: { kind: 'BuiltInLight', stylesheet: null, stylesheetPath: null },
+      }),
+    );
+    openDialogMock.mockResolvedValue('/tmp/project/theme.css');
+    importThemeMock.mockImplementation(
+      () =>
+        new Promise<AppSnapshot>((resolve) => {
+          resolveImportTheme = resolve;
+        }),
+    );
+    setThemeMock.mockImplementation(
+      (kind: AppSnapshot['theme']['kind']) =>
+        new Promise<AppSnapshot>((resolve) => {
+          pendingThemeResolutions.set(kind, resolve);
+        }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe('BuiltInLight');
+    });
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+    const dialog = await screen.findByTestId('settings-panel');
+    const themeToggleGroup = within(dialog).getByTestId('settings-theme-toggle');
+    const darkThemeToggle = within(themeToggleGroup).getByRole('radio', {
+      name: /dark/i,
+    });
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^import css…$/i }));
+    await waitFor(() => {
+      expect(importThemeMock).toHaveBeenCalledWith('/tmp/project/theme.css');
+    });
+
+    fireEvent.click(darkThemeToggle);
+    await waitFor(() => {
+      expect(setThemeMock).toHaveBeenCalledWith('BuiltInDark');
+    });
+
+    await act(async () => {
+      pendingThemeResolutions.get('BuiltInDark')?.(
+        baseSnapshot({
+          activeDocumentName: 'meeting-notes.md',
+          activeDocumentPath: '/tmp/project/meeting-notes.md',
+          activeDocumentSource: '# Meeting notes',
+          theme: { kind: 'BuiltInDark', stylesheet: null, stylesheetPath: null },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe('BuiltInDark');
+    });
+
+    await act(async () => {
+      resolveImportTheme?.(
+        baseSnapshot({
+          activeDocumentName: 'meeting-notes.md',
+          activeDocumentPath: '/tmp/project/meeting-notes.md',
+          activeDocumentSource: '# Meeting notes',
+          theme: {
+            kind: 'CustomCss',
+            stylesheet: '.markdowner-content { color: tomato; }',
+            stylesheetPath: '/tmp/project/theme.css',
+          },
+        }),
+      );
+    });
+
+    expect(document.documentElement.dataset.theme).toBe('BuiltInDark');
+  });
+
   it('persists the code block theme sync toggle from Settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
