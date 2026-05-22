@@ -2386,6 +2386,55 @@ describe('App recent documents', () => {
     });
   });
 
+  it('keeps the latest workspace when an earlier open resolves later', async () => {
+    const pendingWorkspaces = new Map<string, (snapshot: AppSnapshot) => void>();
+    openDialogMock
+      .mockResolvedValueOnce('/tmp/project-a')
+      .mockResolvedValueOnce('/tmp/project-b');
+    openWorkspaceMock.mockImplementation(
+      (path: string) =>
+        new Promise<AppSnapshot>((resolve) => {
+          pendingWorkspaces.set(path, resolve);
+        }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'O', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: 'O', metaKey: true, shiftKey: true });
+
+    await waitFor(() => {
+      expect(openWorkspaceMock).toHaveBeenCalledWith('/tmp/project-b');
+    });
+
+    await act(async () => {
+      pendingWorkspaces.get('/tmp/project-b')?.(
+        baseSnapshot({
+          rootDir: '/tmp/project-b',
+          workspaceDocuments: ['/tmp/project-b/README.md'],
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Workspace: project-b')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      pendingWorkspaces.get('/tmp/project-a')?.(
+        baseSnapshot({
+          rootDir: '/tmp/project-a',
+          workspaceDocuments: ['/tmp/project-a/README.md'],
+        }),
+      );
+    });
+
+    expect(screen.getByTitle('Workspace: project-b')).toBeInTheDocument();
+    expect(screen.queryByTitle('Workspace: project-a')).not.toBeInTheDocument();
+  });
+
   it('switches modes with the Cmd+K chord shortcuts (Cmd+K Cmd+E/W/S)', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

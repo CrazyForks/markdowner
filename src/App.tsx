@@ -2393,9 +2393,12 @@ export default function App() {
       return;
     }
 
+    const token = nextEditorOpRequest();
     await withBusy(async () => {
       await syncActiveDraftBestEffort();
+      if (isEditorOpStale(token)) return;
       const next = await openWorkspace(selected);
+      if (isEditorOpStale(token)) return;
       applySnapshot(next, true);
     });
   };
