@@ -879,14 +879,17 @@ export default function App() {
   const handleSelectSearchMatch = useEffectEvent(
     async (file: SearchResultFile, match: SearchResultMatch | undefined) => {
       const targetMatch = match ?? file.matches[0];
-      const existing = findDocumentTabByPath(tabs, file.path);
-      if (existing) {
-        await switchToTab(existing.id);
+      const pathTransition = resolveOpenDocumentPathTransition({
+        currentTabs: tabs,
+        path: file.path,
+      });
+      if (pathTransition.kind === 'switchExisting') {
+        await switchToTab(pathTransition.activeTabId);
       } else {
         await withBusy(async () => {
           stashActiveTabDraft();
           await syncActiveDraftBestEffort();
-          const next = await openWorkspaceDocument(file.path);
+          const next = await openWorkspaceDocument(pathTransition.path);
           applySnapshot(next);
           upsertActiveTabFromSnapshot(next);
         });
@@ -2330,9 +2333,12 @@ export default function App() {
 
     // Single-path shortcut: just switch if it's already open.
     if (paths.length === 1) {
-      const existing = findDocumentTabByPath(tabs, paths[0]);
-      if (existing) {
-        await switchToTab(existing.id);
+      const pathTransition = resolveOpenDocumentPathTransition({
+        currentTabs: tabs,
+        path: paths[0],
+      });
+      if (pathTransition.kind === 'switchExisting') {
+        await switchToTab(pathTransition.activeTabId);
         focusActiveEditor();
         return;
       }
