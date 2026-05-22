@@ -2916,6 +2916,58 @@ describe('App recent documents', () => {
     expect(screen.queryByText('# Alpha from disk')).not.toBeInTheDocument();
   });
 
+  it('keeps the latest disk comparison when an earlier Compare resolves later', async () => {
+    const pendingComparisons: Array<(source: string) => void> = [];
+
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    activeDocumentDiskSourceMock.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          pendingComparisons.push(resolve);
+        }),
+    );
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^save$/i }));
+
+    const compareButton = await screen.findByRole('button', { name: /compare/i });
+    fireEvent.click(compareButton);
+    fireEvent.click(compareButton);
+
+    await waitFor(() => {
+      expect(activeDocumentDiskSourceMock).toHaveBeenCalledTimes(2);
+      expect(pendingComparisons).toHaveLength(2);
+    });
+
+    await act(async () => {
+      pendingComparisons[1]?.('# Latest disk version');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Disk vs local')).toBeInTheDocument();
+      expect(screen.getByText('# Latest disk version')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      pendingComparisons[0]?.('# Older disk version');
+    });
+
+    expect(screen.getByText('# Latest disk version')).toBeInTheDocument();
+    expect(screen.queryByText('# Older disk version')).not.toBeInTheDocument();
+  });
+
   it('syncs the unsaved draft before creating a new document', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

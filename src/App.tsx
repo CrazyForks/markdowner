@@ -379,6 +379,7 @@ export default function App() {
   const splitPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const modeRequestIdRef = useRef(0);
   const themeRequestIdRef = useRef(0);
+  const externalCompareRequestIdRef = useRef(0);
   const busyDepthRef = useRef(0);
   const liveRegionTimerRef = useRef<number | null>(null);
   const lastAnnouncedModeRef = useRef<EditorMode | null>(null);
@@ -2559,12 +2560,16 @@ export default function App() {
     }
 
     const token = editorOpRequestIdRef.current;
+    const compareRequestId = externalCompareRequestIdRef.current + 1;
+    externalCompareRequestIdRef.current = compareRequestId;
     try {
       const source = await activeDocumentDiskSource();
       if (isEditorOpStale(token)) return;
+      if (externalCompareRequestIdRef.current !== compareRequestId) return;
       setExternalCompareSource(source);
     } catch (error) {
       if (isEditorOpStale(token)) return;
+      if (externalCompareRequestIdRef.current !== compareRequestId) return;
       const reason = error instanceof Error ? error.message : String(error);
       setExternalChangeMessage(formatDiskReadError(snapshot.activeDocumentName, reason));
       setShowExternalChangeActions(false);
