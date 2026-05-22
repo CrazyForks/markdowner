@@ -187,10 +187,7 @@ import {
   formatEditorMode,
 } from './lib/shellDisplay';
 import {
-  buildDocumentMeta,
-  buildOpenEditorItems,
-  buildStatusBarModel,
-  buildTabStripItems,
+  buildShellChromeModel,
 } from './lib/shellModel';
 import {
   findClickedAnchorHref,
@@ -1635,7 +1632,6 @@ export default function App() {
     hasAnyTabEdits,
     hasUnsavedChanges,
   } = tabViewState;
-  const tabIsDirty = (tab: DocumentTab) => tabViewState.dirtyTabIds.has(tab.id);
 
   useEffect(() => {
     if (!activeTab) {
@@ -3481,21 +3477,10 @@ export default function App() {
     };
   }, []);
 
-  const documentMeta = buildDocumentMeta({
-    activeDocumentPath: snapshot.activeDocumentPath,
-    rootDir: snapshot.rootDir,
-    activeDocumentOpen,
-  });
-  const openEditorItems = buildOpenEditorItems({
+  const shellChromeModel = buildShellChromeModel({
     tabs,
     activeTabId,
-    isDirty: tabIsDirty,
-  });
-  const tabStripItems = buildTabStripItems({
-    tabs,
-    isDirty: tabIsDirty,
-  });
-  const statusBarModel = buildStatusBarModel({
+    dirtyTabIds: tabViewState.dirtyTabIds,
     currentMode,
     themeKind: snapshot.theme.kind,
     busy,
@@ -3507,6 +3492,7 @@ export default function App() {
     cursorPosition,
     documentStats,
   });
+  const { documentMeta, openEditorItems, tabStripItems, statusBarModel } = shellChromeModel;
   const sidebarLayout = resolveSidebarLayoutState({
     isOpen: isSidebarOpen,
     width: sidebarWidth,

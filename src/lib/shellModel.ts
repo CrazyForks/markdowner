@@ -59,6 +59,19 @@ export interface StatusBarModelInput {
   };
 }
 
+export interface ShellChromeModelInput extends StatusBarModelInput {
+  tabs: readonly DocumentTab[];
+  activeTabId: string | null;
+  dirtyTabIds: ReadonlySet<string>;
+}
+
+export interface ShellChromeModel {
+  documentMeta: string;
+  openEditorItems: OpenEditorItem[];
+  tabStripItems: TabStripItem[];
+  statusBarModel: StatusBarModel;
+}
+
 export function buildOpenEditorItems({
   tabs,
   activeTabId,
@@ -91,7 +104,7 @@ export function buildTabStripItems({
     name: tab.name,
     isDirty: isDirty(tab),
     missing: tab.missing,
-    shortcutLabel: index < 9 ? `⌘${index + 1}` : index === 9 ? '⌘0' : null,
+    shortcutLabel: shortcutLabelForTabIndex(index),
   }));
 }
 
@@ -111,6 +124,67 @@ export function buildDocumentMeta({
     return 'Save As to choose where this draft lives.';
   }
   return 'Open a workspace or a Markdown file to begin.';
+}
+
+export function buildShellChromeModel({
+  tabs,
+  activeTabId,
+  dirtyTabIds,
+  currentMode,
+  themeKind,
+  busy,
+  activeDocumentOpen,
+  activeDocumentDirty,
+  activeDocumentName,
+  activeDocumentPath,
+  rootDir,
+  cursorPosition,
+  documentStats,
+}: ShellChromeModelInput): ShellChromeModel {
+  const openEditorItems: OpenEditorItem[] = [];
+  const tabStripItems: TabStripItem[] = [];
+
+  tabs.forEach((tab, index) => {
+    const isDirty = dirtyTabIds.has(tab.id);
+    openEditorItems.push({
+      id: tab.id,
+      name: tab.name,
+      path: tab.path,
+      isActive: tab.id === activeTabId,
+      isDirty,
+      missing: tab.missing,
+    });
+    tabStripItems.push({
+      id: tab.id,
+      kind: tab.kind,
+      name: tab.name,
+      isDirty,
+      missing: tab.missing,
+      shortcutLabel: shortcutLabelForTabIndex(index),
+    });
+  });
+
+  return {
+    documentMeta: buildDocumentMeta({
+      activeDocumentPath,
+      rootDir,
+      activeDocumentOpen,
+    }),
+    openEditorItems,
+    tabStripItems,
+    statusBarModel: buildStatusBarModel({
+      currentMode,
+      themeKind,
+      busy,
+      activeDocumentOpen,
+      activeDocumentDirty,
+      activeDocumentName,
+      activeDocumentPath,
+      rootDir,
+      cursorPosition,
+      documentStats,
+    }),
+  };
 }
 
 export function buildStatusBarModel({
@@ -144,4 +218,8 @@ export function buildStatusBarModel({
     characterCount: activeDocumentOpen ? documentStats.characters : null,
     readingTimeMinutes: activeDocumentOpen ? documentStats.readingTimeMinutes : null,
   };
+}
+
+function shortcutLabelForTabIndex(index: number): string | null {
+  return index < 9 ? `⌘${index + 1}` : index === 9 ? '⌘0' : null;
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDocumentMeta,
   buildOpenEditorItems,
+  buildShellChromeModel,
   buildStatusBarModel,
   buildTabStripItems,
 } from './shellModel';
@@ -134,6 +135,71 @@ describe('buildDocumentMeta', () => {
         activeDocumentOpen: false,
       }),
     ).toBe('Open a workspace or a Markdown file to begin.');
+  });
+});
+
+describe('buildShellChromeModel', () => {
+  it('builds document, tab, and status chrome in one pass over tabs', () => {
+    const model = buildShellChromeModel({
+      tabs,
+      activeTabId: 'settings',
+      dirtyTabIds: new Set(['doc-1']),
+      currentMode: 'Editor',
+      themeKind: 'BuiltInDark',
+      busy: false,
+      activeDocumentOpen: true,
+      activeDocumentDirty: true,
+      activeDocumentName: 'draft.md',
+      activeDocumentPath: '/tmp/project/docs/draft.md',
+      rootDir: '/tmp/project',
+      cursorPosition: { line: 7, column: 2 },
+      documentStats: {
+        words: 42,
+        characters: 260,
+        readingTimeMinutes: 1,
+      },
+    });
+
+    expect(model.documentMeta).toBe('docs/draft.md');
+    expect(model.openEditorItems).toEqual([
+      {
+        id: 'doc-1',
+        name: 'draft.md',
+        path: '/tmp/project/docs/draft.md',
+        isActive: false,
+        isDirty: true,
+        missing: false,
+      },
+      {
+        id: 'settings',
+        name: 'Settings',
+        path: null,
+        isActive: true,
+        isDirty: false,
+        missing: false,
+      },
+      {
+        id: 'doc-2',
+        name: 'missing.md',
+        path: '/tmp/project/docs/missing.md',
+        isActive: false,
+        isDirty: false,
+        missing: true,
+      },
+    ]);
+    expect(model.tabStripItems.map((item) => [item.id, item.isDirty, item.shortcutLabel])).toEqual(
+      [
+        ['doc-1', true, '⌘1'],
+        ['settings', false, '⌘2'],
+        ['doc-2', false, '⌘3'],
+      ],
+    );
+    expect(model.statusBarModel).toMatchObject({
+      mode: 'Editor',
+      theme: 'Dark',
+      activeDocumentLabel: 'docs/draft.md',
+      wordCount: 42,
+    });
   });
 });
 
