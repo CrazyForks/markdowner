@@ -2558,10 +2558,13 @@ export default function App() {
       return;
     }
 
+    const token = editorOpRequestIdRef.current;
     try {
       const source = await activeDocumentDiskSource();
+      if (isEditorOpStale(token)) return;
       setExternalCompareSource(source);
     } catch (error) {
+      if (isEditorOpStale(token)) return;
       const reason = error instanceof Error ? error.message : String(error);
       setExternalChangeMessage(formatDiskReadError(snapshot.activeDocumentName, reason));
       setShowExternalChangeActions(false);

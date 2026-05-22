@@ -2850,6 +2850,72 @@ describe('App recent documents', () => {
     expect(screen.queryByText('Disk')).not.toBeInTheDocument();
   });
 
+  it('does not show a stale disk comparison after switching tabs during Compare', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    let resolveDiskSource: ((source: string) => void) | undefined;
+
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    activeDocumentDiskSourceMock.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveDiskSource = resolve;
+        }),
+    );
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      const isAlpha = path === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: isAlpha ? '# Alpha local' : '# Beta local',
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha local');
+    });
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^save$/i }));
+
+    const compareButton = await screen.findByRole('button', { name: /compare/i });
+    fireEvent.click(compareButton);
+
+    await waitFor(() => {
+      expect(activeDocumentDiskSourceMock).toHaveBeenCalled();
+      expect(resolveDiskSource).toBeTypeOf('function');
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta local');
+      expect(screen.queryByText(/External change detected/i)).not.toBeInTheDocument();
+    });
+
+    await act(async () => {
+      resolveDiskSource?.('# Alpha from disk');
+    });
+
+    expect(sourceEditor).toHaveValue('# Beta local');
+    expect(screen.queryByText('Disk vs local')).not.toBeInTheDocument();
+    expect(screen.queryByText('# Alpha from disk')).not.toBeInTheDocument();
+  });
+
   it('syncs the unsaved draft before creating a new document', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
