@@ -51,14 +51,11 @@ import { TableToolbar } from '@/components/wysiwyg/TableToolbar';
 import { cn } from '@/lib/utils';
 import { ActivityBar } from '@/shell/ActivityBar';
 import { AppMenu } from '@/shell/AppMenu';
-import { CommandPalette } from '@/shell/CommandPalette';
-import { DocumentStatsDialog } from '@/shell/DocumentStatsDialog';
+import { AppOverlays } from '@/shell/AppOverlays';
 import { EditorArea } from '@/shell/EditorArea';
 import { FindReplaceBar } from '@/shell/FindReplaceBar';
-import { ShortcutsDialog } from '@/shell/ShortcutsDialog';
 import { Tabs } from '@/shell/Tabs';
 import { TitleBar } from '@/shell/TitleBar';
-import { QuickOpen } from '@/shell/QuickOpen';
 import {
   SideBar,
   type SearchResultFile,
@@ -3834,25 +3831,22 @@ export default function App() {
       </div>
       </div>
       </div>
-      <QuickOpen
-        open={isQuickOpenOpen}
-        onOpenChange={setIsQuickOpenOpen}
-        items={quickOpenItems}
-        onSelect={handleQuickOpenSelect}
-      />
-      <CommandPalette
-        open={isCommandPaletteOpen}
-        onOpenChange={setIsCommandPaletteOpen}
-        commands={paletteCommands}
-      />
-      <DocumentStatsDialog
-        open={isDocumentStatsOpen}
-        onOpenChange={setIsDocumentStatsOpen}
+      <AppOverlays
+        quickOpenOpen={isQuickOpenOpen}
+        onQuickOpenOpenChange={setIsQuickOpenOpen}
+        quickOpenItems={quickOpenItems}
+        onQuickOpenSelect={handleQuickOpenSelect}
+        commandPaletteOpen={isCommandPaletteOpen}
+        onCommandPaletteOpenChange={setIsCommandPaletteOpen}
+        commandPaletteCommands={paletteCommands}
+        documentStatsOpen={isDocumentStatsOpen}
+        onDocumentStatsOpenChange={setIsDocumentStatsOpen}
         documentName={snapshot.activeDocumentName}
         documentPath={snapshot.activeDocumentPath}
         stats={documentStats}
+        shortcutsOpen={isShortcutsOpen}
+        onShortcutsOpenChange={setIsShortcutsOpen}
       />
-      <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen} />
 
       <StatusBar {...statusBarModel} />
     </div>
