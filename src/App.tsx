@@ -378,6 +378,7 @@ export default function App() {
   const splitSourceScrollRef = useRef<HTMLDivElement | null>(null);
   const splitPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const modeRequestIdRef = useRef(0);
+  const themeRequestIdRef = useRef(0);
   const busyDepthRef = useRef(0);
   const liveRegionTimerRef = useRef<number | null>(null);
   const lastAnnouncedModeRef = useRef<EditorMode | null>(null);
@@ -1940,14 +1941,30 @@ export default function App() {
     sourceEditorViewToken,
   ]);
 
-  const handleSettingsChange = (next: Settings) => {
+  const nextThemeRequest = () => ++themeRequestIdRef.current;
+  const isThemeRequestStale = (requestId: number) =>
+    themeRequestIdRef.current !== requestId;
+
+  const handleSettingsChange = (
+    next: Settings,
+    options: { syncSystemTheme?: boolean } = {},
+  ) => {
     const changedKeys = getChangedSettingsKeys(settings, next);
     setSettings(next);
     const saveSettingsPromise = saveSettings(next);
     void saveSettingsPromise;
-    if (changedKeys.includes('themeFollowSystem') && next.themeFollowSystem) {
+    if (
+      options.syncSystemTheme !== false &&
+      changedKeys.includes('themeFollowSystem') &&
+      next.themeFollowSystem
+    ) {
+      const requestId = nextThemeRequest();
       void setTheme(resolveOsTheme())
-        .then((synced) => applySnapshot(synced, true))
+        .then((synced) => {
+          if (!isThemeRequestStale(requestId)) {
+            applySnapshot(synced, true);
+          }
+        })
         .catch(() => undefined);
     }
     if (next.diagnosticsEnabled) {
@@ -2715,21 +2732,28 @@ export default function App() {
   });
 
   const handleSetTheme = async (themeKind: ThemeKind) => {
+    const requestId = nextThemeRequest();
     await withBusy(async () => {
       if (settings.themeFollowSystem) {
         handleSettingsChange({ ...settings, themeFollowSystem: false });
       }
       const next = await setTheme(themeKind);
+      if (isThemeRequestStale(requestId)) return;
       applySnapshot(next, true);
     });
   };
 
   const handleFollowSystemTheme = async () => {
+    const requestId = nextThemeRequest();
     await withBusy(async () => {
       if (!settings.themeFollowSystem) {
-        handleSettingsChange({ ...settings, themeFollowSystem: true });
+        handleSettingsChange(
+          { ...settings, themeFollowSystem: true },
+          { syncSystemTheme: false },
+        );
       }
       const next = await setTheme(resolveOsTheme());
+      if (isThemeRequestStale(requestId)) return;
       applySnapshot(next, true);
     });
   };

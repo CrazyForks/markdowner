@@ -1722,6 +1722,98 @@ describe('App recent documents', () => {
     });
   });
 
+  it('keeps the latest theme when an earlier theme persistence resolves later', async () => {
+    const pendingThemeResolutions = new Map<
+      AppSnapshot['theme']['kind'],
+      (snapshot: AppSnapshot) => void
+    >();
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          themeFollowSystem: false,
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        theme: { kind: 'BuiltInLight', stylesheet: null, stylesheetPath: null },
+      }),
+    );
+    setThemeMock.mockImplementation(
+      (kind: AppSnapshot['theme']['kind']) =>
+        new Promise<AppSnapshot>((resolve) => {
+          pendingThemeResolutions.set(kind, resolve);
+        }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe('BuiltInLight');
+    });
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+    const dialog = await screen.findByTestId('settings-panel');
+    const themeToggleGroup = within(dialog).getByTestId('settings-theme-toggle');
+    const systemThemeToggle = within(themeToggleGroup).getByRole('radio', {
+      name: /system/i,
+    });
+    const lightThemeToggle = within(themeToggleGroup).getByRole('radio', {
+      name: /light/i,
+    });
+
+    await waitFor(() => {
+      expect(systemThemeToggle).toHaveAttribute('data-state', 'off');
+    });
+    fireEvent.click(systemThemeToggle);
+    await waitFor(() => {
+      expect(systemThemeToggle).toHaveAttribute('data-state', 'on');
+      expect(setThemeMock).toHaveBeenCalledWith('BuiltInDark');
+    });
+
+    fireEvent.click(lightThemeToggle);
+    await waitFor(() => {
+      expect(setThemeMock).toHaveBeenCalledWith('BuiltInLight');
+    });
+
+    await act(async () => {
+      pendingThemeResolutions.get('BuiltInLight')?.(
+        baseSnapshot({
+          activeDocumentName: 'meeting-notes.md',
+          activeDocumentPath: '/tmp/project/meeting-notes.md',
+          activeDocumentSource: '# Meeting notes',
+          theme: { kind: 'BuiltInLight', stylesheet: null, stylesheetPath: null },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe('BuiltInLight');
+    });
+
+    await act(async () => {
+      pendingThemeResolutions.get('BuiltInDark')?.(
+        baseSnapshot({
+          activeDocumentName: 'meeting-notes.md',
+          activeDocumentPath: '/tmp/project/meeting-notes.md',
+          activeDocumentSource: '# Meeting notes',
+          theme: { kind: 'BuiltInDark', stylesheet: null, stylesheetPath: null },
+        }),
+      );
+    });
+
+    expect(document.documentElement.dataset.theme).toBe('BuiltInLight');
+  });
+
   it('persists the code block theme sync toggle from Settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
