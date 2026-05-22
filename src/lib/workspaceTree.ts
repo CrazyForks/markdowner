@@ -15,6 +15,13 @@ export type WorkspaceTreeFolderNode = {
 
 export type WorkspaceTreeNode = WorkspaceTreeFileNode | WorkspaceTreeFolderNode;
 
+export type WorkspaceTreeViewState = {
+  tree: WorkspaceTreeNode[];
+  filteredTree: WorkspaceTreeNode[];
+  filtering: boolean;
+  signature: string;
+};
+
 export function displayFileName(path: string): string {
   const normalizedPath = normalizeDisplayPath(path);
   const segments = normalizedPath.split('/').filter(Boolean);
@@ -118,6 +125,33 @@ export function filterWorkspaceTree(
   }
 
   return filteredNodes;
+}
+
+export function buildWorkspaceTreeSignature(
+  paths: readonly string[],
+  rootDir: string | null,
+): string {
+  return `${rootDir ?? ''}\u0000${paths.join('\u0000')}`;
+}
+
+export function resolveWorkspaceTreeViewState({
+  paths,
+  rootDir,
+  filter,
+}: {
+  paths: readonly string[];
+  rootDir: string | null;
+  filter: string;
+}): WorkspaceTreeViewState {
+  const tree = buildWorkspaceTree(paths, rootDir);
+  const filtering = filter.trim().length > 0;
+
+  return {
+    tree,
+    filteredTree: filterWorkspaceTree(tree, filter),
+    filtering,
+    signature: buildWorkspaceTreeSignature(paths, rootDir),
+  };
 }
 
 export function collectWorkspaceFolderKeys(nodes: readonly WorkspaceTreeNode[]): string[] {

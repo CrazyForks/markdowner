@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildWorkspaceTreeSignature,
   buildWorkspaceTree,
   collectWorkspaceFolderKeys,
   displayFileName,
   displayWorkspacePath,
   filterWorkspaceTree,
   pruneCollapsedWorkspaceFolderKeys,
+  resolveWorkspaceTreeViewState,
   toggleWorkspaceFolderKey,
 } from './workspaceTree';
 
@@ -97,6 +99,60 @@ describe('filterWorkspaceTree', () => {
     );
 
     expect(filterWorkspaceTree(tree, 'api')).toEqual([
+      {
+        kind: 'folder',
+        key: 'guides',
+        name: 'guides',
+        children: [
+          {
+            kind: 'folder',
+            key: 'guides/reference',
+            name: 'reference',
+            children: [
+              {
+                kind: 'file',
+                key: '/tmp/project/guides/reference/api.md',
+                path: '/tmp/project/guides/reference/api.md',
+                name: 'api.md',
+                relativePath: 'guides/reference/api.md',
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+});
+
+describe('buildWorkspaceTreeSignature', () => {
+  it('captures root and ordered workspace documents for stable memo dependencies', () => {
+    expect(
+      buildWorkspaceTreeSignature(
+        ['/tmp/project/README.md', '/tmp/project/guides/draft.md'],
+        '/tmp/project',
+      ),
+    ).toBe('/tmp/project\u0000/tmp/project/README.md\u0000/tmp/project/guides/draft.md');
+  });
+});
+
+describe('resolveWorkspaceTreeViewState', () => {
+  it('builds the full and filtered tree with filter state and signature', () => {
+    const state = resolveWorkspaceTreeViewState({
+      paths: [
+        '/tmp/project/README.md',
+        '/tmp/project/guides/draft.md',
+        '/tmp/project/guides/reference/api.md',
+      ],
+      rootDir: '/tmp/project',
+      filter: 'api',
+    });
+
+    expect(state.signature).toBe(
+      '/tmp/project\u0000/tmp/project/README.md\u0000/tmp/project/guides/draft.md\u0000/tmp/project/guides/reference/api.md',
+    );
+    expect(state.filtering).toBe(true);
+    expect(state.tree).toHaveLength(2);
+    expect(state.filteredTree).toEqual([
       {
         kind: 'folder',
         key: 'guides',

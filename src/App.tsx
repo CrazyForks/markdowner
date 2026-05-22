@@ -242,12 +242,11 @@ import {
   shouldSuppressSyntheticImeEnter,
 } from './lib/wysiwygKeyboard';
 import {
-  buildWorkspaceTree,
   collectWorkspaceFolderKeys,
   displayFileName,
   displayWorkspacePath,
-  filterWorkspaceTree,
   pruneCollapsedWorkspaceFolderKeys,
+  resolveWorkspaceTreeViewState,
   toggleWorkspaceFolderKey,
 } from './lib/workspaceTree';
 import { buildQuickOpenItems } from './lib/quickOpenItems';
@@ -1647,10 +1646,21 @@ export default function App() {
   }, [activeTab?.id, activeTab?.name]);
 
   const errorMessage = snapshot.lastError;
-  const workspaceTree = buildWorkspaceTree(snapshot.workspaceDocuments, snapshot.rootDir);
-  const filteredWorkspaceTree = filterWorkspaceTree(workspaceTree, workspaceFilter);
-  const filteringWorkspace = workspaceFilter.trim().length > 0;
-  const workspaceTreeSignature = `${snapshot.rootDir ?? ''}\u0000${snapshot.workspaceDocuments.join('\u0000')}`;
+  const workspaceTreeView = useMemo(
+    () =>
+      resolveWorkspaceTreeViewState({
+        paths: snapshot.workspaceDocuments,
+        rootDir: snapshot.rootDir,
+        filter: workspaceFilter,
+      }),
+    [snapshot.rootDir, snapshot.workspaceDocuments, workspaceFilter],
+  );
+  const {
+    tree: workspaceTree,
+    filteredTree: filteredWorkspaceTree,
+    filtering: filteringWorkspace,
+    signature: workspaceTreeSignature,
+  } = workspaceTreeView;
   const outlinePanelSizing = resolveOutlinePanelSizing(settings);
 
   const applyExternalChangeState = (next: ExternalChangeViewState) => {
