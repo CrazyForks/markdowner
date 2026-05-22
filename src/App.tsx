@@ -2593,9 +2593,12 @@ export default function App() {
       return;
     }
 
+    const token = nextEditorOpRequest();
     await withBusy(async () => {
       await syncActiveDraft(undefined, { forFinalSave: true });
+      if (isEditorOpStale(token)) return;
       const next = await saveActiveDocumentAs(selected);
+      if (isEditorOpStale(token)) return;
       applySnapshot(next, true);
       refreshActiveTabFromSnapshot(next);
     });
