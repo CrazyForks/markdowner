@@ -6,6 +6,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { syncVersion } from './sync-version.mjs';
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, '..');
 const defaultCargoTargetDir = path.join(projectRoot, 'target', 'tauri-build-and-install');
@@ -410,6 +412,8 @@ function printDistributionArtifacts(options, env) {
 }
 
 const argv = process.argv.slice(2).filter((arg) => arg !== '--');
+
+syncVersion();
 
 if (argv.length === 0) {
   buildFrontend();
