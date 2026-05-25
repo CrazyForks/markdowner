@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['VERSION']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read VERSION
+        id: v
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing release
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "v${{ steps.v.outputs.version }}" \
+              --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "exists=true"  >> "$GITHUB_OUTPUT"
+            echo "Release v${{ steps.v.outputs.version }} already exists — skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.existing.outputs.exists != 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install
+        if: steps.existing.outputs.exists != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync version into package.json / tauri.conf.json / Cargo.toml
+        if: steps.existing.outputs.exists != 'true'
+        run: pnpm sync-version
+
+      - name: Build universal DMG
+        if: steps.existing.outputs.exists != 'true'
+        run: pnpm build universal dmg
+
+      - name: Create GitHub Release
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.v.outputs.version }}"
+          DMG=$(find target -path '*/bundle/dmg/*.dmg' -type f | head -1)
+          [ -n "$DMG" ] || { echo "No DMG found under target/"; exit 1; }
+          echo "Found DMG: $DMG"
+          gh release create "v$VERSION" \
+            --repo "${{ github.repository }}" \
+            --title "v$VERSION" \
+            --notes "Release v$VERSION" \
+            "$DMG"
