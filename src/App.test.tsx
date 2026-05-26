@@ -4142,6 +4142,91 @@ describe('App recent documents', () => {
     expect(editor.commands.setContent).not.toHaveBeenCalled();
   });
 
+  it('preserves WYSIWYG content when paste arrives while activeDocumentSource is still null', async () => {
+    // Regression test for the "paste loses content" bug. When the user pastes
+    // into a freshly opened WYSIWYG editor whose backing snapshot has not yet
+    // mirrored the draft into activeDocumentSource (the typical state during
+    // the 180ms debounce after onUpdate), the localDraft -> editor sync effect
+    // must not call setContent with stale content.
+    const editor = createMockTiptapEditor('Existing', [{ text: 'Existing', from: 1 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'doc.md',
+        activeDocumentPath: '/tmp/project/doc.md',
+        activeDocumentSource: 'Existing',
+        mode: 'Wysiwyg',
+      }),
+    );
+    replaceActiveDocumentSourceMock.mockImplementation(async (source: string) =>
+      baseSnapshot({
+        activeDocumentName: 'doc.md',
+        activeDocumentPath: '/tmp/project/doc.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+    await waitFor(() => {
+      expect(editor.commands.setContent).toHaveBeenCalledWith('Existing', {
+        contentType: 'markdown',
+        emitUpdate: false,
+      });
+    });
+
+    editor.commands.setContent.mockClear();
+
+    // Simulate paste: ProseMirror inserts "PASTED" and fires onUpdate. The
+    // mocked editor reports the new markdown via getMarkdown().
+    editor.getMarkdown.mockReturnValue('Existing\n\nPASTED');
+
+    act(() => {
+      tiptapMockState.lastOptions.onUpdate({ editor });
+    });
+
+    // Wait past the 120ms WYSIWYG flush debounce + 180ms draft mirror sync.
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
+    });
+
+    // setContent must NOT have been called with the stale pre-paste content.
+    const staleCalls = editor.commands.setContent.mock.calls.filter(
+      ([content]: [string]) => content === 'Existing',
+    );
+    expect(staleCalls).toEqual([]);
+  });
+
+  it('wires a handlePaste editorProp on the WYSIWYG editor to force plain-text pasting', async () => {
+    // Smoke test that the bug-fix wiring stays in place. Behavior is unit
+    // tested in src/lib/wysiwygPaste.test.ts; this just confirms the prop is
+    // attached so it can't silently fall off the editor configuration.
+    const editor = createMockTiptapEditor('Existing', [{ text: 'Existing', from: 1 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'doc.md',
+        activeDocumentPath: '/tmp/project/doc.md',
+        activeDocumentSource: 'Existing',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+
+    expect(typeof tiptapMockState.lastOptions.editorProps.handlePaste).toBe(
+      'function',
+    );
+  });
+
   it('swallows the WebKit Korean IME duplicate-syllable handleTextInput call', async () => {
     // Regression test for the bug where typing `# 안녕하세요` rendered as
     // `# 안안녕하세요`. WebKit's Korean IME fires an extra `handleTextInput`

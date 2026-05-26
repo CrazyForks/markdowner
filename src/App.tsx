@@ -251,6 +251,7 @@ import {
   shouldSuppressSyntheticImeEnter,
 } from './lib/wysiwygKeyboard';
 import { resolveWysiwygContentSyncAction } from './lib/wysiwygEditorSync';
+import { handleWysiwygPlainTextPaste } from './lib/wysiwygPaste';
 import {
   collectWorkspaceFolderKeys,
   displayFileName,
@@ -1418,6 +1419,8 @@ export default function App() {
         }
         return false;
       },
+      handlePaste: (view: any, event: ClipboardEvent) =>
+        handleWysiwygPlainTextPaste(view, event),
       handleDOMEvents: {
         beforeinput: (_view: any, event: Event) => {
           const inputEvent = event as InputEvent;
