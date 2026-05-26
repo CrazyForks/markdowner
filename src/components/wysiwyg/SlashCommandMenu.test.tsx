@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { publishEditorEvent } from '@/lib/editorEvents';
 import { SlashCommandMenu } from './SlashCommandMenu';
 
 function createSlashEditor(
@@ -250,6 +251,28 @@ describe('SlashCommandMenu', () => {
       expect(screen.queryByTestId('slash-command-image-form')).not.toBeInTheDocument();
     });
     expect(setImage).not.toHaveBeenCalled();
+  });
+
+  it('opens at the caret when the slash:open-at-cursor event fires (Mod+/ shortcut)', async () => {
+    // Mod+/ is the discoverable, position-agnostic equivalent of typing `/`
+    // at block start. The shortcut publishes the event; the menu must open
+    // even though no slash character is present in the document.
+    const editor = createSlashEditor();
+
+    render(<SlashCommandMenu editor={editor} />);
+
+    // Drain initial useEffect setup so the subscription is registered.
+    await act(async () => {});
+
+    expect(screen.queryByRole('menu', { name: /insert block/i })).toBeNull();
+
+    act(() => {
+      publishEditorEvent('slash:open-at-cursor', {});
+    });
+
+    expect(
+      await screen.findByRole('menu', { name: /insert block/i }),
+    ).toBeInTheDocument();
   });
 
   it('repositions the menu when the editor pane scrolls beneath the slash caret', async () => {

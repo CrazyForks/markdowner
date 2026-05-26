@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { publishEditorEvent } from '@/lib/editorEvents';
+import { publishEditorEvent, subscribeEditorEvent } from '@/lib/editorEvents';
 
 type SlashItemKind = 'block' | 'prompt-image';
 
@@ -394,12 +394,40 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
     // — only the capture phase sees it).
     window.addEventListener('scroll', reposition, true);
 
+    // External "open the slash menu at the current caret" trigger (Mod+/, the
+    // command palette, etc.). Behaves as if the user had typed a slash at the
+    // block start — but without a slash character to delete on selection.
+    // Setting from === to === current caret means `runItem`'s `deleteRange`
+    // becomes a no-op, so the block insertion happens cleanly at the caret.
+    const unsubscribeOpenAtCursor = subscribeEditorEvent('slash:open-at-cursor', () => {
+      const { state } = editor;
+      const { from, empty } = state.selection;
+      if (!empty) return;
+      let coords: { top: number; bottom: number; left: number; right: number };
+      try {
+        coords = editor.view.coordsAtPos(from);
+      } catch {
+        return;
+      }
+      setMenu({
+        open: true,
+        stage: 'list',
+        query: '',
+        from,
+        to: from,
+        cursorTop: coords.top,
+        cursorBottom: coords.bottom,
+        left: coords.left,
+      });
+    });
+
     return () => {
       editor.off('selectionUpdate', update);
       editor.off('update', update);
       editor.off('blur', handleBlur);
       window.removeEventListener('resize', reposition);
       window.removeEventListener('scroll', reposition, true);
+      unsubscribeOpenAtCursor();
     };
   }, [editor, enabled]);
 

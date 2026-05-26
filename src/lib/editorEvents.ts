@@ -7,16 +7,22 @@
  * publish/subscribe site so downstream listeners stay in sync.
  */
 
-export type EditorOverlayEvent = 'link:edit-request';
+export type EditorOverlayEvent = 'link:edit-request' | 'slash:open-at-cursor';
 
 interface LinkEditRequest {
   /** When true, request the URL input to take focus immediately. */
   focusInput?: boolean;
 }
 
+// Empty payload reserved for future options. Kept as an object so adding a
+// field later doesn't change the public event shape.
+type SlashOpenAtCursorRequest = Record<string, never>;
+
 type PayloadFor<E extends EditorOverlayEvent> = E extends 'link:edit-request'
   ? LinkEditRequest
-  : never;
+  : E extends 'slash:open-at-cursor'
+    ? SlashOpenAtCursorRequest
+    : never;
 
 type Listener<E extends EditorOverlayEvent> = (payload: PayloadFor<E>) => void;
 

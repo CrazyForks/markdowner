@@ -1397,6 +1397,21 @@ export default function App() {
         if (focusCodeBlockLanguageSelectorOnArrowUp(view, event)) {
           return true;
         }
+        // Cmd+/ (Ctrl+/) — open the slash command menu at the current caret,
+        // regardless of where the caret sits inside the block. The "type / at
+        // block start" behaviour stays as-is; this shortcut is the
+        // discoverable, position-agnostic equivalent users reach for after
+        // they've typed something on the line.
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          !event.altKey &&
+          !event.shiftKey &&
+          event.key === '/'
+        ) {
+          event.preventDefault();
+          publishEditorEvent('slash:open-at-cursor', {});
+          return true;
+        }
         // Cmd+K (Ctrl+K on Win/Linux) — open the inline link editor at the
         // current selection. Mirrors the convention used by Notion / Google
         // Docs / Slack. We use the editor instance via the closure-stable ref
@@ -1474,7 +1489,7 @@ export default function App() {
         return false;
       },
       handlePaste: (view: any, event: ClipboardEvent) =>
-        handleWysiwygPlainTextPaste(view, event),
+        handleWysiwygPlainTextPaste(view, event, editorInstanceRef.current),
       handleDOMEvents: {
         beforeinput: (_view: any, event: Event) => {
           const inputEvent = event as InputEvent;

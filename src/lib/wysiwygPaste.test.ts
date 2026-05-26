@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Schema } from '@tiptap/pm/model';
 
-import { buildPlainTextPasteSlice, handleWysiwygPlainTextPaste } from './wysiwygPaste';
+import {
+  buildPlainTextPasteSlice,
+  handleWysiwygPlainTextPaste,
+  pastedTextLooksLikeMarkdown,
+} from './wysiwygPaste';
 
 const schema = new Schema({
   nodes: {
@@ -218,5 +222,105 @@ describe('handleWysiwygPlainTextPaste', () => {
     expect(sliceArg.content.child(1).textContent).toBe(
       'in SidebarInset (at /src/components/ui/sidebar.tsx)',
     );
+  });
+
+  it('routes through the markdown manager when the text contains structural markdown', () => {
+    // A heading + paragraph is unambiguous markdown source. The handler must
+    // hand it off to @tiptap/markdown so the user gets formatted blocks
+    // instead of literal `# Title` characters in their document.
+    const { view, dispatch } = makeView();
+    const insertContent = vi.fn().mockReturnValue(true);
+    const parse = vi.fn().mockReturnValue({ type: 'doc', content: [] });
+    const editor = {
+      storage: { markdown: { manager: { parse, hasMarked: () => true } } },
+      commands: { insertContent },
+    } as any;
+    const handled = handleWysiwygPlainTextPaste(
+      view as any,
+      makeEvent({ 'text/plain': '# Title\n\nSome body text.' }),
+      editor,
+    );
+    expect(handled).toBe(true);
+    expect(parse).toHaveBeenCalledWith('# Title\n\nSome body text.');
+    expect(insertContent).toHaveBeenCalledTimes(1);
+    // Plain-text path must NOT run when markdown handled it.
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to plain text when the markdown manager throws', () => {
+    const { view, dispatch } = makeView();
+    const parse = vi.fn().mockImplementation(() => {
+      throw new Error('lex failed');
+    });
+    const editor = {
+      storage: { markdown: { manager: { parse, hasMarked: () => true } } },
+      commands: { insertContent: vi.fn() },
+    } as any;
+    const handled = handleWysiwygPlainTextPaste(
+      view as any,
+      makeEvent({ 'text/plain': '# Title' }),
+      editor,
+    );
+    expect(handled).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT treat ambiguous text as markdown', () => {
+    // "5 * 3 = 15" contains an asterisk but no structural shape; we must
+    // paste it verbatim instead of converting to italic.
+    const { view, dispatch } = makeView();
+    const insertContent = vi.fn();
+    const editor = {
+      storage: { markdown: { manager: { parse: vi.fn(), hasMarked: () => true } } },
+      commands: { insertContent },
+    } as any;
+    const handled = handleWysiwygPlainTextPaste(
+      view as any,
+      makeEvent({ 'text/plain': '5 * 3 = 15' }),
+      editor,
+    );
+    expect(handled).toBe(true);
+    expect(insertContent).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('pastedTextLooksLikeMarkdown', () => {
+  it('returns true for ATX headings', () => {
+    expect(pastedTextLooksLikeMarkdown('# Hello')).toBe(true);
+    expect(pastedTextLooksLikeMarkdown('### Subsection title')).toBe(true);
+  });
+
+  it('returns true for fenced code blocks', () => {
+    expect(pastedTextLooksLikeMarkdown('```js\nconsole.log()\n```')).toBe(true);
+  });
+
+  it('returns true for bullet and numbered lists', () => {
+    expect(pastedTextLooksLikeMarkdown('- one\n- two')).toBe(true);
+    expect(pastedTextLooksLikeMarkdown('1. first\n2. second')).toBe(true);
+  });
+
+  it('returns true for blockquotes', () => {
+    expect(pastedTextLooksLikeMarkdown('> a quote')).toBe(true);
+  });
+
+  it('returns true for task lists', () => {
+    expect(pastedTextLooksLikeMarkdown('- [ ] todo\n- [x] done')).toBe(true);
+  });
+
+  it('returns true for tables', () => {
+    expect(pastedTextLooksLikeMarkdown('| col | col |\n| --- | --- |\n| 1 | 2 |')).toBe(true);
+  });
+
+  it('returns false for plain prose', () => {
+    expect(pastedTextLooksLikeMarkdown('Just some prose with no special shape.')).toBe(false);
+  });
+
+  it('returns false for ambiguous inline patterns alone', () => {
+    // Inline-only patterns must not trigger the heuristic — false positives
+    // here are far more jarring than false negatives.
+    expect(pastedTextLooksLikeMarkdown('**not a heading**')).toBe(false);
+    expect(pastedTextLooksLikeMarkdown('[link](https://x.com)')).toBe(false);
+    expect(pastedTextLooksLikeMarkdown('5 * 3 = 15')).toBe(false);
   });
 });
