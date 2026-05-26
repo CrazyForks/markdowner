@@ -40,10 +40,27 @@ export function SelectionToolbar({ editor, enabled = true }: Props) {
     if (empty || from === to) return null;
     if (!view.hasFocus() && !window.getSelection()?.toString()) return null;
 
+    // Inline marks (bold/italic/strike/inline-code/link) cannot apply inside a
+    // code block — ProseMirror's schema forbids it. Showing the toolbar there
+    // would offer buttons that silently do nothing on click, which reads as
+    // "the editor is broken". Suppress instead.
+    if (typeof editor.isActive === 'function' && editor.isActive('codeBlock')) {
+      return null;
+    }
+
     // Use ProseMirror coordinates: anchor/head can be in any direction, so we
     // use the start and end of the selection to compute a bounding box.
-    const startCoords = view.coordsAtPos(from);
-    const endCoords = view.coordsAtPos(to, 1);
+    let startCoords: { top: number; bottom: number; left: number };
+    let endCoords: { top: number; bottom: number; right: number };
+    try {
+      startCoords = view.coordsAtPos(from);
+      endCoords = view.coordsAtPos(to, 1);
+    } catch {
+      // coordsAtPos can throw briefly while ProseMirror re-measures geometry
+      // (e.g. mid-transaction). Hiding the toolbar on that frame is the only
+      // safe option — the next selectionUpdate / transaction event will retry.
+      return null;
+    }
 
     const top = Math.min(startCoords.top, endCoords.top);
     const left = (startCoords.left + endCoords.right) / 2;

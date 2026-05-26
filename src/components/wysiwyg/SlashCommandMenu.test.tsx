@@ -182,4 +182,101 @@ describe('SlashCommandMenu', () => {
 
     offsetHeightSpy.mockRestore();
   });
+
+  it('opens an inline image URL input when the Image item is activated', async () => {
+    // window.prompt is unreliable inside Tauri's WKWebView — the slash menu
+    // must collect the URL itself instead of calling prompt(). The form keeps
+    // focus inside the editor surface and inserts the image only on submit.
+    const setImage = vi.fn().mockReturnValue({ run: vi.fn().mockReturnValue(true) });
+    const deleteRangeChain = {
+      setImage,
+      run: vi.fn().mockReturnValue(true),
+    };
+    const chain = {
+      focus: vi.fn().mockReturnThis(),
+      deleteRange: vi.fn().mockReturnValue(deleteRangeChain),
+      run: vi.fn().mockReturnValue(true),
+    };
+    const editor = createSlashEditor();
+    editor.chain = vi.fn().mockReturnValue(chain);
+    editor.commands = { focus: vi.fn() };
+
+    render(<SlashCommandMenu editor={editor} />);
+
+    act(() => {
+      editor.emit('update');
+    });
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: /image/i }));
+
+    const form = await screen.findByTestId('slash-command-image-form');
+    const input = form.querySelector('input') as HTMLInputElement;
+    expect(input).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: 'https://example.com/cat.png' } });
+    fireEvent.submit(form);
+
+    expect(chain.deleteRange).toHaveBeenCalledTimes(1);
+    expect(setImage).toHaveBeenCalledWith({ src: 'https://example.com/cat.png' });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('slash-command-image-form')).not.toBeInTheDocument();
+    });
+  });
+
+  it('cancels the image URL prompt without inserting an image when the input is empty', async () => {
+    const setImage = vi.fn();
+    const chain = {
+      focus: vi.fn().mockReturnThis(),
+      deleteRange: vi.fn().mockReturnValue({ setImage, run: vi.fn().mockReturnValue(true) }),
+      run: vi.fn().mockReturnValue(true),
+    };
+    const editor = createSlashEditor();
+    editor.chain = vi.fn().mockReturnValue(chain);
+    editor.commands = { focus: vi.fn() };
+
+    render(<SlashCommandMenu editor={editor} />);
+
+    act(() => {
+      editor.emit('update');
+    });
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: /image/i }));
+
+    const form = await screen.findByTestId('slash-command-image-form');
+    fireEvent.click(form.querySelector('button[type="button"]') as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('slash-command-image-form')).not.toBeInTheDocument();
+    });
+    expect(setImage).not.toHaveBeenCalled();
+  });
+
+  it('repositions the menu when the editor pane scrolls beneath the slash caret', async () => {
+    // The WYSIWYG pane uses overflow:auto, so its scroll never bubbles to
+    // window. We listen with capture=true to catch it — otherwise the menu
+    // floats away from the slash character on scroll.
+    let coords = { top: 100, bottom: 118, left: 18, right: 18 };
+    const editor = createSlashEditor(coords);
+    editor.view.coordsAtPos = () => coords;
+
+    render(<SlashCommandMenu editor={editor} />);
+
+    act(() => {
+      editor.emit('update');
+    });
+
+    const menu = await screen.findByRole('menu', { name: /insert block/i });
+    const beforeTop = menu.style.top;
+
+    // Simulate inner pane scrolling: the slash character moves up by 40px.
+    coords = { top: 60, bottom: 78, left: 18, right: 18 };
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+
+    await waitFor(() => {
+      expect(menu.style.top).not.toBe(beforeTop);
+    });
+  });
 });

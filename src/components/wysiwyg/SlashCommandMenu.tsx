@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
 import {
@@ -23,13 +23,16 @@ import {
 import { cn } from '@/lib/utils';
 import { publishEditorEvent } from '@/lib/editorEvents';
 
+type SlashItemKind = 'block' | 'prompt-image';
+
 type SlashItem = {
   id: string;
   title: string;
   description: string;
   keywords: string[];
   icon: typeof Type;
-  run: (editor: Editor) => void;
+  kind?: SlashItemKind;
+  run?: (editor: Editor) => void;
 };
 
 const SLASH_ITEMS: SlashItem[] = [
@@ -136,13 +139,11 @@ const SLASH_ITEMS: SlashItem[] = [
     description: 'Embed an image by URL.',
     keywords: ['image', 'img', 'picture', 'photo'],
     icon: ImageIcon,
-    run: (editor) => {
-      const url = window.prompt('Image URL', 'https://');
-      if (!url) return;
-      const trimmed = url.trim();
-      if (!trimmed) return;
-      editor.chain().focus().setImage({ src: trimmed }).run();
-    },
+    // The runner sub-mode lives inside the menu — window.prompt is unreliable
+    // in WKWebView (Tauri) and feels jarring inside a desktop app. The image
+    // URL input is rendered as a secondary panel within this same portal so
+    // focus / keyboard handling stays consistent with the rest of the menu.
+    kind: 'prompt-image',
   },
   {
     id: 'link',
@@ -174,10 +175,13 @@ const SLASH_ITEMS: SlashItem[] = [
   },
 ];
 
+type MenuStage = 'list' | 'image-url';
+
 type MenuState =
   | { open: false }
   | {
       open: true;
+      stage: MenuStage;
       query: string;
       /** Document position of the slash character. */
       from: number;
@@ -212,8 +216,10 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
   const [menu, setMenu] = useState<MenuState>({ open: false });
   const [activeIndex, setActiveIndex] = useState(0);
   const [placement, setPlacement] = useState<Placement>('below');
+  const [imageUrl, setImageUrl] = useState('');
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef<Array<HTMLLIElement | null>>([]);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   const filteredItems = useMemo(() => {
     if (!menu.open) return SLASH_ITEMS;
@@ -240,11 +246,18 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
   // Without this the selection highlight slides off-screen because the menu
   // body has a capped max-height and overflows.
   useEffect(() => {
-    if (!menu.open) return;
+    if (!menu.open || menu.stage !== 'list') return;
     const safeIndex = Math.min(activeIndex, filteredItems.length - 1);
     const node = itemRefs.current[safeIndex];
     node?.scrollIntoView({ block: 'nearest' });
-  }, [activeIndex, filteredItems, menu.open]);
+  }, [activeIndex, filteredItems, menu]);
+
+  // Focus the image URL input as soon as the image stage mounts.
+  useLayoutEffect(() => {
+    if (!menu.open || menu.stage !== 'image-url') return;
+    imageInputRef.current?.focus();
+    imageInputRef.current?.select();
+  }, [menu]);
 
   // Flip the menu above the caret when there isn't enough room below — keeps
   // the dropdown from being clipped near the bottom of the viewport. Item
@@ -273,7 +286,10 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
     setPlacement((prev) => (prev === next ? prev : next));
   }, [menu, filteredItems]);
 
-  // Watch editor transactions and recompute menu state.
+  // Watch editor transactions and recompute menu state. Selection / update
+  // events refresh the query and caret coords; scroll / resize re-anchor the
+  // popup to the slash character so it tracks the editor surface instead of
+  // floating away when the user scrolls past it.
   useEffect(() => {
     if (!editor || !enabled) {
       setMenu({ open: false });
@@ -289,19 +305,19 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
       const { state } = editor;
       const { from, to, empty } = state.selection;
       if (!empty || from !== to) {
-        setMenu({ open: false });
+        setMenu((prev) => (prev.open && prev.stage === 'image-url' ? prev : { open: false }));
         return;
       }
 
       const $from = state.selection.$from;
       const blockStart = $from.start($from.depth);
-      const textBefore = state.doc.textBetween(blockStart, from, '\n', ' ');
+      const textBefore = state.doc.textBetween(blockStart, from, '\n', ' ');
       // Match slash commands only at the start of a block (allowing leading
       // indentation). API routes such as "DELETE /api/..." commonly contain
       // slashes after ordinary text and must remain plain document content.
       const match = textBefore.match(/^(\s*)\/([^\s/]*)$/);
       if (!match) {
-        setMenu({ open: false });
+        setMenu((prev) => (prev.open && prev.stage === 'image-url' ? prev : { open: false }));
         return;
       }
 
@@ -310,7 +326,7 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
       const matchStart = blockStart + leadingWhitespace;
       // Sanity: matchStart must point at the slash character.
       if (matchStart < blockStart || textBefore[leadingWhitespace] !== '/') {
-        setMenu({ open: false });
+        setMenu((prev) => (prev.open && prev.stage === 'image-url' ? prev : { open: false }));
         return;
       }
 
@@ -318,35 +334,81 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
       try {
         coords = editor.view.coordsAtPos(matchStart);
       } catch {
-        setMenu({ open: false });
+        setMenu((prev) => (prev.open && prev.stage === 'image-url' ? prev : { open: false }));
         return;
       }
 
-      setMenu({
-        open: true,
-        query,
-        from: matchStart,
-        to: from,
-        cursorTop: coords.top,
-        cursorBottom: coords.bottom,
-        left: coords.left,
+      setMenu((prev) => {
+        // Preserve the image-url stage across selection updates — those updates
+        // fire as the user types in the URL input, and we don't want them to
+        // bounce the menu back to the command list.
+        if (prev.open && prev.stage === 'image-url') {
+          return {
+            ...prev,
+            cursorTop: coords.top,
+            cursorBottom: coords.bottom,
+            left: coords.left,
+          };
+        }
+        return {
+          open: true,
+          stage: 'list',
+          query,
+          from: matchStart,
+          to: from,
+          cursorTop: coords.top,
+          cursorBottom: coords.bottom,
+          left: coords.left,
+        };
+      });
+    };
+
+    // Lightweight reposition — only updates coords when the menu is already
+    // open. Used by scroll / resize so we don't accidentally re-open a menu
+    // the user just dismissed, and so a scroll inside an empty doc doesn't
+    // flash the menu on.
+    const reposition = () => {
+      setMenu((prev) => {
+        if (!prev.open) return prev;
+        try {
+          const coords = editor.view.coordsAtPos(prev.from);
+          return {
+            ...prev,
+            cursorTop: coords.top,
+            cursorBottom: coords.bottom,
+            left: coords.left,
+          };
+        } catch {
+          return prev;
+        }
       });
     };
 
     editor.on('selectionUpdate', update);
     editor.on('update', update);
-    editor.on('blur', () => setMenu({ open: false }));
+    const handleBlur = () => setMenu({ open: false });
+    editor.on('blur', handleBlur);
+    window.addEventListener('resize', reposition);
+    // Capture-phase scroll listens to inner scroll containers (the WYSIWYG
+    // editor pane has `overflow: auto`, so its scroll never bubbles to window
+    // — only the capture phase sees it).
+    window.addEventListener('scroll', reposition, true);
 
     return () => {
       editor.off('selectionUpdate', update);
       editor.off('update', update);
+      editor.off('blur', handleBlur);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
     };
   }, [editor, enabled]);
 
   // Keyboard navigation lives on the editor DOM so it runs ahead of Tiptap's
-  // own keymap and we can swallow arrows/Enter/Escape while open.
+  // own keymap and we can swallow arrows/Enter/Escape while open. The image
+  // URL sub-stage owns its own keys via its onKeyDown handler, so the editor
+  // DOM listener only runs when we're still showing the command list.
   useEffect(() => {
-    if (!editor || !enabled || !menu.open) return;
+    if (!editor || !enabled || !menu.open || menu.stage !== 'list') return;
     const dom = editor.view.dom as HTMLElement;
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -393,7 +455,8 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
     return () => dom.removeEventListener('keydown', onKeyDown, true);
   }, [editor, enabled, menu, filteredItems, activeIndex]);
 
-  // Close on outside click and on scrolling the editor container.
+  // Close on outside click. Scrolling repositions (see the main effect) so a
+  // separate close-on-scroll path would just double-close — leave it out.
   useEffect(() => {
     if (!menu.open) return;
     const onPointer = (event: MouseEvent) => {
@@ -402,14 +465,48 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
       setMenu({ open: false });
     };
     document.addEventListener('mousedown', onPointer);
-    window.addEventListener('resize', () => setMenu({ open: false }), { once: true });
     return () => {
       document.removeEventListener('mousedown', onPointer);
     };
   }, [menu.open]);
 
+  const beginImagePrompt = () => {
+    setImageUrl('https://');
+    setMenu((prev) => (prev.open ? { ...prev, stage: 'image-url' } : prev));
+  };
+
+  const commitImage = () => {
+    if (!editor || !menu.open) return;
+    const trimmed = imageUrl.trim();
+    const { from, to } = menu;
+    setMenu({ open: false });
+    setImageUrl('');
+    if (!trimmed || trimmed === 'https://') {
+      // Drop the slash-command text so the user doesn't end up with a
+      // stranded "/image" in their document when they bail on the URL.
+      editor.chain().focus().deleteRange({ from, to }).run();
+      return;
+    }
+    editor
+      .chain()
+      .focus()
+      .deleteRange({ from, to })
+      .setImage({ src: trimmed })
+      .run();
+  };
+
+  const cancelImagePrompt = () => {
+    setMenu({ open: false });
+    setImageUrl('');
+    editor?.commands.focus();
+  };
+
   const runItem = (item: SlashItem | undefined) => {
     if (!item || !editor || !menu.open) return;
+    if (item.kind === 'prompt-image') {
+      beginImagePrompt();
+      return;
+    }
     const { from, to } = menu;
     setMenu({ open: false });
     editor
@@ -417,7 +514,7 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
       .focus()
       .deleteRange({ from, to })
       .run();
-    item.run(editor);
+    item.run?.(editor);
   };
 
   if (!menu.open) return null;
@@ -432,6 +529,18 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
       ? { bottom: viewportHeight - menu.cursorTop + MENU_GUTTER, left: menu.left }
       : { top: menu.cursorBottom + MENU_GUTTER, left: menu.left };
 
+  const handleImageSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    commitImage();
+  };
+
+  const handleImageInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelImagePrompt();
+    }
+  };
+
   return createPortal(
     <div
       ref={menuRef}
@@ -439,14 +548,51 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
       aria-label="Insert block"
       data-testid="slash-command-menu"
       data-placement={placement}
+      data-stage={menu.stage}
       className="slash-command-menu"
       style={positionStyle}
       onMouseDown={(event) => {
         // Keep the editor selection while clicking menu items.
+        if (menu.stage === 'image-url') {
+          // The URL input lives inside the menu — let mousedown reach it so
+          // the user can click into the field.
+          if (event.target instanceof HTMLInputElement) return;
+        }
         event.preventDefault();
       }}
     >
-      {filteredItems.length === 0 ? (
+      {menu.stage === 'image-url' ? (
+        <form
+          className="slash-command-image-form"
+          data-testid="slash-command-image-form"
+          onSubmit={handleImageSubmit}
+        >
+          <input
+            ref={imageInputRef}
+            type="url"
+            className="slash-command-image-input"
+            aria-label="Image URL"
+            placeholder="https://"
+            value={imageUrl}
+            onChange={(event) => setImageUrl(event.target.value)}
+            onKeyDown={handleImageInputKeyDown}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <div className="slash-command-image-actions">
+            <button
+              type="button"
+              className="slash-command-image-button"
+              onClick={cancelImagePrompt}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="slash-command-image-button is-primary">
+              Insert
+            </button>
+          </div>
+        </form>
+      ) : filteredItems.length === 0 ? (
         <div className="slash-command-empty">No blocks match &ldquo;{menu.query}&rdquo;</div>
       ) : (
         <ul className="slash-command-list" role="presentation">

@@ -86,8 +86,17 @@ export function TableToolbar({ editor, enabled = true }: Props) {
     if (isTableCellSelection(state.selection)) return null;
 
     const { from, to } = state.selection;
-    const startCoords = view.coordsAtPos(from);
-    const endCoords = view.coordsAtPos(to, 1);
+    let startCoords: { top: number; bottom: number; left: number };
+    let endCoords: { top: number; bottom: number; right: number };
+    try {
+      startCoords = view.coordsAtPos(from);
+      endCoords = view.coordsAtPos(to, 1);
+    } catch {
+      // Adding/removing rows or columns briefly leaves the view without
+      // measurable geometry. Hide for this frame; the table 'update' event
+      // we listen to will re-fire once the new structure has laid out.
+      return null;
+    }
     const top = Math.min(startCoords.top, endCoords.top);
     const left = (startCoords.left + endCoords.right) / 2;
 

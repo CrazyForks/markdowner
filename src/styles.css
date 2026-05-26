@@ -549,6 +549,53 @@ section[data-mode='Wysiwyg'] {
   font-size: 12px;
   color: var(--muted-foreground);
 }
+.slash-command-image-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+  min-width: 260px;
+}
+.slash-command-image-input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  outline: none;
+}
+.slash-command-image-input:focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 18%, transparent);
+}
+.slash-command-image-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.slash-command-image-button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 80ms ease;
+}
+.slash-command-image-button:hover {
+  background: var(--muted);
+}
+.slash-command-image-button.is-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+.slash-command-image-button.is-primary:hover {
+  filter: brightness(0.95);
+}
 
 /* Notion-style floating selection toolbar (portal to body). */
 .selection-toolbar {
