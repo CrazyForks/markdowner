@@ -92,6 +92,40 @@ export function createCodeBlockExtension() {
             .focus()
             .run();
         },
+        // Tab inside a code block inserts a literal tab character (or the
+        // configured indent string). Without this, Tiptap's default Tab
+        // behaviour moves focus to the next focusable element, which is
+        // jarring in the middle of typing code. Two-space soft indent is
+        // the most common neutral default for markdown code blocks; we'll
+        // expose a setting in a follow-up if users want hard tabs / 4
+        // spaces.
+        Tab: ({ editor }) => {
+          const { state } = editor;
+          if (state.selection.$from.parent.type.name !== 'codeBlock') return false;
+          editor.view.dispatch(state.tr.insertText('  ').scrollIntoView());
+          return true;
+        },
+        // Shift-Tab inside a code block deletes up to 2 spaces of leading
+        // indent on the current line, mirroring the symmetric Tab insert
+        // above. If the caret-preceding text doesn't contain leading
+        // spaces, we fall through.
+        'Shift-Tab': ({ editor }) => {
+          const { state } = editor;
+          const { $from, empty } = state.selection;
+          if (!empty) return false;
+          if ($from.parent.type.name !== 'codeBlock') return false;
+          // Find the start of the current line within the code block.
+          const text = $from.parent.textBetween(0, $from.parentOffset);
+          const lastNewline = text.lastIndexOf('\n');
+          const lineStartInParent = lastNewline + 1;
+          const lineText = $from.parent.textBetween(lineStartInParent, $from.parentOffset);
+          // Strip up to 2 leading spaces.
+          const stripCount = lineText.startsWith('  ') ? 2 : lineText.startsWith(' ') ? 1 : 0;
+          if (stripCount === 0) return false;
+          const lineStartAbs = $from.start($from.depth) + lineStartInParent;
+          editor.view.dispatch(state.tr.delete(lineStartAbs, lineStartAbs + stripCount));
+          return true;
+        },
       };
     },
   }).configure({

@@ -11,7 +11,6 @@
  */
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Image from '@tiptap/extension-image';
-import Placeholder from '@tiptap/extension-placeholder';
 import { Table } from '@tiptap/extension-table';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
@@ -41,11 +40,6 @@ function buildEditor(initial = ''): Editor {
       TableCell,
       TaskList,
       TaskItem.configure({ nested: true }),
-      Placeholder.configure({
-        showOnlyWhenEditable: true,
-        emptyEditorClass: 'is-editor-empty',
-        placeholder: 'Start typing…',
-      }),
       Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
     ],
     content: initial,
@@ -147,6 +141,55 @@ describe('WYSIWYG behaviour — markdown input rules', () => {
     typeText(editor, '`hi` rest');
     const md = editor.getMarkdown();
     expect(md).toMatch(/`hi`/);
+  });
+
+  it('[text](url) typed character-by-character converts to an inline link', () => {
+    // Note: this only works once the MarkdownLinkInputRule extension is
+    // registered. The test harness in this file doesn't include it; the
+    // test below uses a dedicated editor instance that does.
+  });
+});
+
+describe('WYSIWYG behaviour — markdown link input rule', () => {
+  it('converts [text](url) to a link mark as the user types', async () => {
+    const { MarkdownLinkInputRule } = await import(
+      '@/components/wysiwyg/markdownLinkInputRule'
+    );
+    const editor = new Editor({
+      extensions: [
+        StarterKit.configure({ codeBlock: false }),
+        MarkdownLinkInputRule,
+        Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
+      ],
+      content: '',
+    });
+    try {
+      // Drive the input rule like real typing.
+      const view = editor.view;
+      for (const ch of '[Tiptap](https://tiptap.dev)') {
+        const { from, to } = view.state.selection;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handled = view.someProp('handleTextInput', (handler: any) =>
+          handler(view, from, to, ch),
+        );
+        if (!handled) view.dispatch(view.state.tr.insertText(ch, from, to));
+      }
+      const md = editor.getMarkdown();
+      // The serialised form should be `[Tiptap](https://tiptap.dev)` —
+      // confirms the visible link text is "Tiptap", not the URL.
+      expect(md).toBe('[Tiptap](https://tiptap.dev)');
+      const json = editor.getJSON();
+      const inline = (json.content as Array<{ content?: Array<{ text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }> }>)[0]
+        ?.content ?? [];
+      const linked = inline.find((n) => n.marks?.some((m) => m.type === 'link'));
+      expect(linked).toBeDefined();
+      expect(linked?.text).toBe('Tiptap');
+      expect(
+        linked?.marks?.find((m) => m.type === 'link')?.attrs?.href,
+      ).toBe('https://tiptap.dev');
+    } finally {
+      editor.destroy();
+    }
   });
 });
 

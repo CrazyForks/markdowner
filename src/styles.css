@@ -284,6 +284,17 @@
        together as font-size changes. */
     font-size: inherit;
     line-height: inherit;
+    /* Force the system caret colour. Without this, certain colour-mix
+       background overlays elsewhere on the editor surface could leak a
+       transparent caret value through `inherit` and leave the user staring
+       at an invisible cursor — that's the "키보드 커서가 안 보입니다"
+       intermittent bug. `auto` lets the OS pick a colour that contrasts
+       against the current background, in both light and dark themes. */
+    caret-color: auto;
+  }
+  .notion-editor-content .ProseMirror,
+  .notion-editor-content .ProseMirror * {
+    caret-color: var(--foreground);
   }
   .notion-editor-content .ProseMirror > * {
     @apply relative my-1 rounded-sm px-1 transition-colors;
@@ -356,20 +367,6 @@
      paragraph's font/line-height so it scales with the editor settings. */
   .notion-editor-content .ProseMirror p:has(> br.ProseMirror-trailingBreak:only-child)::before {
     content: "\200B";
-  }
-  /* Notion-style placeholder. Tiptap's @tiptap/extension-placeholder marks
-     every empty node with `data-placeholder` and stamps the wrapper with
-     `is-editor-empty` while the whole doc has no content. We restrict the
-     visible hint to the very first paragraph of an empty doc so newly-typed
-     empty blocks don't flash a placeholder mid-flow. The ZWSP rule above
-     wins on non-empty docs because that paragraph won't be empty in the
-     Tiptap sense (it still has the trailing break). */
-  .notion-editor-content .ProseMirror.is-editor-empty p:first-child::before {
-    content: attr(data-placeholder);
-    color: var(--muted-foreground);
-    pointer-events: none;
-    float: left;
-    height: 0;
   }
   .notion-editor-content .ProseMirror ul,
   .notion-editor-content .ProseMirror ol {

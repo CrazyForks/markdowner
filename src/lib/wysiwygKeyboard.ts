@@ -4,6 +4,7 @@ type KeyboardLikeEvent = {
   metaKey?: boolean;
   ctrlKey?: boolean;
   shiftKey?: boolean;
+  isTrusted?: boolean;
   preventDefault?: () => void;
 };
 
@@ -51,7 +52,22 @@ export function shouldSuppressSyntheticImeEnter(
   state: CompositionState,
 ): boolean {
   if (event.key !== 'Enter') return false;
+  // Real keyboard presses are never suppressed. We accept TWO signals as
+  // proof of "this is a real Enter":
+  //
+  //   (1) `event instanceof KeyboardEvent` — the original guard. Synthetic
+  //       Enters from ProseMirror's `readDOMChange` are built via
+  //       `document.createEvent("Event")` and fail this check.
+  //   (2) `event.isTrusted === true` — a fallback for WebViews where the
+  //       constructor check is unreliable (some Tauri/WKWebView builds
+  //       wrap keydown events). Synthetic `createEvent` events have
+  //       isTrusted === false, so this is still a strict distinction.
+  //
+  // Either signal alone is sufficient; we used to require (1) and that
+  // false-negatived enough real Enter presses after Korean IME to leave
+  // users staring at a caret that wouldn't insert a newline.
   if (isNativeKeyboardEvent(event)) return false;
+  if (event.isTrusted === true) return false;
 
   const now = state.now ?? Date.now();
   const lastCompositionEndAt = state.lastCompositionEndAt ?? Number.NEGATIVE_INFINITY;

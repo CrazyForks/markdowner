@@ -128,16 +128,14 @@ export function LinkPopup({
 
   // Refresh the popup state on selection / transaction / focus changes.
   //
-  // Notion-style behaviour: the popup auto-opens on HOVER only. Clicking
-  // inside a link to edit its visible text used to pop the floating chrome
-  // overhead on every cursor tick — visually noisy and exactly what users
-  // mean by "WYSIWYG 모드에서 링크가 이상합니다". We now only re-anchor
-  // an already-open caret popup (so it stays attached to the link while the
-  // user keeps editing the URL input), or close it when the caret leaves
-  // the link entirely; we never spontaneously open a new caret popup.
-  // The hover handler below and the explicit `link:edit-request` event
-  // (Cmd+K / selection toolbar Link button) are the only two paths that
-  // ever transition the popup from closed → open.
+  // The popup auto-opens whenever the caret enters a link mark — that is
+  // the only discoverable way for a keyboard-driven user to reach the
+  // "edit URL" input. The earlier round attempted hover-only auto-open and
+  // users reported "링크 주소 편집이 안 됩니다" because hovering wasn't a
+  // reliable trigger (the cursor sometimes left the anchor before the
+  // popup mounted, or the user simply expected click-to-edit). Caret-mode
+  // re-runs on every transaction and is debounced through rAF so rapid
+  // selection updates don't thrash.
   useEffect(() => {
     if (!editor || !enabled) {
       setState({ open: false });
@@ -155,14 +153,13 @@ export function LinkPopup({
         // Hover-mode wins until the mouse leaves the link.
         if (hoveredLinkRef.current) return;
         const next = computeCaretLink();
-        setState((prev) => {
-          if (!prev.open) return prev; // Don't auto-open on caret motion.
-          if (prev.origin === 'hover') return prev; // Leave hover-mode alone.
-          // Caret-mode popup is already open. Either re-anchor it to follow
-          // the current selection inside the link, or close it when the
-          // selection leaves the link altogether.
-          return next ?? { open: false };
-        });
+        if (!next) {
+          setState((prev) =>
+            prev.open && prev.origin === 'caret' ? { open: false } : prev,
+          );
+          return;
+        }
+        setState(next);
       });
     };
 
@@ -172,19 +169,10 @@ export function LinkPopup({
     editor.on('blur', schedule);
     window.addEventListener('resize', schedule);
     window.addEventListener('scroll', schedule, true);
-
-    // Explicit "open the link popup at the current selection" entry point —
-    // triggered by Cmd+K and by the selection toolbar's Link button. We
-    // compute the caret-mode state once and commit it, since neither path
-    // hits the hover branch.
-    const unsubscribeEditRequest = subscribeEditorEvent(
-      'link:edit-request',
-      () => {
-        if (hoveredLinkRef.current) return;
-        const next = computeCaretLink();
-        if (next) setState(next);
-      },
-    );
+    // Initial pass — covers the case where Cmd+K applied a link mark right
+    // before this effect mounted; without it the popup wouldn't open until
+    // the next selection update fired.
+    schedule();
 
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
@@ -194,7 +182,6 @@ export function LinkPopup({
       editor.off('blur', schedule);
       window.removeEventListener('resize', schedule);
       window.removeEventListener('scroll', schedule, true);
-      unsubscribeEditRequest();
     };
   }, [editor, enabled, computeCaretLink]);
 

@@ -122,8 +122,39 @@ const SLASH_ITEMS: SlashItem[] = [
     description: '3×3 table with header row.',
     keywords: ['table', 'grid'],
     icon: TableIcon,
-    run: (editor) =>
-      editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+    run: (editor) => {
+      // Insert the table, then explicitly drop the caret inside the very
+      // first header cell as a text selection. Without the explicit
+      // setTextSelection follow-up, Tiptap leaves the selection on the
+      // newly-inserted table node — that's a NodeSelection / CellSelection
+      // depending on tab version, which paints the
+      // `color-mix(var(--primary) 18%)` overlay across every cell. To the
+      // user, the next keystroke types over a "highlighted" cell and the
+      // glyphs render against the primary tint — looks exactly like the
+      // "테이블 생성 후 텍스트 입력할 때 글자가 반전되는" complaint.
+      editor
+        .chain()
+        .focus()
+        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+        .run();
+      // Resolve a position inside the first cell. After insertTable the
+      // table sits at the position the caret was at when the command fired;
+      // searching forward for the first table cell node guarantees we land
+      // inside it even if the surrounding doc structure shifted.
+      const { state } = editor;
+      let firstCellInsidePos: number | null = null;
+      state.doc.descendants((node, pos) => {
+        if (firstCellInsidePos !== null) return false;
+        if (node.type.name === 'tableHeader' || node.type.name === 'tableCell') {
+          firstCellInsidePos = pos + 1;
+          return false;
+        }
+        return true;
+      });
+      if (firstCellInsidePos !== null) {
+        editor.chain().setTextSelection(firstCellInsidePos).focus().run();
+      }
+    },
   },
   {
     id: 'inline-code',

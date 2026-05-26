@@ -6,7 +6,6 @@ import {
   save as saveDialog,
 } from '@tauri-apps/plugin-dialog';
 import Image from '@tiptap/extension-image';
-import Placeholder from '@tiptap/extension-placeholder';
 import { Table } from '@tiptap/extension-table';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
@@ -17,6 +16,7 @@ import { Markdown } from '@tiptap/markdown';
 import { useEditor, type Editor as TiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { createCodeBlockExtension } from '@/components/wysiwyg/codeBlockExtension';
+import { MarkdownLinkInputRule } from '@/components/wysiwyg/markdownLinkInputRule';
 import { PreventTableHoverSelection } from '@/components/wysiwyg/preventTableHoverSelection';
 import { publishEditorEvent } from '@/lib/editorEvents';
 import { EditorView } from '@uiw/react-codemirror';
@@ -1358,21 +1358,10 @@ export default function App() {
       PreventTableHoverSelection,
       TaskList,
       TaskItem.configure({ nested: true }),
-      // Notion-style hint inside an empty document. Only the very first
-      // paragraph of an otherwise-empty doc shows the hint; per-node
-      // placeholders are intentionally suppressed so newly-typed blocks (h1,
-      // blockquote, list item, ...) don't flash placeholder text mid-flow.
-      Placeholder.configure({
-        showOnlyWhenEditable: true,
-        showOnlyCurrent: false,
-        emptyEditorClass: 'is-editor-empty',
-        placeholder: ({ node }) => {
-          if (node.type.name === 'paragraph') {
-            return "Type '/' for commands, or just start writing…";
-          }
-          return '';
-        },
-      }),
+      // Recognise literal `[text](url)` as the user types — Tiptap's built-in
+      // link extension only autolinks bare URLs and handles paste rules, not
+      // the markdown bracket-paren syntax.
+      MarkdownLinkInputRule,
       Markdown.configure({
         markedOptions: {
           gfm: true,
