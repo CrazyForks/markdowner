@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveWysiwygContentSyncAction } from './wysiwygEditorSync';
+import {
+  resolvePersistedWysiwygMarkdown,
+  resolveWysiwygContentSyncAction,
+} from './wysiwygEditorSync';
 
 describe('resolveWysiwygContentSyncAction', () => {
   it('skips editor-authored updates on the same tab to avoid redundant setContent', () => {
@@ -67,5 +70,48 @@ describe('resolveWysiwygContentSyncAction', () => {
       shouldClearDomSelection: false,
       shouldFinalizeComposition: false,
     });
+  });
+});
+
+describe('resolvePersistedWysiwygMarkdown', () => {
+  it('returns the verbatim loaded bytes when the editor still matches the canonical round-trip', () => {
+    // Opening a file containing a raw HTML block; @tiptap/markdown
+    // round-trips it as escaped text, so `loaded` differs from `canonical`.
+    // The user hasn't typed anything, so the live serialised markdown
+    // equals `canonical`. We want the save path to write `loaded`, not
+    // `current` — otherwise the HTML block silently gets HTML-escaped on
+    // disk.
+    const loaded = '# Title\n\n<details>note</details>\n';
+    const canonical = '# Title\n\n&lt;details&gt;note&lt;/details&gt;\n';
+    expect(resolvePersistedWysiwygMarkdown(canonical, loaded, canonical)).toBe(loaded);
+  });
+
+  it('returns the live serialised markdown once the user actually edits', () => {
+    const loaded = '# Title\n';
+    const canonical = '# Title\n\n';
+    const current = '# Title\n\nNew paragraph the user just typed\n';
+    expect(resolvePersistedWysiwygMarkdown(current, loaded, canonical)).toBe(current);
+  });
+
+  it('falls back to the live serialised markdown when load tracking is unavailable', () => {
+    expect(resolvePersistedWysiwygMarkdown('x', null, null)).toBe('x');
+    expect(resolvePersistedWysiwygMarkdown('x', 'y', null)).toBe('x');
+    expect(resolvePersistedWysiwygMarkdown('x', null, 'y')).toBe('x');
+  });
+
+  it('returns loaded bytes for a clean round-trip (loaded === canonical) so the no-edit case is still byte-identical', () => {
+    // Even when the round-trip is already lossless, we still want
+    // byte-for-byte equivalence after a no-op edit (trailing whitespace,
+    // EOL normalisation, etc. should never get rewritten).
+    const md = '# Title\n';
+    expect(resolvePersistedWysiwygMarkdown(md, md, md)).toBe(md);
+  });
+
+  it('preserves the user reverting to the canonical state', () => {
+    // User typed, then deleted back to the load-time state. Should still
+    // save the loaded bytes since the canonical comparison matches.
+    const loaded = '~~~\ncode\n~~~\n';
+    const canonical = '```\ncode\n```\n';
+    expect(resolvePersistedWysiwygMarkdown(canonical, loaded, canonical)).toBe(loaded);
   });
 });

@@ -252,7 +252,10 @@ import {
   shouldSuppressDuplicateImeTextInput,
   shouldSuppressSyntheticImeEnter,
 } from './lib/wysiwygKeyboard';
-import { resolveWysiwygContentSyncAction } from './lib/wysiwygEditorSync';
+import {
+  resolveWysiwygContentSyncAction,
+  resolvePersistedWysiwygMarkdown,
+} from './lib/wysiwygEditorSync';
 import { handleWysiwygPlainTextPaste } from './lib/wysiwygPaste';
 import {
   collectWorkspaceFolderKeys,
@@ -402,6 +405,24 @@ export default function App() {
   // mid-typing — breaking IME composition (e.g. typing Korean "안녕하세요"
   // would split into two lines).
   const lastEditorMarkdownRef = useRef<string>('');
+  // The exact markdown bytes most recently *loaded into* the editor (via
+  // setContent / external sync). Untouched after the load; if the editor's
+  // current `getMarkdown()` still matches `lastLoadedCanonicalRef` we know
+  // the user hasn't authored any structural edits and can preserve the
+  // original bytes verbatim instead of writing the lossy round-trip back to
+  // disk. Without this, opening a file that contains markdown shapes
+  // @tiptap/markdown can't perfectly round-trip (raw HTML blocks, tilde
+  // code fences, explicit `<https://…>` autolinks, escaped `\*` …) would
+  // overwrite the file with a normalised, content-shifted equivalent the
+  // moment the user pressed Cmd+S.
+  const lastLoadedMarkdownRef = useRef<string | null>(null);
+  // The result of `editor.getMarkdown()` immediately after the load above —
+  // i.e. the canonical round-trip of `lastLoadedMarkdownRef`. The flush
+  // compares its serialised output against this value: equal => zero
+  // edits => save original bytes; different => user edited => save the
+  // serialised form (the only path that can lose lossy fragments, and only
+  // for regions the user actually touched).
+  const lastLoadedCanonicalRef = useRef<string | null>(null);
   // Tracks which tab's content the editor currently displays. Allows the
   // sync effect to detect tab switches even when both tabs share identical
   // markdown (e.g. a fresh untitled doc after closing another empty one),
@@ -1185,7 +1206,13 @@ export default function App() {
     const ed = editorInstanceRef.current;
     if (!ed) return;
     if (isWysiwygComposingRef.current || ed.view?.composing) return;
-    publishWysiwygMarkdownDraft(ed.getMarkdown());
+    publishWysiwygMarkdownDraft(
+      resolvePersistedWysiwygMarkdown(
+        ed.getMarkdown(),
+        lastLoadedMarkdownRef.current,
+        lastLoadedCanonicalRef.current,
+      ),
+    );
   });
 
   // Debounced flush. Per-keystroke updates schedule with the default debounce;
@@ -1236,7 +1263,11 @@ export default function App() {
         });
       }
     }
-    const markdown = ed.getMarkdown();
+    const markdown = resolvePersistedWysiwygMarkdown(
+      ed.getMarkdown(),
+      lastLoadedMarkdownRef.current,
+      lastLoadedCanonicalRef.current,
+    );
     publishWysiwygMarkdownDraft(markdown);
     return markdown;
   });
@@ -2336,6 +2367,20 @@ export default function App() {
       }
     } else {
       editor.commands.setContent(nextContent, setContentOptions);
+    }
+
+    // Capture the canonical round-trip of the just-loaded markdown so the
+    // save path can detect "user hasn't actually edited anything" and write
+    // the original bytes back to disk verbatim. Without this, opening a file
+    // containing markdown shapes @tiptap/markdown can't perfectly round-trip
+    // (raw HTML blocks, escaped `\*`, tilde fences, autolinks, multi-paragraph
+    // list items …) and pressing Cmd+S would silently rewrite the file to
+    // the normalised equivalent — exactly the "저장/로드 시 내용 깨짐" bug.
+    lastLoadedMarkdownRef.current = nextContent;
+    try {
+      lastLoadedCanonicalRef.current = editor.getMarkdown();
+    } catch {
+      lastLoadedCanonicalRef.current = null;
     }
   }, [editor, localDraft, activeTabId]);
 
