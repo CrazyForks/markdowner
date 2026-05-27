@@ -18,6 +18,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { createCodeBlockExtension } from '@/components/wysiwyg/codeBlockExtension';
 import { MarkdownLinkInputRule } from '@/components/wysiwyg/markdownLinkInputRule';
 import { PreventTableHoverSelection } from '@/components/wysiwyg/preventTableHoverSelection';
+import { TableArrowNavigation } from '@/components/wysiwyg/tableArrowNavigation';
 import { publishEditorEvent } from '@/lib/editorEvents';
 import { imeLog } from '@/lib/imeDebug';
 import { EditorView } from '@uiw/react-codemirror';
@@ -1364,6 +1365,12 @@ export default function App() {
       TableHeader,
       TableCell,
       PreventTableHoverSelection,
+      // Deterministic Up/Down navigation between table rows (same column).
+      // prosemirror-tables leaves vertical movement to the browser, which
+      // WebKit gets wrong (Down jumps to the cell on the right). Must sit
+      // before StarterKit-derived handlers so its ArrowUp/Down win inside a
+      // table; outside a table it returns false and the defaults run.
+      TableArrowNavigation,
       TaskList,
       TaskItem.configure({ nested: true }),
       // Recognise literal `[text](url)` as the user types — Tiptap's built-in

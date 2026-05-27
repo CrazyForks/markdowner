@@ -24,6 +24,7 @@ import ReactDOM from 'react-dom/client';
 import { createCodeBlockExtension } from '@/components/wysiwyg/codeBlockExtension';
 import { MarkdownLinkInputRule } from '@/components/wysiwyg/markdownLinkInputRule';
 import { PreventTableHoverSelection } from '@/components/wysiwyg/preventTableHoverSelection';
+import { TableArrowNavigation } from '@/components/wysiwyg/tableArrowNavigation';
 import { WysiwygEditorChrome } from '@/shell/WysiwygEditorChrome';
 import {
   shouldSuppressDuplicateImeTextInput,
@@ -49,6 +50,7 @@ function Playground() {
       TableHeader,
       TableCell,
       PreventTableHoverSelection,
+      TableArrowNavigation,
       TaskList,
       TaskItem.configure({ nested: true }),
       MarkdownLinkInputRule,
