@@ -39,6 +39,32 @@ export const PreventTableHoverSelection = Extension.create({
     let primaryButtonDown = false;
     let downX = 0;
     let downY = 0;
+    // Re-entrancy guard: forceTableDragTeardown dispatches a synthetic mouseup,
+    // which our own release listeners would otherwise re-process (and re-tear-
+    // down) forever.
+    let tearingDown = false;
+
+    type ViewLike = {
+      root: { dispatchEvent: (event: Event) => boolean };
+    };
+
+    // The actual fix. prosemirror-tables attaches its drag mousemove/mouseup
+    // listeners to view.root on mousedown and only removes them when a `mouseup`
+    // fires on view.root. Tauri's WebKit frequently DROPS that mouseup (the real
+    // mouseup never reaches view.root), so the drag's mousemove listener lingers
+    // and every later hover extends the selection — and because it never checks
+    // event.buttons, it does so with no button held. `pointerup` IS delivered
+    // reliably, so on every release we synthesize the mouseup prosemirror missed,
+    // forcing its stop() to run and detach the lingering listener.
+    const forceTableDragTeardown = (view: ViewLike) => {
+      if (tearingDown) return;
+      tearingDown = true;
+      try {
+        view.root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      } finally {
+        tearingDown = false;
+      }
+    };
 
     return [
       new Plugin({
@@ -79,55 +105,57 @@ export const PreventTableHoverSelection = Extension.create({
             });
           };
 
-          const onPointerUp = (event: PointerEvent | MouseEvent) => {
+          const onRelease = (event: PointerEvent | MouseEvent) => {
+            // Ignore the synthetic mouseup we dispatch during teardown.
+            if (tearingDown) return;
             const wasDown = primaryButtonDown;
             primaryButtonDown = false;
-            if (!wasDown) return;
-            collapseAccidentalCellSelection(event.clientX, event.clientY);
+            // Always force the drag teardown on release — even if prosemirror's
+            // own mouseup arrived, this is idempotent (stop() removes already-
+            // removed listeners harmlessly).
+            forceTableDragTeardown(editorView);
+            if (wasDown) collapseAccidentalCellSelection(event.clientX, event.clientY);
           };
 
-          const releaseOnly = () => {
+          const onCancel = () => {
+            if (tearingDown) return;
             primaryButtonDown = false;
+            forceTableDragTeardown(editorView);
           };
 
           ownerDocument.addEventListener('pointerdown', onPointerDown, true);
           ownerDocument.addEventListener('mousedown', onPointerDown, true);
-          ownerDocument.addEventListener('pointerup', onPointerUp, true);
-          ownerDocument.addEventListener('pointercancel', releaseOnly, true);
-          ownerDocument.addEventListener('mouseup', onPointerUp, true);
-          win.addEventListener('blur', releaseOnly);
+          ownerDocument.addEventListener('pointerup', onRelease, true);
+          ownerDocument.addEventListener('pointercancel', onCancel, true);
+          ownerDocument.addEventListener('mouseup', onRelease, true);
+          win.addEventListener('blur', onCancel);
 
           return {
             destroy() {
               ownerDocument.removeEventListener('pointerdown', onPointerDown, true);
               ownerDocument.removeEventListener('mousedown', onPointerDown, true);
-              ownerDocument.removeEventListener('pointerup', onPointerUp, true);
-              ownerDocument.removeEventListener('pointercancel', releaseOnly, true);
-              ownerDocument.removeEventListener('mouseup', onPointerUp, true);
-              win.removeEventListener('blur', releaseOnly);
+              ownerDocument.removeEventListener('pointerup', onRelease, true);
+              ownerDocument.removeEventListener('pointercancel', onCancel, true);
+              ownerDocument.removeEventListener('mouseup', onRelease, true);
+              win.removeEventListener('blur', onCancel);
             },
           };
         },
         props: {
           handleDOMEvents: {
             mousemove(view, event) {
-              // A real drag (button held) must pass through untouched so
-              // deliberate multi-cell selection works exactly like Chrome.
-              if (primaryButtonDown) return false;
-              // Button is up. If prosemirror-tables still has an active cell
-              // drag, its terminating mouseup was missed and this hover would
-              // otherwise extend the selection. Tear the drag down using its
-              // own stop() handler (listening for mouseup on view.root): this
-              // removes the document-level move listener and clears the state.
-              // This handler runs on view.dom, which is inside view.root, so it
-              // fires BEFORE the stale move listener for this same event —
-              // the selection never grows. No-op for a clean hover (no drag),
-              // so column-resize hover detection keeps working.
+              // Safety net for the case where BOTH pointerup and mouseup were
+              // dropped, leaving the button latch stuck. Use the mousemove's own
+              // `buttons` (reliably 0 on a true hover) as a second release
+              // signal: if nothing is pressed but a table drag is still active,
+              // it can only be a stale drag — tear it down and swallow this move
+              // so it can't extend first. No-op during a genuine drag (button
+              // held) and for clean hovers (no active drag), so column-resize
+              // hover detection is unaffected.
+              const buttonUp = !primaryButtonDown || (event as MouseEvent).buttons === 0;
+              if (!buttonUp) return false;
               if (tableEditingKey.getState(view.state) == null) return false;
-              const root = view.root as unknown as EventTarget & {
-                dispatchEvent: (event: Event) => boolean;
-              };
-              root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+              forceTableDragTeardown(view);
               return true;
             },
           },
