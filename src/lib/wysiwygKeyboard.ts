@@ -101,6 +101,39 @@ export function shouldSuppressDuplicateImeTextInput(
   return state.textBetween(start, state.from, '\n', '\n') === state.text;
 }
 
+type TableCaretCorrectionInput = {
+  /** Caret position captured at compositionstart, or null if it began outside a cell. */
+  anchor: number | null;
+  /** Length of the text committed by this composition (compositionend `data`). */
+  committedLength: number;
+  /** Where the caret actually sits now (after WebKit may have moved it). */
+  currentCaret: number;
+  /** Current document size, used to keep the corrected position in range. */
+  docSize: number;
+  /** Whether the caret is still inside a table cell. */
+  insideTableCell: boolean;
+};
+
+/**
+ * Decide whether — and where — to repair the caret after a CJK composition in
+ * a table cell. WebKit can reset the caret to the cell start after committing
+ * the first syllable in a previously-empty cell, so the next syllable lands in
+ * front of it and "안녕하세요" comes out "녕하세요안".
+ *
+ * Returns the position to move the caret to, or `null` for a no-op. It is a
+ * strict no-op unless a genuine BACKWARD jump happened inside a table cell, so
+ * it can never disturb correctly-behaving input (Chrome, plain paragraphs):
+ * there the caret already sits at/after `anchor + committedLength`, so the
+ * `currentCaret < expected` guard fails and nothing moves.
+ */
+export function computeTableCaretCorrection(input: TableCaretCorrectionInput): number | null {
+  const { anchor, committedLength, currentCaret, docSize, insideTableCell } = input;
+  if (anchor === null || committedLength <= 0 || !insideTableCell) return null;
+  const expected = anchor + committedLength;
+  if (currentCaret < expected && expected <= docSize) return expected;
+  return null;
+}
+
 export function focusCodeBlockLanguageSelectorOnArrowUp(
   view: ProseMirrorKeyboardView,
   event: KeyboardLikeEvent,

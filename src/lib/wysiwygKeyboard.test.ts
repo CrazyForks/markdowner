@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  computeTableCaretCorrection,
   focusCodeBlockLanguageSelectorOnArrowUp,
   shouldSuppressDuplicateImeTextInput,
   shouldSuppressSyntheticImeEnter,
@@ -161,5 +162,59 @@ describe('focusCodeBlockLanguageSelectorOnArrowUp', () => {
     expect(focusCodeBlockLanguageSelectorOnArrowUp(view, event)).toBe(false);
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(view.nodeDOM).not.toHaveBeenCalled();
+  });
+});
+
+describe('computeTableCaretCorrection', () => {
+  const base = {
+    anchor: 10,
+    committedLength: 1,
+    currentCaret: 11,
+    docSize: 100,
+    insideTableCell: true,
+  };
+
+  it('corrects a backward caret jump inside a table cell', () => {
+    // WebKit reset the caret to the cell start (10) after committing "안";
+    // it should be pushed to anchor + 1 = 11.
+    expect(
+      computeTableCaretCorrection({ ...base, currentCaret: 10 }),
+    ).toBe(11);
+  });
+
+  it('corrects across multiple committed characters', () => {
+    expect(
+      computeTableCaretCorrection({ ...base, committedLength: 5, currentCaret: 10 }),
+    ).toBe(15);
+  });
+
+  it('is a no-op when the caret is already where it belongs (Chrome / no bug)', () => {
+    expect(computeTableCaretCorrection({ ...base, currentCaret: 11 })).toBeNull();
+  });
+
+  it('never moves the caret forward', () => {
+    expect(computeTableCaretCorrection({ ...base, currentCaret: 20 })).toBeNull();
+  });
+
+  it('does nothing outside a table cell (plain paragraphs untouched)', () => {
+    expect(
+      computeTableCaretCorrection({ ...base, currentCaret: 10, insideTableCell: false }),
+    ).toBeNull();
+  });
+
+  it('does nothing when composition began outside a cell (anchor null)', () => {
+    expect(computeTableCaretCorrection({ ...base, anchor: null, currentCaret: 0 })).toBeNull();
+  });
+
+  it('does nothing for an empty commit', () => {
+    expect(
+      computeTableCaretCorrection({ ...base, committedLength: 0, currentCaret: 10 }),
+    ).toBeNull();
+  });
+
+  it('refuses to move the caret past the end of the document', () => {
+    expect(
+      computeTableCaretCorrection({ ...base, committedLength: 5, currentCaret: 10, docSize: 12 }),
+    ).toBeNull();
   });
 });

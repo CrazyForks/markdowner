@@ -251,6 +251,7 @@ import {
   selectWysiwygFindMatch,
 } from './lib/wysiwygFind';
 import {
+  computeTableCaretCorrection,
   focusCodeBlockLanguageSelectorOnArrowUp,
   shouldSuppressDuplicateImeTextInput,
   shouldSuppressSyntheticImeEnter,
@@ -1680,19 +1681,21 @@ export default function App() {
           const committed = (event as CompositionEvent).data ?? '';
           tableCompositionAnchorRef.current = null;
           if (anchor !== null && committed.length > 0) {
-            const expected = anchor + committed.length;
             window.setTimeout(() => {
               const ed = editorInstanceRef.current;
               if (!ed || currentModeRef.current !== 'Wysiwyg') return;
               if (isWysiwygComposingRef.current || ed.view?.composing) return;
-              if (!selectionInsideTableCell(ed.state)) return;
               const current = ed.state.selection.from;
-              const docSize = ed.state.doc.content.size;
-              // Only correct a genuine backward jump that still lands inside
-              // the doc; never move the caret forward or out of range.
-              if (current < expected && expected <= docSize) {
-                ed.chain().setTextSelection(expected).run();
-                imeLog('cell caret corrected', ed.view, { from: current, to: expected });
+              const target = computeTableCaretCorrection({
+                anchor,
+                committedLength: committed.length,
+                currentCaret: current,
+                docSize: ed.state.doc.content.size,
+                insideTableCell: selectionInsideTableCell(ed.state),
+              });
+              if (target !== null) {
+                ed.chain().setTextSelection(target).run();
+                imeLog('cell caret corrected', ed.view, { from: current, to: target });
               }
             }, 60);
           }
