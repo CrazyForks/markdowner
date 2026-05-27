@@ -128,6 +128,7 @@ function Playground() {
             window.setTimeout(() => {
               const ed = editorRef.current;
               if (!ed) return;
+              if (isComposingRef.current) return;
               ed.chain()
                 .focus()
                 .command(({ commands }) =>
@@ -139,7 +140,7 @@ function Playground() {
                   ]),
                 )
                 .run();
-            }, 0);
+            }, 80);
           }
           return false;
         },

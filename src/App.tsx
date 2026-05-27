@@ -1594,18 +1594,27 @@ export default function App() {
             pendingEnter: pendingEnterAfterCompositionRef.current,
           });
           // Replay an Enter that was swallowed by the IME mid-composition.
-          // Deferred to a macrotask so ProseMirror has finished applying the
-          // committed composition to the doc before we split the block; the
-          // editorProps keymap's Enter chain (newlineInCode →
-          // createParagraphNear → liftEmptyBlock → splitBlock) is reproduced
-          // via Tiptap's first() so lists / code blocks / quotes behave the
-          // same as a normal Enter.
+          //
+          // Timing is the subtle part: prosemirror-view keeps
+          // `view.composing === true` for ~50ms AFTER `compositionend`
+          // fires (its composition-cleanup timeout). An earlier revision
+          // ran this replay on a 0ms timer and bailed when
+          // `view.composing` was still true — so in WebKit (where the flag
+          // lingers) the replay almost always bailed and the newline was
+          // lost: "한글 입력 후 엔터가 안 먹는다". We now (a) wait past that
+          // window and (b) do NOT bail on `view.composing` — we already
+          // know the composition ended because we're inside its handler;
+          // we only re-check that we're still in WYSIWYG mode and that a
+          // brand-new composition hasn't begun (tracked by our own ref,
+          // which compositionstart sets synchronously).
           if (pendingEnterAfterCompositionRef.current) {
             pendingEnterAfterCompositionRef.current = false;
             window.setTimeout(() => {
               const ed = editorInstanceRef.current;
               if (!ed || currentModeRef.current !== 'Wysiwyg') return;
-              if (isWysiwygComposingRef.current || ed.view?.composing) return;
+              // A genuinely new composition starting cancels the replay
+              // (the user kept typing rather than wanting a newline).
+              if (isWysiwygComposingRef.current) return;
               ed.chain()
                 .focus()
                 .command(({ commands }) =>
@@ -1617,7 +1626,7 @@ export default function App() {
                   ]),
                 )
                 .run();
-            }, 0);
+            }, 80);
           }
           scheduleWysiwygCompositionFlush();
           return false;
