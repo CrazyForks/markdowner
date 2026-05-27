@@ -32,7 +32,6 @@ type TableCommand =
   | 'toggleHeaderRow';
 
 const TOOLBAR_OFFSET_PX = 10;
-const TABLE_DRAG_SELECTION_THRESHOLD_PX = 4;
 
 type RecordLike = Record<string, unknown>;
 
@@ -42,36 +41,16 @@ interface TableCellSelection {
   $headCell?: RecordLike;
 }
 
-interface PendingTableMouseDrag {
-  startX: number;
-  startY: number;
-  dragging: boolean;
-}
-
 function isRecordLike(value: unknown): value is RecordLike {
   return typeof value === 'object' && value !== null;
 }
 
+// While a multi-cell CellSelection is active we hide the formatting toolbar —
+// the add/delete buttons act on whatever single cell the caret is in, so a
+// spanning selection would make their target ambiguous.
 function isTableCellSelection(selection: unknown): selection is TableCellSelection {
   if (!isRecordLike(selection)) return false;
   return isRecordLike(selection.$anchorCell) && isRecordLike(selection.$headCell);
-}
-
-function getCellTextSelectionPosition(selection: TableCellSelection): number | null {
-  const headCellPosition = selection.$headCell?.pos;
-  if (typeof headCellPosition === 'number' && Number.isFinite(headCellPosition)) {
-    return headCellPosition + 1;
-  }
-
-  if (typeof selection.from === 'number' && Number.isFinite(selection.from)) {
-    return selection.from;
-  }
-
-  return null;
-}
-
-function isTableCellTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest('td, th'));
 }
 
 export function TableToolbar({ editor, enabled = true }: Props) {
@@ -159,100 +138,11 @@ export function TableToolbar({ editor, enabled = true }: Props) {
     };
   }, [editor, enabled, computePosition]);
 
-  useEffect(() => {
-    if (!editor || !enabled) return;
-
-    const editorDom = editor.view?.dom;
-    if (!(editorDom instanceof HTMLElement)) return;
-
-    const ownerDocument = editorDom.ownerDocument;
-    let pendingDrag: PendingTableMouseDrag | null = null;
-    let settleFrame: number | null = null;
-
-    const clearAccidentalCellSelection = () => {
-      if (settleFrame !== null) cancelAnimationFrame(settleFrame);
-
-      settleFrame = requestAnimationFrame(() => {
-        settleFrame = null;
-        const selection = editor.state.selection;
-        if (!isTableCellSelection(selection)) return;
-
-        const textPosition = getCellTextSelectionPosition(selection);
-        if (textPosition === null) return;
-
-        editor.commands.setTextSelection(textPosition);
-        if (typeof editor.view.focus === 'function') {
-          editor.view.focus();
-        }
-      });
-    };
-
-    const handleMouseDown = (event: MouseEvent) => {
-      if (event.button !== 0 || event.ctrlKey || event.metaKey) return;
-      if (!isTableCellTarget(event.target)) return;
-
-      pendingDrag = {
-        startX: event.clientX,
-        startY: event.clientY,
-        dragging: false,
-      };
-    };
-
-    const handleMouseMove = (event: MouseEvent) => {
-      if (!pendingDrag) return;
-      if (event.buttons !== 0 && (event.buttons & 1) === 0) {
-        pendingDrag = null;
-        return;
-      }
-
-      const distance = Math.hypot(
-        event.clientX - pendingDrag.startX,
-        event.clientY - pendingDrag.startY,
-      );
-
-      if (distance < TABLE_DRAG_SELECTION_THRESHOLD_PX) {
-        event.stopPropagation();
-        return;
-      }
-
-      pendingDrag.dragging = true;
-      setVisible(false);
-    };
-
-    const handleMouseUp = () => {
-      if (!pendingDrag) return;
-
-      const wasDragging = pendingDrag.dragging;
-      pendingDrag = null;
-
-      if (!wasDragging) {
-        clearAccidentalCellSelection();
-      }
-    };
-
-    const handleCancel = () => {
-      pendingDrag = null;
-    };
-
-    editorDom.addEventListener('mousedown', handleMouseDown, true);
-    editorDom.addEventListener('mousemove', handleMouseMove, true);
-    editorDom.addEventListener('mouseup', handleMouseUp, true);
-    editorDom.addEventListener('dragstart', handleCancel, true);
-    ownerDocument.addEventListener('mousemove', handleMouseMove, true);
-    ownerDocument.addEventListener('mouseup', handleMouseUp, true);
-    ownerDocument.addEventListener('dragstart', handleCancel, true);
-
-    return () => {
-      if (settleFrame !== null) cancelAnimationFrame(settleFrame);
-      editorDom.removeEventListener('mousedown', handleMouseDown, true);
-      editorDom.removeEventListener('mousemove', handleMouseMove, true);
-      editorDom.removeEventListener('mouseup', handleMouseUp, true);
-      editorDom.removeEventListener('dragstart', handleCancel, true);
-      ownerDocument.removeEventListener('mousemove', handleMouseMove, true);
-      ownerDocument.removeEventListener('mouseup', handleMouseUp, true);
-      ownerDocument.removeEventListener('dragstart', handleCancel, true);
-    };
-  }, [editor, enabled]);
+  // NOTE: stale-cell-selection / accidental-drag handling now lives entirely
+  // in the PreventTableHoverSelection ProseMirror plugin (pointer-tracked,
+  // engine-robust). The toolbar used to run its own mousedown/mousemove/
+  // mouseup threshold tracking here, which double-handled the gesture and
+  // fought prosemirror-tables in WebKit. Removed.
 
   const runCommand = (command: TableCommand) => {
     if (!editor) return;

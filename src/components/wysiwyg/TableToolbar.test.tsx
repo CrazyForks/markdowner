@@ -174,46 +174,10 @@ describe('TableToolbar', () => {
     });
   });
 
-  it('suppresses tiny table mousemoves until the user actually drags', () => {
-    const editor = createTableEditor();
-    const rootMouseMove = vi.fn();
-
-    document.addEventListener('mousemove', rootMouseMove);
-    document.body.appendChild(editor.view.dom);
-    render(<TableToolbar editor={editor} />);
-
-    try {
-      fireEvent.mouseDown(editor.tableCell, { button: 0, clientX: 100, clientY: 100 });
-      fireEvent.mouseMove(editor.tableCell, { buttons: 1, clientX: 102, clientY: 101 });
-      expect(rootMouseMove).not.toHaveBeenCalled();
-
-      fireEvent.mouseMove(editor.tableCell, { buttons: 1, clientX: 112, clientY: 100 });
-      expect(rootMouseMove).toHaveBeenCalledTimes(1);
-    } finally {
-      document.removeEventListener('mousemove', rootMouseMove);
-      editor.view.dom.remove();
-    }
-  });
-
-  it('converts accidental click-only cell selections back to text selection', async () => {
-    const editor = createTableEditor();
-
-    render(<TableToolbar editor={editor} />);
-
-    fireEvent.mouseDown(editor.tableCell, { button: 0, clientX: 48, clientY: 48 });
-    editor.state.selection = {
-      from: 12,
-      to: 12,
-      empty: false,
-      $anchorCell: { pos: 11 },
-      $headCell: { pos: 11 },
-    };
-    fireEvent.mouseUp(editor.tableCell, { button: 0, clientX: 48, clientY: 48 });
-
-    await waitFor(() => {
-      expect(editor.commands.setTextSelection).toHaveBeenCalledWith(12);
-    });
-  });
+  // Accidental-drag suppression + click-only cell-selection collapse moved
+  // out of TableToolbar into the PreventTableHoverSelection ProseMirror
+  // plugin (pointer-tracked, engine-robust). Covered by
+  // preventTableHoverSelection.test.ts.
 
   it('stays hidden when the WYSIWYG selection is outside a table', async () => {
     const editor = createTableEditor({ inTable: false });
