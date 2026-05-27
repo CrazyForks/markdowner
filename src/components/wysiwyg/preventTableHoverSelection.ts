@@ -1,5 +1,5 @@
 import { Extension } from '@tiptap/core';
-import { CellSelection } from '@tiptap/pm/tables';
+import { CellSelection, tableEditingKey } from '@tiptap/pm/tables';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 
 const pluginKey = new PluginKey('preventTableHoverSelection');
@@ -11,15 +11,18 @@ const CLICK_MOVEMENT_THRESHOLD_PX = 4;
  * Robust table pointer interaction. Solves two related bugs that only
  * surfaced in Tauri's WebKit engine:
  *
- * 1. "cell이 드래그하지 않아도 자동으로 드래그되는" — prosemirror-tables
- *    extends a CellSelection on mousemove while it thinks a drag is in
- *    progress. If the terminating mouseup is missed (pointer leaves the
- *    window, drag ends outside the editor, focus loss) its drag state goes
- *    stale and every later hover grows the selection. The earlier guard used
- *    `MouseEvent.buttons`, but WebKit reports a STALE buttons value after
- *    drags, so the guard leaked. We track the real primary-button state from
- *    pointerdown/up/cancel (+ window blur) and swallow idle in-table
- *    mousemoves whenever the button is up.
+ * 1. "cell이 드래그하지 않아도 자동으로 드래그되는" — on mousedown
+ *    prosemirror-tables attaches its OWN mousemove/mouseup listeners to
+ *    `view.root` (the document) and extends a CellSelection on every mousemove
+ *    while `tableEditingKey` state is active. If the terminating mouseup is
+ *    missed (pointer leaves the window, drag ends outside the editor, focus
+ *    loss — frequent in Tauri's WebKit) that state goes stale and every later
+ *    HOVER grows the selection. Swallowing the mousemove via handleDOMEvents
+ *    cannot help: that document-level listener fires regardless. Instead we
+ *    track the real primary-button state (pointerdown/up/cancel + window blur)
+ *    and, when a mousemove arrives with the button up but a drag still active,
+ *    trigger prosemirror-tables' own teardown by dispatching a mouseup to
+ *    `view.root` — removing its move listener and clearing the stale state.
  *
  * 2. A click that incidentally produces a single-cell CellSelection (which
  *    paints the whole cell as "selected" and makes the column/row-add buttons
@@ -107,13 +110,25 @@ export const PreventTableHoverSelection = Extension.create({
         },
         props: {
           handleDOMEvents: {
-            mousemove(_view, event) {
+            mousemove(view, event) {
+              // A real drag (button held) must pass through untouched so
+              // deliberate multi-cell selection works exactly like Chrome.
               if (primaryButtonDown) return false;
-              const target = (event as MouseEvent).target as HTMLElement | null;
-              if (target && target.closest('table')) {
-                return true;
-              }
-              return false;
+              // Button is up. If prosemirror-tables still has an active cell
+              // drag, its terminating mouseup was missed and this hover would
+              // otherwise extend the selection. Tear the drag down using its
+              // own stop() handler (listening for mouseup on view.root): this
+              // removes the document-level move listener and clears the state.
+              // This handler runs on view.dom, which is inside view.root, so it
+              // fires BEFORE the stale move listener for this same event —
+              // the selection never grows. No-op for a clean hover (no drag),
+              // so column-resize hover detection keeps working.
+              if (tableEditingKey.getState(view.state) == null) return false;
+              const root = view.root as unknown as EventTarget & {
+                dispatchEvent: (event: Event) => boolean;
+              };
+              root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+              return true;
             },
           },
         },

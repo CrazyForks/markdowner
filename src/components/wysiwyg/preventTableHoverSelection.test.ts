@@ -10,7 +10,7 @@ import TableHeader from '@tiptap/extension-table-header';
 import TableRow from '@tiptap/extension-table-row';
 import StarterKit from '@tiptap/starter-kit';
 import { Editor } from '@tiptap/core';
-import { CellSelection } from '@tiptap/pm/tables';
+import { CellSelection, tableEditingKey } from '@tiptap/pm/tables';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { PreventTableHoverSelection } from './preventTableHoverSelection';
@@ -55,10 +55,29 @@ describe('PreventTableHoverSelection', () => {
     el?.remove();
   });
 
-  it('swallows idle (no-button) mousemove inside a table', () => {
+  it('passes idle (no-button) mousemove through when no table drag is active', () => {
+    // A clean hover with no in-progress drag must NOT be swallowed, otherwise
+    // column-resize hover detection (also mousemove-driven) would break.
     const td = editor.view.dom.querySelector('td, th') as HTMLElement;
     expect(td).toBeTruthy();
-    // No pointerdown happened, so the primary button is considered up.
+    expect(tableEditingKey.getState(editor.state)).toBeNull();
+    const handled = editor.view.someProp('handleDOMEvents', (handlers: any) =>
+      handlers?.mousemove?.(editor.view, { target: td } as unknown as MouseEvent),
+    );
+    expect(handled).toBeFalsy();
+  });
+
+  it('tears down a stale table drag on an idle (no-button) mousemove', () => {
+    // Simulate prosemirror-tables having an active cell drag whose terminating
+    // mouseup was missed (the WebKit "auto-drag on hover" bug): tableEditingKey
+    // state is set but no button is down.
+    const cells = cellPositions(editor);
+    editor.view.dispatch(editor.state.tr.setMeta(tableEditingKey, cells[0]));
+    expect(tableEditingKey.getState(editor.state)).not.toBeNull();
+
+    const td = editor.view.dom.querySelector('td, th') as HTMLElement;
+    // No pointerdown happened, so the primary button is considered up. The
+    // handler should engage teardown (and report the event handled).
     const handled = editor.view.someProp('handleDOMEvents', (handlers: any) =>
       handlers?.mousemove?.(editor.view, { target: td } as unknown as MouseEvent),
     );
