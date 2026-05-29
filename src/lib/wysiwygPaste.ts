@@ -10,38 +10,61 @@ import type { EditorView } from '@tiptap/pm/view';
 const URL_PATTERN =
   /\b((?:https?:\/\/|mailto:|tel:)[^\s<>()[\]{}'"`]+[^\s<>()[\]{}'"`.,;:!?])/g;
 
-// Structural markdown patterns. We only auto-parse pasted text as markdown
-// when at least one of these block-level shapes is present — inline `*emph*`
-// or `**bold**` alone is too ambiguous (a user pasting "5 * 3 = 15" doesn't
-// want italic), but a leading `# heading` or fenced code block is an
-// unambiguous signal that the source was rendered markdown.
-const MARKDOWN_STRUCTURE_PATTERNS: RegExp[] = [
-  /^#{1,6}\s\S/m,        // ATX heading: "# Title", "## Sub", ...
-  /^```/m,               // Fenced code block
-  /^~~~/m,               // Tilde-fenced code block
-  /^>\s\S/m,             // Blockquote: "> note"
-  /^[-*+]\s\S/m,         // Bullet list: "- item"
-  /^\d+\.\s\S/m,         // Numbered list: "1. item"
-  /^- \[[ xX]\]\s/m,     // GFM task list: "- [ ] todo"
-  /^\|.+\|.+\|/m,        // GFM table row: "| a | b |"
-  /^-{3,}\s*$/m,         // Horizontal rule
-  /\n\n\!\[[^\]]*\]\([^)]+\)/,  // Block image after blank line
-];
+// ProseMirror node types that are indistinguishable from a plain-text paste.
+// A document built only from these, with no marks, round-trips through plain
+// text unchanged — so routing it through the markdown path would gain nothing
+// (and risks subtle reflows). Anything outside this set (heading, list, table,
+// code block, blockquote, image, …) is genuine block structure.
+const TRIVIAL_NODE_TYPES = new Set(['doc', 'paragraph', 'text', 'hardBreak']);
+
+interface ParsedNode {
+  type?: string;
+  marks?: unknown[];
+  content?: ParsedNode[];
+}
 
 /**
- * Heuristic: does this plain-text payload look like rendered markdown source
- * that the user wants converted to formatted blocks on paste?
+ * Walks a parsed ProseMirror JSON document and reports whether it carries any
+ * "real" markdown: an inline mark (bold / italic / code / link / strike / …)
+ * or a block node beyond plain paragraphs (heading, list, table, code block,
+ * blockquote, image, …).
  *
- * Returns true ONLY when an unambiguous block-level markdown shape is
- * present. Inline-only patterns (e.g. `**bold**`, `[text](url)`) are NOT
- * sufficient — those round-trip through plain text fine, and the user might
- * have intended the literal characters. Conservative on purpose: a false
- * positive (rendering "5 * 3" as italic) is far more jarring than a false
- * negative (pasting markdown source verbatim and letting the user re-paste).
+ * This is the signal that distinguishes "the user pasted markdown source they
+ * want rendered" from "the user pasted prose that merely contains an
+ * asterisk". `5 * 3 = 15`, `snake_case`, and `C:\path\file` all parse to a
+ * single plain paragraph → no formatting → false; `**bold**`, `# heading`,
+ * setext `===`, and GFM tables → true.
+ *
+ * Parsing first (instead of a regex pre-filter) is what lets inline-only
+ * markdown render: a leading `#` is no longer required to recognise that the
+ * clipboard held markdown source.
  */
-export function pastedTextLooksLikeMarkdown(text: string): boolean {
-  if (text.length === 0) return false;
-  return MARKDOWN_STRUCTURE_PATTERNS.some((pattern) => pattern.test(text));
+export function parsedDocHasFormatting(doc: unknown): boolean {
+  if (!doc || typeof doc !== 'object') return false;
+  const visit = (node: ParsedNode): boolean => {
+    if (Array.isArray(node.marks) && node.marks.length > 0) return true;
+    if (node.type && !TRIVIAL_NODE_TYPES.has(node.type)) return true;
+    if (Array.isArray(node.content)) return node.content.some(visit);
+    return false;
+  };
+  return visit(doc as ParsedNode);
+}
+
+interface ViewInputLike {
+  input?: { shiftKey?: boolean; lastKeyCode?: number | null };
+}
+
+/**
+ * Mirrors ProseMirror's own "prefer plain" rule. prosemirror-view tracks
+ * `view.input.shiftKey` / `lastKeyCode` on every keydown; a paste fired while
+ * Shift is held (Cmd/Ctrl+Shift+V) is a "paste as plain text" request — except
+ * Shift+Insert (keyCode 45), which is just an alternative paste chord. Routing
+ * that case here makes the paste bypass markdown rendering and land verbatim.
+ */
+export function isPlainTextPasteRequest(view: ViewInputLike): boolean {
+  const input = view?.input;
+  if (!input) return false;
+  return !!input.shiftKey && input.lastKeyCode !== 45;
 }
 
 function linkMarkForHref(schema: Schema, href: string): Mark | null {
@@ -139,15 +162,17 @@ interface EditorLike {
 }
 
 /**
- * If the editor exposes a @tiptap/markdown manager and the pasted text looks
- * like markdown source, parse it through that manager and insert the result
- * via `editor.commands.insertContent`. Returns true when the markdown path
- * fully handled the paste so the caller can short-circuit; returns false to
- * fall through to the plain-text behaviour.
+ * If the editor exposes a @tiptap/markdown manager, parse the pasted text
+ * through it and — only when the result carries real formatting or structure
+ * (see `parsedDocHasFormatting`) — insert it via `editor.commands.insertContent`
+ * so the user gets rendered blocks instead of literal markdown characters.
+ *
+ * Returns true when the markdown path fully handled the paste so the caller can
+ * short-circuit; returns false to fall through to the plain-text behaviour
+ * (plain prose, ambiguous asterisks, file paths, …).
  */
 function tryPasteAsMarkdown(editor: EditorLike | null, text: string): boolean {
   if (!editor) return false;
-  if (!pastedTextLooksLikeMarkdown(text)) return false;
   const manager = editor.storage?.markdown?.manager;
   if (!manager || typeof manager.parse !== 'function') return false;
   if (typeof manager.hasMarked === 'function' && !manager.hasMarked()) return false;
@@ -158,7 +183,7 @@ function tryPasteAsMarkdown(editor: EditorLike | null, text: string): boolean {
   } catch {
     return false;
   }
-  if (!parsed || typeof parsed !== 'object') return false;
+  if (!parsedDocHasFormatting(parsed)) return false;
   try {
     const ok = editor.commands.insertContent(parsed);
     return ok !== false;
@@ -180,14 +205,20 @@ function tryPasteAsMarkdown(editor: EditorLike | null, text: string): boolean {
  * We instead lean on `text/plain` — which mirrors what the user visibly
  * highlighted — and route it through two paths in order:
  *
- *   1. If the plain text contains unambiguous markdown structures (ATX
- *      heading, fenced code, list bullet, blockquote, GFM task list, table,
- *      …) we parse it through @tiptap/markdown so the user gets the
- *      formatted blocks they'd expect from a markdown editor.
+ *   1. We parse it through @tiptap/markdown. If the parse yields real
+ *      formatting or structure — inline marks (`**bold**`, `*italic*`,
+ *      `` `code` ``, `[link](url)`, `~~strike~~`) or block nodes (headings,
+ *      lists, tables, blockquotes, code fences, setext `===`, …) — we insert
+ *      the rendered result so the user gets the formatted blocks they'd
+ *      expect from a markdown editor.
  *
  *   2. Otherwise we insert the text verbatim, auto-linking any URLs along
- *      the way (see `buildPlainTextPasteSlice`). This avoids surprises like
- *      "5 * 3 = 15" being rendered as italic.
+ *      the way (see `buildPlainTextPasteSlice`). This is also what happens
+ *      for ambiguous prose like "5 * 3 = 15" (marked leaves it a plain
+ *      paragraph) and what `forcePlainText` forces unconditionally.
+ *
+ * `forcePlainText` (Cmd/Ctrl+Shift+V — see `isPlainTextPasteRequest`) skips the
+ * markdown path entirely so the raw characters land as typed.
  *
  * Returns `true` to short-circuit the default handler when we've handled
  * the paste; falls through (`false`) for clipboard payloads without text
@@ -197,13 +228,14 @@ export function handleWysiwygPlainTextPaste(
   view: EditorView,
   event: ClipboardEvent,
   editor: EditorLike | null = null,
+  forcePlainText = false,
 ): boolean {
   const clipboardData = event.clipboardData;
   if (!clipboardData) return false;
   const text = clipboardData.getData('text/plain');
   if (!text) return false;
 
-  if (tryPasteAsMarkdown(editor, text)) {
+  if (!forcePlainText && tryPasteAsMarkdown(editor, text)) {
     return true;
   }
 

@@ -261,7 +261,10 @@ import {
   resolveWysiwygContentSyncAction,
   resolvePersistedWysiwygMarkdown,
 } from './lib/wysiwygEditorSync';
-import { handleWysiwygPlainTextPaste } from './lib/wysiwygPaste';
+import {
+  handleWysiwygPlainTextPaste,
+  isPlainTextPasteRequest,
+} from './lib/wysiwygPaste';
 import {
   collectWorkspaceFolderKeys,
   displayFileName,
@@ -1574,7 +1577,13 @@ export default function App() {
         return false;
       },
       handlePaste: (view: any, event: ClipboardEvent) =>
-        handleWysiwygPlainTextPaste(view, event, editorInstanceRef.current),
+        handleWysiwygPlainTextPaste(
+          view,
+          event,
+          editorInstanceRef.current,
+          // Cmd/Ctrl+Shift+V → paste verbatim, bypassing markdown rendering.
+          isPlainTextPasteRequest(view),
+        ),
       handleDOMEvents: {
         beforeinput: (_view: any, event: Event) => {
           const inputEvent = event as InputEvent;

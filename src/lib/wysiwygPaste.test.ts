@@ -4,7 +4,8 @@ import { Schema } from '@tiptap/pm/model';
 import {
   buildPlainTextPasteSlice,
   handleWysiwygPlainTextPaste,
-  pastedTextLooksLikeMarkdown,
+  isPlainTextPasteRequest,
+  parsedDocHasFormatting,
 } from './wysiwygPaste';
 
 const schema = new Schema({
@@ -224,27 +225,60 @@ describe('handleWysiwygPlainTextPaste', () => {
     );
   });
 
-  it('routes through the markdown manager when the text contains structural markdown', () => {
-    // A heading + paragraph is unambiguous markdown source. The handler must
-    // hand it off to @tiptap/markdown so the user gets formatted blocks
-    // instead of literal `# Title` characters in their document.
+  // A parsed doc carrying real formatting (here a heading) means the user
+  // pasted markdown source — hand it to insertContent so they get formatted
+  // blocks instead of literal `# Title` characters.
+  const headingDoc = {
+    type: 'doc',
+    content: [
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Title' }] },
+    ],
+  };
+  // A plain paragraph is indistinguishable from a plain-text paste — the
+  // markdown path must decline so we don't, e.g., turn "5 * 3 = 15" into italic.
+  const plainParagraphDoc = {
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: '5 * 3 = 15' }] }],
+  };
+
+  it('renders pasted text as markdown when the parsed doc carries formatting', () => {
     const { view, dispatch } = makeView();
     const insertContent = vi.fn().mockReturnValue(true);
-    const parse = vi.fn().mockReturnValue({ type: 'doc', content: [] });
+    const parse = vi.fn().mockReturnValue(headingDoc);
     const editor = {
       storage: { markdown: { manager: { parse, hasMarked: () => true } } },
       commands: { insertContent },
     } as any;
     const handled = handleWysiwygPlainTextPaste(
       view as any,
-      makeEvent({ 'text/plain': '# Title\n\nSome body text.' }),
+      makeEvent({ 'text/plain': '# Title' }),
       editor,
     );
     expect(handled).toBe(true);
-    expect(parse).toHaveBeenCalledWith('# Title\n\nSome body text.');
-    expect(insertContent).toHaveBeenCalledTimes(1);
+    expect(parse).toHaveBeenCalledWith('# Title');
+    expect(insertContent).toHaveBeenCalledWith(headingDoc);
     // Plain-text path must NOT run when markdown handled it.
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('falls through to plain text when the parsed doc has no formatting', () => {
+    // The asterisk in "5 * 3 = 15" is not emphasis; marked yields a plain
+    // paragraph, so we must paste it verbatim rather than via insertContent.
+    const { view, dispatch } = makeView();
+    const insertContent = vi.fn();
+    const parse = vi.fn().mockReturnValue(plainParagraphDoc);
+    const editor = {
+      storage: { markdown: { manager: { parse, hasMarked: () => true } } },
+      commands: { insertContent },
+    } as any;
+    const handled = handleWysiwygPlainTextPaste(
+      view as any,
+      makeEvent({ 'text/plain': '5 * 3 = 15' }),
+      editor,
+    );
+    expect(handled).toBe(true);
+    expect(insertContent).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to plain text when the markdown manager throws', () => {
@@ -265,62 +299,114 @@ describe('handleWysiwygPlainTextPaste', () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT treat ambiguous text as markdown', () => {
-    // "5 * 3 = 15" contains an asterisk but no structural shape; we must
-    // paste it verbatim instead of converting to italic.
+  it('forcePlainText bypasses markdown rendering and pastes verbatim', () => {
+    // Cmd/Ctrl+Shift+V: even unambiguous markdown must land as literal
+    // characters so the user gets the raw text they asked for.
     const { view, dispatch } = makeView();
-    const insertContent = vi.fn();
+    const insertContent = vi.fn().mockReturnValue(true);
+    const parse = vi.fn().mockReturnValue(headingDoc);
     const editor = {
-      storage: { markdown: { manager: { parse: vi.fn(), hasMarked: () => true } } },
+      storage: { markdown: { manager: { parse, hasMarked: () => true } } },
       commands: { insertContent },
     } as any;
     const handled = handleWysiwygPlainTextPaste(
       view as any,
-      makeEvent({ 'text/plain': '5 * 3 = 15' }),
+      makeEvent({ 'text/plain': '# Title' }),
       editor,
+      true,
     );
     expect(handled).toBe(true);
+    expect(parse).not.toHaveBeenCalled();
     expect(insertContent).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });
 
-describe('pastedTextLooksLikeMarkdown', () => {
-  it('returns true for ATX headings', () => {
-    expect(pastedTextLooksLikeMarkdown('# Hello')).toBe(true);
-    expect(pastedTextLooksLikeMarkdown('### Subsection title')).toBe(true);
+describe('parsedDocHasFormatting', () => {
+  it('returns false for null / undefined / non-objects', () => {
+    expect(parsedDocHasFormatting(null)).toBe(false);
+    expect(parsedDocHasFormatting(undefined)).toBe(false);
+    expect(parsedDocHasFormatting('text')).toBe(false);
   });
 
-  it('returns true for fenced code blocks', () => {
-    expect(pastedTextLooksLikeMarkdown('```js\nconsole.log()\n```')).toBe(true);
+  it('returns false for a single plain paragraph', () => {
+    expect(
+      parsedDocHasFormatting({
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello' }] }],
+      }),
+    ).toBe(false);
   });
 
-  it('returns true for bullet and numbered lists', () => {
-    expect(pastedTextLooksLikeMarkdown('- one\n- two')).toBe(true);
-    expect(pastedTextLooksLikeMarkdown('1. first\n2. second')).toBe(true);
+  it('returns false for multiple plain paragraphs (blank-line separated text)', () => {
+    expect(
+      parsedDocHasFormatting({
+        type: 'doc',
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'one' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'two' }] },
+        ],
+      }),
+    ).toBe(false);
   });
 
-  it('returns true for blockquotes', () => {
-    expect(pastedTextLooksLikeMarkdown('> a quote')).toBe(true);
+  it('treats hard breaks inside a paragraph as plain text', () => {
+    expect(
+      parsedDocHasFormatting({
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'a' },
+              { type: 'hardBreak' },
+              { type: 'text', text: 'b' },
+            ],
+          },
+        ],
+      }),
+    ).toBe(false);
   });
 
-  it('returns true for task lists', () => {
-    expect(pastedTextLooksLikeMarkdown('- [ ] todo\n- [x] done')).toBe(true);
+  it('returns true when any text node carries a mark', () => {
+    expect(
+      parsedDocHasFormatting({
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'bold', marks: [{ type: 'bold' }] }],
+          },
+        ],
+      }),
+    ).toBe(true);
   });
 
-  it('returns true for tables', () => {
-    expect(pastedTextLooksLikeMarkdown('| col | col |\n| --- | --- |\n| 1 | 2 |')).toBe(true);
-  });
-
-  it('returns false for plain prose', () => {
-    expect(pastedTextLooksLikeMarkdown('Just some prose with no special shape.')).toBe(false);
-  });
-
-  it('returns false for ambiguous inline patterns alone', () => {
-    // Inline-only patterns must not trigger the heuristic — false positives
-    // here are far more jarring than false negatives.
-    expect(pastedTextLooksLikeMarkdown('**not a heading**')).toBe(false);
-    expect(pastedTextLooksLikeMarkdown('[link](https://x.com)')).toBe(false);
-    expect(pastedTextLooksLikeMarkdown('5 * 3 = 15')).toBe(false);
+  it('returns true for non-paragraph block nodes (heading, list, table)', () => {
+    for (const block of ['heading', 'bulletList', 'orderedList', 'blockquote', 'codeBlock', 'table']) {
+      expect(
+        parsedDocHasFormatting({ type: 'doc', content: [{ type: block }] }),
+      ).toBe(true);
+    }
   });
 });
+
+describe('isPlainTextPasteRequest', () => {
+  it('is true when shift is held and the last key was not Insert', () => {
+    expect(isPlainTextPasteRequest({ input: { shiftKey: true, lastKeyCode: 86 } })).toBe(true);
+  });
+
+  it('is false without shift', () => {
+    expect(isPlainTextPasteRequest({ input: { shiftKey: false, lastKeyCode: 86 } })).toBe(false);
+  });
+
+  it('is false for Shift+Insert (lastKeyCode 45)', () => {
+    expect(isPlainTextPasteRequest({ input: { shiftKey: true, lastKeyCode: 45 } })).toBe(false);
+  });
+
+  it('is false when the view exposes no input state', () => {
+    expect(isPlainTextPasteRequest({})).toBe(false);
+    expect(isPlainTextPasteRequest({ input: undefined })).toBe(false);
+  });
+});
+
