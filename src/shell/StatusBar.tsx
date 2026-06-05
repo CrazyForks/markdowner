@@ -12,6 +12,8 @@ interface StatusBarProps {
   wordCount?: number | null;
   characterCount?: number | null;
   readingTimeMinutes?: number | null;
+  updateAvailable?: boolean;
+  onUpdateClick?: () => void;
 }
 
 export function StatusBar({
@@ -28,6 +30,8 @@ export function StatusBar({
   wordCount,
   characterCount,
   readingTimeMinutes,
+  updateAvailable = false,
+  onUpdateClick,
 }: StatusBarProps) {
   const showCursorPosition =
     typeof cursorLine === 'number' && typeof cursorColumn === 'number';
@@ -65,6 +69,17 @@ export function StatusBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-3 overflow-hidden">
+        {updateAvailable ? (
+          <button
+            type="button"
+            data-testid="statusbar-update-badge"
+            onClick={onUpdateClick}
+            title="A new version is available"
+            className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[0.68rem] font-semibold text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300"
+          >
+            Update ▴
+          </button>
+        ) : null}
         {showDocumentStats ? (
           <span className="hidden min-[760px]:inline" title="Document statistics">
             {wordCount} {wordCount === 1 ? 'word' : 'words'} · {characterCount} {characterCount === 1 ? 'char' : 'chars'}
