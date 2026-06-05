@@ -1,5 +1,6 @@
 import type { ThemeKind } from '@/lib/desktop';
 import type { Settings } from '@/lib/settings';
+import type { UpdateInfo } from '@/lib/updateCheck';
 
 import { SettingsPanel, type ThemeChoice } from './SettingsPanel';
 
@@ -9,6 +10,12 @@ interface SettingsTabContentProps {
   themeKind: ThemeKind;
   onSetTheme: (themeKind: ThemeKind) => void;
   onFollowSystemTheme: () => void;
+  updateInfo?: UpdateInfo | null;
+  updateActionLabel?: string;
+  updateBusy?: boolean;
+  updateChecking?: boolean;
+  onUpdateAction?: () => void;
+  onCheckForUpdate?: () => void;
 }
 
 export function SettingsTabContent({
@@ -17,6 +24,12 @@ export function SettingsTabContent({
   themeKind,
   onSetTheme,
   onFollowSystemTheme,
+  updateInfo,
+  updateActionLabel,
+  updateBusy,
+  updateChecking,
+  onUpdateAction,
+  onCheckForUpdate,
 }: SettingsTabContentProps) {
   const currentTheme = resolveSettingsThemeChoice(settings, themeKind);
 
@@ -35,6 +48,12 @@ export function SettingsTabContent({
       onSettingsChange={onSettingsChange}
       currentTheme={currentTheme}
       onThemeChange={handleThemeChange}
+      updateInfo={updateInfo}
+      updateActionLabel={updateActionLabel}
+      updateBusy={updateBusy}
+      updateChecking={updateChecking}
+      onUpdateAction={onUpdateAction}
+      onCheckForUpdate={onCheckForUpdate}
     />
   );
 }

@@ -63,6 +63,7 @@ import {
 import { SidebarResizeHandle } from '@/shell/SidebarResizeHandle';
 import { SourceEditorPane } from '@/shell/SourceEditorPane';
 import { StatusBar } from '@/shell/StatusBar';
+import { UpdateBanner } from '@/shell/UpdateBanner';
 import { SettingsTabContent } from '@/shell/SettingsTabContent';
 import { WorkspaceTree } from '@/shell/WorkspaceTree';
 import { WysiwygEditorChrome } from '@/shell/WysiwygEditorChrome';
@@ -187,6 +188,7 @@ import {
   saveSettings,
 } from './lib/settings';
 import { moveTab } from './lib/tabs';
+import { useUpdateCheck } from './lib/useUpdateCheck';
 import {
   MARKDOWN_CONTENT_SCOPE_CLASS,
   applyImportedStylesheet,
@@ -403,6 +405,7 @@ export default function App() {
   const searchRequests = useLatestRequestTracker();
   const [shellAnnouncement, setShellAnnouncement] = useState('');
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [debouncedLocalDraft, setDebouncedLocalDraft] = useState(localDraft);
   const [cursorPosition, setCursorPosition] = useState<{ line: number; column: number }>({
     line: 1,
@@ -2110,6 +2113,7 @@ export default function App() {
 
         startTransition(() => {
           setSettings(loadedSettings);
+          setSettingsLoaded(true);
         });
 
         let next = await bootstrap();
@@ -2398,6 +2402,8 @@ export default function App() {
       );
     }
   };
+
+  const updateCheck = useUpdateCheck(settings, handleSettingsChange, settingsLoaded);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -4127,6 +4133,15 @@ export default function App() {
           />
         }
       />
+      {updateCheck.bannerVisible && updateCheck.info ? (
+        <UpdateBanner
+          latestVersion={updateCheck.info.latestVersion}
+          actionLabel="View release"
+          busy={updateCheck.installing}
+          onAction={updateCheck.viewRelease}
+          onDismiss={updateCheck.dismissBanner}
+        />
+      ) : null}
       <div
         className={cn(
           'min-h-0 flex-1 grid',
@@ -4215,6 +4230,12 @@ export default function App() {
           themeKind={snapshot.theme.kind}
           onSetTheme={(theme) => void handleSetTheme(theme)}
           onFollowSystemTheme={() => void handleFollowSystemTheme()}
+          updateInfo={updateCheck.info}
+          updateActionLabel="View release"
+          updateBusy={updateCheck.installing}
+          updateChecking={updateCheck.checking}
+          onUpdateAction={updateCheck.viewRelease}
+          onCheckForUpdate={updateCheck.checkNow}
         />
       ) : null}
       <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', isSettingsTabActive && 'hidden')}>
@@ -4317,7 +4338,15 @@ export default function App() {
         onShortcutsOpenChange={setIsShortcutsOpen}
       />
 
-      <StatusBar {...statusBarModel} />
+      <StatusBar
+        {...statusBarModel}
+        updateAvailable={updateCheck.info?.available ?? false}
+        onUpdateClick={() => {
+          if (!isSettingsTabActive) {
+            void toggleSettingsTab();
+          }
+        }}
+      />
       <ImeDebugOverlay />
     </div>
   );

@@ -10,6 +10,11 @@ import {
   type UpdateInfo,
 } from './updateCheck';
 
+/** True only inside the Tauri shell, where the Rust backend exists. */
+function inTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
 export interface UseUpdateCheck {
   info: UpdateInfo | null;
   bannerVisible: boolean;
@@ -37,26 +42,31 @@ export function useUpdateCheck(
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const launchedRef = useRef(false);
 
-  // Keep the latest settings in a ref so callbacks can read/merge without
-  // being re-created on every settings change.
+  // Keep the latest settings and change handler in refs so callbacks have a
+  // stable identity — otherwise they'd be re-created every render (the parent
+  // recreates `onSettingsChange` each render), churning the launch effect.
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const onSettingsChangeRef = useRef(onSettingsChange);
+  onSettingsChangeRef.current = onSettingsChange;
 
   const runCheck = useCallback(async () => {
     setChecking(true);
     try {
       const result = await checkForUpdate();
       setInfo(result);
-      onSettingsChange({ ...settingsRef.current, lastUpdateCheckAt: Date.now() });
+      onSettingsChangeRef.current({ ...settingsRef.current, lastUpdateCheckAt: Date.now() });
     } catch (error) {
       console.error('Update check failed:', error);
     } finally {
       setChecking(false);
     }
-  }, [onSettingsChange]);
+  }, []);
 
   useEffect(() => {
-    if (!ready || launchedRef.current) {
+    // The launch check needs the Rust backend; skip it outside the Tauri shell
+    // (web preview, tests) where there is nothing to call.
+    if (!ready || launchedRef.current || !inTauri()) {
       return;
     }
     launchedRef.current = true;
@@ -74,9 +84,12 @@ export function useUpdateCheck(
   const dismissBanner = useCallback(() => {
     setSessionDismissed(true);
     if (info) {
-      onSettingsChange({ ...settingsRef.current, dismissedUpdateVersion: info.latestVersion });
+      onSettingsChangeRef.current({
+        ...settingsRef.current,
+        dismissedUpdateVersion: info.latestVersion,
+      });
     }
-  }, [info, onSettingsChange]);
+  }, [info]);
 
   const checkNow = useCallback(() => runCheck(), [runCheck]);
 

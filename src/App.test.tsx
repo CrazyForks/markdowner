@@ -5716,6 +5716,9 @@ describe('App recent documents', () => {
           codeBlockHighlight: true,
           codeBlockTheme: 'one-dark',
           codeBlockThemeSync: true,
+          updateCheckEnabled: true,
+          lastUpdateCheckAt: null,
+          dismissedUpdateVersion: null,
         },
       });
     });
@@ -6929,6 +6932,9 @@ describe('App recent documents', () => {
           codeBlockHighlight: true,
           codeBlockTheme: 'one-dark',
           codeBlockThemeSync: true,
+          updateCheckEnabled: true,
+          lastUpdateCheckAt: null,
+          dismissedUpdateVersion: null,
         },
       });
     });
