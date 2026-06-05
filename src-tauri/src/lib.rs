@@ -19,6 +19,7 @@ use tauri_plugin_cli::CliExt;
 
 mod diagnostics;
 mod link_actions;
+mod updater;
 
 const MENU_COMMAND_EVENT: &str = "markdowner://menu-command";
 const MENU_FILE_ID: &str = "file";
@@ -1735,6 +1736,7 @@ pub fn run() {
             link_actions::resolve_markdown_link,
             link_actions::open_external_url,
             link_actions::open_path_in_default_app,
+            updater::check_for_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while running Markdowner desktop shell")
