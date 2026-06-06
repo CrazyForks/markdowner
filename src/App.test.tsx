@@ -6943,6 +6943,44 @@ describe('App recent documents', () => {
     expect(within(dialog).getByLabelText(/font family/i)).toHaveValue('');
   });
 
+  it('shows a toast when a manual update check is already on the latest version', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          updateCheckEnabled: true,
+          lastUpdateCheckAt: null,
+          dismissedUpdateVersion: null,
+        };
+      }
+      if (command === 'check_for_update') {
+        return {
+          available: false,
+          currentVersion: '0.260606.2',
+          latestVersion: '0.260606.2',
+          dmgUrl: null,
+          releaseUrl: 'https://example.com/release',
+          notes: '',
+        };
+      }
+      return undefined;
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const panel = await screen.findByTestId('settings-panel');
+    fireEvent.click(within(panel).getByTestId('settings-update-check'));
+
+    expect(await screen.findByText("You're already on the latest version! 🎉")).toBeInTheDocument();
+  });
+
   it('exposes a descriptive tooltip on the Settings dialog Reset to Defaults button', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {

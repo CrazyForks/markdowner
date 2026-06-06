@@ -26,6 +26,10 @@ export interface UseUpdateCheck {
   install: () => Promise<void>;
 }
 
+interface UseUpdateCheckOptions {
+  onManualCheckComplete?: (info: UpdateInfo) => void;
+}
+
 /**
  * Owns the launch update check (24h throttle) and the resulting state.
  * `ready` gates the launch check until persisted settings have loaded, so we
@@ -35,6 +39,7 @@ export function useUpdateCheck(
   settings: Settings,
   onSettingsChange: (next: Settings) => void,
   ready: boolean,
+  options: UseUpdateCheckOptions = {},
 ): UseUpdateCheck {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
@@ -49,13 +54,18 @@ export function useUpdateCheck(
   settingsRef.current = settings;
   const onSettingsChangeRef = useRef(onSettingsChange);
   onSettingsChangeRef.current = onSettingsChange;
+  const onManualCheckCompleteRef = useRef(options.onManualCheckComplete);
+  onManualCheckCompleteRef.current = options.onManualCheckComplete;
 
-  const runCheck = useCallback(async () => {
+  const runCheck = useCallback(async (manual = false) => {
     setChecking(true);
     try {
       const result = await checkForUpdate();
       setInfo(result);
       onSettingsChangeRef.current({ ...settingsRef.current, lastUpdateCheckAt: Date.now() });
+      if (manual) {
+        onManualCheckCompleteRef.current?.(result);
+      }
     } catch (error) {
       console.error('Update check failed:', error);
     } finally {
@@ -71,7 +81,7 @@ export function useUpdateCheck(
     }
     launchedRef.current = true;
     if (shouldCheckNow(settings.updateCheckEnabled, settings.lastUpdateCheckAt, Date.now())) {
-      void runCheck();
+      void runCheck(false);
     }
   }, [ready, runCheck, settings.updateCheckEnabled, settings.lastUpdateCheckAt]);
 
@@ -91,7 +101,7 @@ export function useUpdateCheck(
     }
   }, [info]);
 
-  const checkNow = useCallback(() => runCheck(), [runCheck]);
+  const checkNow = useCallback(() => runCheck(true), [runCheck]);
 
   const viewRelease = useCallback(() => {
     if (info) {

@@ -45,6 +45,12 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import {
+  Toast,
+  ToastDescription,
+  ToastProvider,
+  ToastViewport,
+} from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { ActivityBar } from '@/shell/ActivityBar';
 import { AppMenu } from '@/shell/AppMenu';
@@ -335,6 +341,7 @@ const CHORD_PREFIX_TIMEOUT_MS = 1500;
 // at this cadence and force-flush at synchronization points (save, mode
 // switch, tab stash, close prompts) to keep correctness without the cost.
 const WYSIWYG_FLUSH_DEBOUNCE_MS = 120;
+const SHELL_TOAST_DISMISS_MS = 3000;
 // Max gap between a syllable's compositionend and the next syllable's
 // compositionstart for the table-cell caret carry-forward to apply. Continuous
 // CJK typing fires these within tens of ms; deliberate caret moves are slower.
@@ -404,6 +411,7 @@ export default function App() {
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const searchRequests = useLatestRequestTracker();
   const [shellAnnouncement, setShellAnnouncement] = useState('');
+  const [shellToastMessage, setShellToastMessage] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [debouncedLocalDraft, setDebouncedLocalDraft] = useState(localDraft);
@@ -420,6 +428,7 @@ export default function App() {
   const externalCompareRequests = useLatestRequestTracker();
   const busyDepthRef = useRef(0);
   const liveRegionTimerRef = useRef<number | null>(null);
+  const shellToastTimerRef = useRef<number | null>(null);
   const lastAnnouncedModeRef = useRef<EditorMode | null>(null);
   const lastAnnouncedTabIdRef = useRef<string | null>(null);
   const chordPrefixActiveRef = useRef(false);
@@ -574,10 +583,24 @@ export default function App() {
     }, 10);
   };
 
+  const showShellToast = (message: string) => {
+    if (shellToastTimerRef.current !== null) {
+      window.clearTimeout(shellToastTimerRef.current);
+    }
+    setShellToastMessage(message);
+    shellToastTimerRef.current = window.setTimeout(() => {
+      setShellToastMessage(null);
+      shellToastTimerRef.current = null;
+    }, SHELL_TOAST_DISMISS_MS);
+  };
+
   useEffect(() => {
     return () => {
       if (liveRegionTimerRef.current !== null) {
         window.clearTimeout(liveRegionTimerRef.current);
+      }
+      if (shellToastTimerRef.current !== null) {
+        window.clearTimeout(shellToastTimerRef.current);
       }
     };
   }, []);
@@ -2403,7 +2426,13 @@ export default function App() {
     }
   };
 
-  const updateCheck = useUpdateCheck(settings, handleSettingsChange, settingsLoaded);
+  const updateCheck = useUpdateCheck(settings, handleSettingsChange, settingsLoaded, {
+    onManualCheckComplete: (result) => {
+      if (!result.available) {
+        showShellToast("You're already on the latest version! 🎉");
+      }
+    },
+  });
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -4348,6 +4377,21 @@ export default function App() {
         }}
       />
       <ImeDebugOverlay />
+      <ToastProvider>
+        <Toast
+          open={shellToastMessage !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setShellToastMessage(null);
+            }
+          }}
+        >
+          {shellToastMessage ? (
+            <ToastDescription>{shellToastMessage}</ToastDescription>
+          ) : null}
+        </Toast>
+        <ToastViewport />
+      </ToastProvider>
     </div>
   );
 }
