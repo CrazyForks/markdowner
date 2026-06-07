@@ -22,6 +22,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import { publishEditorEvent, subscribeEditorEvent } from '@/lib/editorEvents';
+import { hangulToQwerty } from '@/lib/hangulQwerty';
 
 type SlashItemKind = 'block' | 'prompt-image';
 
@@ -40,7 +41,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'paragraph',
     title: 'Text',
     description: 'Plain paragraph text.',
-    keywords: ['text', 'paragraph', 'plain', 'p'],
+    keywords: ['text', 'paragraph', 'plain', 'p', '텍스트', '본문', '문단'],
     icon: Pilcrow,
     run: (editor) => editor.chain().focus().setParagraph().run(),
   },
@@ -48,7 +49,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'h1',
     title: 'Heading 1',
     description: 'Large section heading.',
-    keywords: ['h1', 'heading', 'title'],
+    keywords: ['h1', 'heading', 'title', '제목1', '제목', '큰제목', '헤딩'],
     icon: Heading1,
     run: (editor) => editor.chain().focus().setNode('heading', { level: 1 }).run(),
   },
@@ -56,7 +57,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'h2',
     title: 'Heading 2',
     description: 'Medium section heading.',
-    keywords: ['h2', 'heading'],
+    keywords: ['h2', 'heading', '제목2', '제목', '헤딩'],
     icon: Heading2,
     run: (editor) => editor.chain().focus().setNode('heading', { level: 2 }).run(),
   },
@@ -64,7 +65,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'h3',
     title: 'Heading 3',
     description: 'Small section heading.',
-    keywords: ['h3', 'heading'],
+    keywords: ['h3', 'heading', '제목3', '제목', '헤딩'],
     icon: Heading3,
     run: (editor) => editor.chain().focus().setNode('heading', { level: 3 }).run(),
   },
@@ -72,7 +73,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'bulleted',
     title: 'Bulleted list',
     description: 'Simple bulleted list.',
-    keywords: ['bullet', 'unordered', 'list', 'ul'],
+    keywords: ['bullet', 'unordered', 'list', 'ul', '목록', '글머리기호', '리스트', '불릿'],
     icon: List,
     run: (editor) => editor.chain().focus().toggleBulletList().run(),
   },
@@ -80,7 +81,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'numbered',
     title: 'Numbered list',
     description: 'List with numbering.',
-    keywords: ['numbered', 'ordered', 'list', 'ol'],
+    keywords: ['numbered', 'ordered', 'list', 'ol', '번호목록', '순서목록', '숫자목록', '번호매기기'],
     icon: ListOrdered,
     run: (editor) => editor.chain().focus().toggleOrderedList().run(),
   },
@@ -88,7 +89,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'todo',
     title: 'To-do list',
     description: 'Track tasks with checkboxes.',
-    keywords: ['todo', 'task', 'checkbox', 'check'],
+    keywords: ['todo', 'task', 'checkbox', 'check', '할일', '체크리스트', '체크박스', '투두'],
     icon: CheckSquare,
     run: (editor) => editor.chain().focus().toggleTaskList().run(),
   },
@@ -96,7 +97,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'quote',
     title: 'Quote',
     description: 'Block quote.',
-    keywords: ['quote', 'blockquote'],
+    keywords: ['quote', 'blockquote', '인용', '인용구'],
     icon: Quote,
     run: (editor) => editor.chain().focus().toggleBlockquote().run(),
   },
@@ -104,7 +105,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'code',
     title: 'Code block',
     description: 'Fenced code block.',
-    keywords: ['code', 'codeblock', 'pre', 'fenced'],
+    keywords: ['code', 'codeblock', 'pre', 'fenced', '코드', '코드블록'],
     icon: Code,
     run: (editor) => editor.chain().focus().toggleCodeBlock().run(),
   },
@@ -112,7 +113,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'divider',
     title: 'Divider',
     description: 'Horizontal rule.',
-    keywords: ['divider', 'hr', 'rule', 'separator', 'line'],
+    keywords: ['divider', 'hr', 'rule', 'separator', 'line', '구분선', '구분', '가로줄'],
     icon: Minus,
     run: (editor) => editor.chain().focus().setHorizontalRule().run(),
   },
@@ -120,7 +121,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'table',
     title: 'Table',
     description: '3×3 table with header row.',
-    keywords: ['table', 'grid'],
+    keywords: ['table', 'grid', '표', '테이블'],
     icon: TableIcon,
     run: (editor) =>
       editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
@@ -129,7 +130,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'inline-code',
     title: 'Inline code',
     description: 'Toggle inline code mark.',
-    keywords: ['inline', 'code', 'mark'],
+    keywords: ['inline', 'code', 'mark', '인라인코드', '인라인'],
     icon: Hash,
     run: (editor) => editor.chain().focus().toggleCode().run(),
   },
@@ -137,7 +138,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'image',
     title: 'Image',
     description: 'Embed an image by URL.',
-    keywords: ['image', 'img', 'picture', 'photo'],
+    keywords: ['image', 'img', 'picture', 'photo', '이미지', '그림', '사진'],
     icon: ImageIcon,
     // The runner sub-mode lives inside the menu — window.prompt is unreliable
     // in WKWebView (Tauri) and feels jarring inside a desktop app. The image
@@ -149,7 +150,7 @@ const SLASH_ITEMS: SlashItem[] = [
     id: 'link',
     title: 'Link',
     description: 'Insert or convert text into a link.',
-    keywords: ['link', 'url', 'hyperlink', 'anchor'],
+    keywords: ['link', 'url', 'hyperlink', 'anchor', '링크', '주소'],
     icon: LinkIcon,
     run: (editor) => {
       // Apply a placeholder link mark on whatever the caret currently covers,
@@ -223,12 +224,21 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
 
   const filteredItems = useMemo(() => {
     if (!menu.open) return SLASH_ITEMS;
-    const query = menu.query.trim().toLowerCase();
+    const trimmed = menu.query.trim();
+    const query = trimmed.toLowerCase();
     if (!query) return SLASH_ITEMS;
-    return SLASH_ITEMS.filter((item) => {
-      if (item.title.toLowerCase().includes(query)) return true;
-      return item.keywords.some((keyword) => keyword.toLowerCase().startsWith(query));
-    });
+    // Also try the query as if the user had meant to type an English command
+    // but left the IME in Korean mode: "/ㅅ뮤ㅣㄷ" → "table" (두벌식 layout).
+    // Korean keywords (e.g. "표"/"테이블") are matched directly via `query`.
+    const layoutSwapped = hangulToQwerty(trimmed).toLowerCase();
+    const queries = layoutSwapped && layoutSwapped !== query ? [query, layoutSwapped] : [query];
+    return SLASH_ITEMS.filter((item) =>
+      queries.some(
+        (q) =>
+          item.title.toLowerCase().includes(q) ||
+          item.keywords.some((keyword) => keyword.toLowerCase().startsWith(q)),
+      ),
+    );
   }, [menu]);
 
   // Keep activeIndex clamped to filteredItems length.

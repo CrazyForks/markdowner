@@ -302,4 +302,34 @@ describe('SlashCommandMenu', () => {
       expect(menu.style.top).not.toBe(beforeTop);
     });
   });
+
+  it('matches a Korean keyword query ("/테이블" → Table)', async () => {
+    const editor = createSlashEditor();
+    setSlashTextBefore(editor, '/테이블');
+
+    render(<SlashCommandMenu editor={editor} />);
+
+    act(() => {
+      editor.emit('update');
+    });
+
+    expect(await screen.findByRole('menuitem', { name: /table/i })).toBeInTheDocument();
+    // Unrelated commands are filtered out by the Korean keyword.
+    expect(screen.queryByRole('menuitem', { name: /heading 1/i })).toBeNull();
+  });
+
+  it('matches English mistyped under the Korean IME ("/ㅅ뮤ㅣㄷ" → table → Table)', async () => {
+    const editor = createSlashEditor();
+    // "table" typed on a dubeolsik layout with the IME left in Korean mode.
+    setSlashTextBefore(editor, '/ㅅ뮤ㅣㄷ');
+
+    render(<SlashCommandMenu editor={editor} />);
+
+    act(() => {
+      editor.emit('update');
+    });
+
+    expect(await screen.findByRole('menuitem', { name: /table/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /heading 1/i })).toBeNull();
+  });
 });
