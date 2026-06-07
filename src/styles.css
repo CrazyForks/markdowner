@@ -552,6 +552,32 @@ img.ProseMirror-separator {
   .notion-editor-content .ProseMirror.resize-cursor {
     cursor: col-resize;
   }
+
+  /* Inline table view (data-table-view='inline'): cells never auto-wrap, so the
+     table grows to its content width and the surrounding pane scrolls
+     horizontally. Intentional breaks inside a cell (a hard `<br>` or a second
+     paragraph) still render — white-space:nowrap only suppresses *automatic*
+     wrapping, not explicit line breaks. The 'normal' view keeps the default
+     full-width, text-wrapping layout. */
+  [data-table-view='inline'] .notion-editor-content .ProseMirror table {
+    width: auto;
+  }
+  [data-table-view='inline'] .notion-editor-content .ProseMirror table th,
+  [data-table-view='inline'] .notion-editor-content .ProseMirror table td {
+    white-space: nowrap;
+  }
+  /* Preview pane renders plain react-markdown tables with no scroll wrapper, so
+     the table itself becomes the horizontal scroll container in inline view. */
+  [data-table-view='inline'] .editor-pane-preview table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  [data-table-view='inline'] .editor-pane-preview th,
+  [data-table-view='inline'] .editor-pane-preview td {
+    white-space: nowrap;
+  }
 }
 
 /* Editor surface layout — three persistent panes, mode toggles flex direction. */

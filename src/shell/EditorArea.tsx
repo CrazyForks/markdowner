@@ -65,6 +65,7 @@ export interface EditorAreaProps {
   minimapScrollEl?: HTMLElement | null;
   /** Controls cell padding/font in WYSIWYG + preview markdown tables. */
   tableDensity?: 'compact' | 'normal';
+  tableViewMode?: 'normal' | 'inline';
 }
 
 export function EditorArea({
@@ -105,6 +106,7 @@ export function EditorArea({
   minimapEnabled = false,
   minimapScrollEl = null,
   tableDensity = 'compact',
+  tableViewMode = 'normal',
 }: EditorAreaProps) {
   // Cast the style record so we can carry our custom property
   // (`--editor-wrap-column`) without TypeScript complaining about an
@@ -220,6 +222,7 @@ export function EditorArea({
         data-mode={currentMode}
         data-minimap={minimapEnabled && activeDocumentOpen ? 'on' : 'off'}
         data-table-density={tableDensity}
+        data-table-view={tableViewMode}
       >
         {!activeDocumentOpen ? (
           <Empty className="flex-1 border-dashed">

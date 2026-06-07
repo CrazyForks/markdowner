@@ -132,6 +132,7 @@ export function buildCommandPaletteCommands(
       id: 'preferences.toggleFocusMode',
       category: 'Preferences',
       label: settings.focusModeEnabled ? 'Disable Focus Mode' : 'Enable Focus Mode',
+      shortcut: '⌘⇧J',
       run: () =>
         actions.updateSettings({
           ...settings,
@@ -153,10 +154,25 @@ export function buildCommandPaletteCommands(
       id: 'preferences.toggleWordWrap',
       category: 'Preferences',
       label: settings.editorLineWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
+      shortcut: '⌥Z',
       run: () =>
         actions.updateSettings({
           ...settings,
           editorLineWrap: !settings.editorLineWrap,
+        }),
+    },
+    {
+      id: 'preferences.toggleTableViewMode',
+      category: 'Preferences',
+      label:
+        settings.tableViewMode === 'inline'
+          ? 'Table View: Normal (wrap)'
+          : 'Table View: Inline (no wrap, scroll)',
+      shortcut: '⌘⇧M',
+      run: () =>
+        actions.updateSettings({
+          ...settings,
+          tableViewMode: settings.tableViewMode === 'inline' ? 'normal' : 'inline',
         }),
     },
     {

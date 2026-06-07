@@ -70,10 +70,12 @@ export type ShellShortcutAction =
   | { kind: 'showExplorerPanel' }
   | { kind: 'toggleCommandPalette' }
   | { kind: 'toggleDocumentStats' }
+  | { kind: 'toggleFocusMode' }
   | { kind: 'toggleQuickOpen' }
   | { kind: 'toggleSettingsTab' }
   | { kind: 'toggleShortcuts' }
   | { kind: 'toggleSidebar' }
+  | { kind: 'toggleTableViewMode' }
   | { kind: 'toggleTypewriterMode' };
 
 export type TabShortcutResolution =
@@ -254,7 +256,31 @@ export function resolveShellShortcutAction(
   if (matchesShortcut(event, 't', { shift: true })) {
     return { kind: 'toggleTypewriterMode' };
   }
+  if (matchesShortcut(event, 'j', { shift: true })) {
+    return { kind: 'toggleFocusMode' };
+  }
+  if (matchesShortcut(event, 'm', { shift: true })) {
+    return { kind: 'toggleTableViewMode' };
+  }
   return { kind: 'none' };
+}
+
+type WordWrapShortcutEvent = CommandModifierEvent &
+  Pick<KeyboardEvent, 'altKey' | 'code' | 'shiftKey'>;
+
+/**
+ * Toggle Word Wrap with Option+Z (VS Code convention). Keyed on `event.code`
+ * rather than `event.key` because macOS reports `Ω` for Option+Z; the caller
+ * must `preventDefault()` so that character is never inserted into the editor.
+ */
+export function resolveWordWrapShortcut(event: WordWrapShortcutEvent): boolean {
+  return (
+    event.code === 'KeyZ' &&
+    event.altKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey
+  );
 }
 
 export function resolveTabShortcut(event: TabShortcutEvent): TabShortcutResolution | null {

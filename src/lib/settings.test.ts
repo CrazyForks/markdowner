@@ -106,3 +106,18 @@ describe('update-check settings defaults', () => {
     expect(DEFAULT_SETTINGS.dismissedUpdateVersion).toBeNull();
   });
 });
+
+describe('table view defaults', () => {
+  it('defaults to the normal (text-wrapping) table layout', () => {
+    expect(DEFAULT_SETTINGS.tableViewMode).toBe('normal');
+  });
+
+  it('tracks table view mode as a change', () => {
+    expect(
+      getChangedSettingsKeys(DEFAULT_SETTINGS, {
+        ...DEFAULT_SETTINGS,
+        tableViewMode: 'inline',
+      }),
+    ).toEqual(['tableViewMode']);
+  });
+});

@@ -10,6 +10,7 @@ import {
   resolveShellShortcutAction,
   resolveTabShortcut,
   resolveTabShortcutAction,
+  resolveWordWrapShortcut,
   usesCommandModifier,
 } from './keyboardShortcuts';
 
@@ -218,6 +219,8 @@ describe('resolveShellShortcutAction', () => {
     [{ key: 'q', metaKey: true }, { kind: 'quit' }],
     [{ key: 'w', metaKey: true }, { kind: 'closeTabOrWindow' }],
     [{ key: 'T', metaKey: true, shiftKey: true }, { kind: 'toggleTypewriterMode' }],
+    [{ key: 'J', metaKey: true, shiftKey: true }, { kind: 'toggleFocusMode' }],
+    [{ key: 'm', metaKey: true, shiftKey: true }, { kind: 'toggleTableViewMode' }],
   ] as const)('resolves shell shortcut %o', (event, expected) => {
     expect(resolveShellShortcutAction(shortcutEvent(event), context)).toEqual(expected);
   });
@@ -273,6 +276,25 @@ describe('resolveShellShortcutAction', () => {
         context,
       ),
     ).toEqual({ kind: 'none' });
+  });
+});
+
+describe('resolveWordWrapShortcut', () => {
+  it('matches Option+Z by physical code, ignoring the macOS Ω key value', () => {
+    expect(resolveWordWrapShortcut(shortcutEvent({ code: 'KeyZ', key: 'Ω', altKey: true }))).toBe(
+      true,
+    );
+  });
+
+  it('rejects Z without Option and Option+Z carrying extra modifiers', () => {
+    expect(resolveWordWrapShortcut(shortcutEvent({ code: 'KeyZ', key: 'z' }))).toBe(false);
+    expect(
+      resolveWordWrapShortcut(shortcutEvent({ code: 'KeyZ', altKey: true, metaKey: true })),
+    ).toBe(false);
+    expect(
+      resolveWordWrapShortcut(shortcutEvent({ code: 'KeyZ', altKey: true, shiftKey: true })),
+    ).toBe(false);
+    expect(resolveWordWrapShortcut(shortcutEvent({ code: 'KeyA', altKey: true }))).toBe(false);
   });
 });
 

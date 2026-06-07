@@ -226,6 +226,7 @@ import {
   resolveShellShortcutAction,
   resolveTabShortcut,
   resolveTabShortcutAction,
+  resolveWordWrapShortcut,
 } from './lib/keyboardShortcuts';
 import type { OutlineItem } from './lib/outline';
 import {
@@ -3587,6 +3588,17 @@ export default function App() {
         return;
       }
 
+      // Option+Z toggles Word Wrap (VS Code convention). preventDefault stops
+      // macOS from inserting the `Ω` that Option+Z would otherwise produce.
+      if (resolveWordWrapShortcut(event)) {
+        event.preventDefault();
+        handleSettingsChange({
+          ...settings,
+          editorLineWrap: !settings.editorLineWrap,
+        });
+        return;
+      }
+
       const shellShortcutAction = resolveShellShortcutAction(event, {
         activeDocumentOpen,
         isSidebarOpen,
@@ -3645,6 +3657,18 @@ export default function App() {
             handleSettingsChange({
               ...settings,
               typewriterModeEnabled: !settings.typewriterModeEnabled,
+            });
+            return;
+          case 'toggleFocusMode':
+            handleSettingsChange({
+              ...settings,
+              focusModeEnabled: !settings.focusModeEnabled,
+            });
+            return;
+          case 'toggleTableViewMode':
+            handleSettingsChange({
+              ...settings,
+              tableViewMode: settings.tableViewMode === 'inline' ? 'normal' : 'inline',
             });
             return;
           default:
@@ -4316,6 +4340,7 @@ export default function App() {
         minimapEnabled={settings.showMinimap}
         minimapScrollEl={minimapScrollEl}
         tableDensity={settings.tableDensity}
+        tableViewMode={settings.tableViewMode}
         editorContent={
           <WysiwygEditorChrome
             editor={editor}

@@ -74,6 +74,7 @@ export interface Settings {
   diagnosticsEnabled: boolean;
   showMinimap: boolean;
   tableDensity: 'compact' | 'normal';
+  tableViewMode: 'normal' | 'inline';
   codeBlockHighlight: boolean;
   codeBlockTheme: CodeBlockTheme;
   codeBlockThemeSync: boolean;
@@ -146,6 +147,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diagnosticsEnabled: false,
   showMinimap: false,
   tableDensity: 'compact',
+  tableViewMode: 'normal',
   codeBlockHighlight: true,
   codeBlockTheme: 'one-dark',
   codeBlockThemeSync: true,
@@ -306,6 +308,9 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   }
   if (merged.tableDensity !== 'compact' && merged.tableDensity !== 'normal') {
     merged.tableDensity = DEFAULT_SETTINGS.tableDensity;
+  }
+  if (merged.tableViewMode !== 'normal' && merged.tableViewMode !== 'inline') {
+    merged.tableViewMode = DEFAULT_SETTINGS.tableViewMode;
   }
   if (typeof merged.codeBlockHighlight !== 'boolean') {
     merged.codeBlockHighlight = DEFAULT_SETTINGS.codeBlockHighlight;

@@ -23,6 +23,7 @@ pub struct Settings {
     pub diagnostics_enabled: bool,
     pub show_minimap: bool,
     pub table_density: String,
+    pub table_view_mode: String,
     pub code_block_highlight: bool,
     pub code_block_theme: String,
     pub code_block_theme_sync: bool,
@@ -51,6 +52,7 @@ impl Default for Settings {
             diagnostics_enabled: false,
             show_minimap: false,
             table_density: "compact".to_string(),
+            table_view_mode: "normal".to_string(),
             code_block_highlight: true,
             code_block_theme: "one-dark".to_string(),
             code_block_theme_sync: true,
@@ -120,6 +122,21 @@ mod tests {
         assert!(!parsed.editor_line_wrap);
         assert_eq!(parsed.outline_font_size, 12);
         assert_eq!(parsed.outline_row_spacing, 1);
+    }
+
+    #[test]
+    fn table_view_mode_defaults_to_normal_and_round_trips() {
+        // Legacy settings.json (pre-table-view) loads as the normal layout.
+        let legacy = r#"{"tableDensity":"normal"}"#;
+        let parsed: Settings = serde_json::from_str(legacy).expect("legacy settings parse");
+        assert_eq!(parsed.table_view_mode, "normal");
+
+        // Explicit value survives a camelCase round-trip.
+        let json = serde_json::json!({ "tableViewMode": "inline" });
+        let parsed: Settings = serde_json::from_value(json).expect("explicit settings parse");
+        assert_eq!(parsed.table_view_mode, "inline");
+        let value = serde_json::to_value(parsed).expect("serialize settings");
+        assert_eq!(value["tableViewMode"], "inline");
     }
 
     #[test]

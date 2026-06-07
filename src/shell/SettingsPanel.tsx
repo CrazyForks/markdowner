@@ -883,6 +883,40 @@ export function SettingsPanel({
             </ToggleGroup>
           </div>
 
+          <div className={toggleFieldClass}>
+            <Label htmlFor="table-view-mode" className="text-sm">Table View</Label>
+            <ToggleGroup
+              id="table-view-mode"
+              data-testid="settings-table-view-toggle"
+              type="single"
+              value={settings.tableViewMode}
+              onValueChange={(value) => {
+                if (!value) return;
+                handleSettingChange('tableViewMode', value as Settings['tableViewMode']);
+              }}
+              variant="outline"
+              size="sm"
+              className={toggleGroupClass}
+            >
+              <ToggleGroupItem
+                value="normal"
+                aria-label="Normal"
+                title="Wrap cell text to fit the page width"
+                className={toggleItemClass}
+              >
+                Normal
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="inline"
+                aria-label="Inline"
+                title="Keep each cell on one line; scroll horizontally"
+                className={toggleItemClass}
+              >
+                Inline
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
           <div className={switchFieldClass}>
             <Label htmlFor="code-block-highlight" className="text-sm">Code Block Highlighting</Label>
             <Switch

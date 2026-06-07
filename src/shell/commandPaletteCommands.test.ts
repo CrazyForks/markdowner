@@ -68,6 +68,7 @@ describe('buildCommandPaletteCommands', () => {
       'preferences.toggleFocusMode',
       'preferences.toggleTypewriterMode',
       'preferences.toggleWordWrap',
+      'preferences.toggleTableViewMode',
       'preferences.toggleAutoSave',
       'app.settings',
       'app.installCliLauncher',
@@ -124,6 +125,39 @@ describe('buildCommandPaletteCommands', () => {
 
     commands.find((command) => command.id === 'preferences.resetDefaults')?.run();
     expect(updateSettings).toHaveBeenLastCalledWith(DEFAULT_SETTINGS);
+  });
+
+  it('toggles the table view mode and labels it by the next action', () => {
+    const updateSettings = vi.fn();
+    const normal = settings({ tableViewMode: 'normal' });
+    const normalCommands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      settings: normal,
+      actions: actions({ updateSettings }),
+    });
+    const toggle = normalCommands.find((c) => c.id === 'preferences.toggleTableViewMode');
+    expect(toggle?.label).toBe('Table View: Inline (no wrap, scroll)');
+    expect(toggle?.shortcut).toBe('⌘⇧M');
+    toggle?.run();
+    expect(updateSettings).toHaveBeenCalledWith({ ...normal, tableViewMode: 'inline' });
+
+    const inlineCommands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      settings: settings({ tableViewMode: 'inline' }),
+      actions: actions(),
+    });
+    expect(inlineCommands.find((c) => c.id === 'preferences.toggleTableViewMode')?.label)
+      .toBe('Table View: Normal (wrap)');
+  });
+
+  it('exposes shortcuts for the focus-mode and word-wrap toggles', () => {
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      settings: settings(),
+      actions: actions(),
+    });
+    expect(commands.find((c) => c.id === 'preferences.toggleFocusMode')?.shortcut).toBe('⌘⇧J');
+    expect(commands.find((c) => c.id === 'preferences.toggleWordWrap')?.shortcut).toBe('⌥Z');
   });
 
   it('wires composite and parameterized actions', () => {
