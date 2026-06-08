@@ -636,6 +636,18 @@ section[data-mode='Wysiwyg'] {
 .editor-pane-wysiwyg[data-line-wrap='false'] .notion-editor-content {
   max-width: none;
 }
+.editor-pane-wysiwyg[data-line-wrap='false'] .notion-editor-content .ProseMirror {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-wrap: normal;
+  word-break: normal;
+}
+.editor-pane-wysiwyg[data-line-wrap='false'] .notion-editor-content .ProseMirror pre {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-wrap: normal;
+  word-break: normal;
+}
 
 /* Notion-style slash-command launcher (portal to body). */
 .slash-command-menu {

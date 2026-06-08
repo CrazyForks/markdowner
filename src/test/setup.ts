@@ -1,9 +1,47 @@
 import '@testing-library/jest-dom/vitest';
 
+function createZeroDomRect(): DOMRect {
+  if (typeof DOMRect !== 'undefined') {
+    return new DOMRect(0, 0, 0, 0);
+  }
+
+  return {
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function createEmptyDomRectList(): DOMRectList {
+  return {
+    length: 0,
+    item: () => null,
+    [Symbol.iterator]: function* iterator() {},
+  } as DOMRectList;
+}
+
 // jsdom in vitest 4 ships without a writable localStorage by default; install
 // a minimal in-memory polyfill so app code that persists state through
 // localStorage (sidebar width, theme mode, etc.) can be exercised in tests.
 if (typeof window !== 'undefined') {
+  // ProseMirror calls Range geometry APIs while scrolling selections into
+  // view. jsdom does not implement them, so provide inert geometry for tests.
+  if (typeof window.Range !== 'undefined') {
+    const rangePrototype = window.Range.prototype as Range & {
+      getBoundingClientRect?: () => DOMRect;
+      getClientRects?: () => DOMRectList;
+    };
+
+    rangePrototype.getBoundingClientRect ??= createZeroDomRect;
+    rangePrototype.getClientRects ??= createEmptyDomRectList;
+  }
+
   const requiresPolyfill = (() => {
     try {
       return typeof window.localStorage?.setItem !== 'function';
