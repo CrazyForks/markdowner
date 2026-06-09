@@ -6132,7 +6132,11 @@ describe('App recent documents', () => {
     const pdfPaperSizeToggle = within(panel).getByTestId('settings-pdf-paper-size-toggle');
 
     expect(panel).toHaveClass('flex', 'min-h-0', 'overflow-hidden');
-    expect(body).toHaveClass('flex', 'flex-col', 'overflow-y-auto');
+    // The scroll container is full-width so its scrollbar sits at the window's
+    // right edge (not mid-window); the content is centered in an inner
+    // max-w-2xl wrapper.
+    expect(body).toHaveClass('flex-1', 'min-h-0', 'overflow-y-auto');
+    expect(body.firstElementChild).toHaveClass('mx-auto', 'w-full', 'max-w-2xl');
     expect(fontFamilyRow).toHaveClass('grid', 'gap-2');
     expect(fontFamilyInput).toHaveClass('w-full', 'min-w-0');
     expect(defaultModeToggle).toHaveClass('h-auto', 'w-full', 'flex-wrap');

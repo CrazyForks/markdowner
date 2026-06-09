@@ -293,8 +293,9 @@ export function SettingsPanel({
       </header>
       <div
         data-testid="settings-panel-body"
-        className={`mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-6 py-6 ${sectionBodyClass}`}
+        className="min-h-0 flex-1 overflow-y-auto"
       >
+        <div className={`mx-auto w-full max-w-2xl px-6 py-6 ${sectionBodyClass}`}>
         <div
           data-testid="settings-app-version"
           className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-4 py-3"
@@ -987,6 +988,7 @@ export function SettingsPanel({
               onCheckedChange={(checked) => handleSettingChange('diagnosticsEnabled', checked)}
             />
           </div>
+        </div>
         </div>
       </div>
       <footer
