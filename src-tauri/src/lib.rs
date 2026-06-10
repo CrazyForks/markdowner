@@ -958,16 +958,43 @@ fn cli_binary_wrapper_script_for_target(target_executable: &Path) -> String {
     )
 }
 
+fn path_value_contains_dir(raw_path: &std::ffi::OsStr, dir: &Path) -> bool {
+    let dir_str = dir.to_string_lossy();
+    env::split_paths(raw_path).any(|candidate| candidate.to_string_lossy() == dir_str)
+}
+
+/// PATH as the user's login shell sees it. A GUI app launched from the
+/// Dock/Finder inherits launchd's minimal PATH (`/usr/bin:/bin:...`), which
+/// says nothing about the terminal the user will actually type `mdner` into —
+/// checking only the process PATH made the Settings panel warn that
+/// /usr/local/bin is missing even on stock macOS, where every login shell
+/// gets it via /etc/paths + path_helper. `-l -c` runs the profile chain
+/// without going interactive, so it can't prompt or block on tty access.
+fn login_shell_path_value() -> Option<std::ffi::OsString> {
+    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let output = std::process::Command::new(shell)
+        .args(["-l", "-c", "printf %s \"$PATH\""])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw.into())
+    }
+}
+
 fn cli_binary_directory_is_in_path(install_path: &Path) -> bool {
     let Some(parent) = install_path.parent() else {
         return false;
     };
-    let parent_str = parent.to_string_lossy();
-    env::var_os("PATH")
-        .map(|raw| {
-            env::split_paths(&raw).any(|candidate| candidate.to_string_lossy() == parent_str)
-        })
-        .unwrap_or(false)
+    if env::var_os("PATH").is_some_and(|raw| path_value_contains_dir(&raw, parent)) {
+        return true;
+    }
+    login_shell_path_value().is_some_and(|raw| path_value_contains_dir(&raw, parent))
 }
 
 fn cli_binary_install_is_ours(install_path: &Path) -> bool {
@@ -1795,9 +1822,10 @@ mod tests {
         MENU_FILE_TITLE, MENU_VIEW_TITLE, TopLevelMenuSection, VIEW_MENU_COMMANDS,
         cli_binary_install_is_ours, cli_binary_wrapper_script_for_target,
         cli_launcher_alias_command_for_path, ctrl_g_launcher_managed_block, install_cli_binary_at,
-        install_cli_launcher_alias, install_ctrl_g_launcher_block, menu_command_from_id,
-        open_startup_path, resolve_cli_path, shell_config_path_for_shell, top_level_menu_sections,
-        uninstall_cli_binary_at, uninstall_ctrl_g_launcher_block,
+        install_cli_launcher_alias, install_ctrl_g_launcher_block, login_shell_path_value,
+        menu_command_from_id, open_startup_path, path_value_contains_dir, resolve_cli_path,
+        shell_config_path_for_shell, top_level_menu_sections, uninstall_cli_binary_at,
+        uninstall_ctrl_g_launcher_block,
     };
 
     #[test]
@@ -1895,6 +1923,30 @@ mod tests {
         assert!(result.already_installed);
         let contents = fs::read_to_string(&shell_config_path).unwrap();
         assert_eq!(contents.matches(alias_command).count(), 1);
+    }
+
+    #[test]
+    fn path_value_contains_dir_matches_exact_entries_only() {
+        let raw = std::ffi::OsString::from("/usr/bin:/usr/local/bin:/opt/homebrew/bin");
+
+        assert!(path_value_contains_dir(&raw, Path::new("/usr/local/bin")));
+        // Prefixes and unrelated entries must not match.
+        assert!(!path_value_contains_dir(&raw, Path::new("/usr/local")));
+        assert!(!path_value_contains_dir(&raw, Path::new("/usr/local/bin2")));
+    }
+
+    #[test]
+    fn cli_binary_in_path_consults_the_login_shell_not_just_the_process_env() {
+        // GUI apps get launchd's minimal PATH; the check must still succeed
+        // when the login shell (the thing the user types `mdner` into) has
+        // the directory. On any sane dev/CI box `sh -l -c` yields a PATH
+        // containing /usr/bin, so probe with a path we know the login shell
+        // reports rather than asserting a fixed directory.
+        if let Some(shell_path) = login_shell_path_value() {
+            if let Some(first) = std::env::split_paths(&shell_path).next() {
+                assert!(path_value_contains_dir(&shell_path, &first));
+            }
+        }
     }
 
     #[test]
