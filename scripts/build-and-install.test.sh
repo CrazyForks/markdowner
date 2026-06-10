@@ -401,6 +401,12 @@ test_release_workflow_uploads_only_versioned_dmg_asset() {
   assert_file_not_contains "${SOURCE_RELEASE_WORKFLOW}" '"$STABLE_DMG"'
 }
 
+test_release_workflow_uses_github_generated_notes() {
+  assert_file_contains "${SOURCE_RELEASE_WORKFLOW}" '--generate-notes'
+  assert_file_not_contains "${SOURCE_RELEASE_WORKFLOW}" '--notes-file RELEASE_NOTES.md'
+  assert_file_not_contains "${SOURCE_RELEASE_WORKFLOW}" 'Generate release notes'
+}
+
 test_package_exposes_build_aliases
 test_pnpm_build_without_args_runs_frontend_build
 test_pnpm_build_accepts_double_dash_before_flags
@@ -409,6 +415,7 @@ test_pnpm_build_install_open_launches_installed_bundle
 test_pnpm_build_dmg_invokes_tauri_dmg_build_and_prints_hash
 test_pnpm_build_universal_dmg_invokes_tauri_universal_dmg_build
 test_release_workflow_uploads_only_versioned_dmg_asset
+test_release_workflow_uses_github_generated_notes
 test_help_lists_open_flag
 test_build_uses_isolated_cargo_target_dir
 test_open_flag_launches_installed_bundle

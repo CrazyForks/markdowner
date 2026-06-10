@@ -65,24 +65,6 @@ jobs:
         if: steps.existing.outputs.exists != 'true'
         run: pnpm build universal dmg
 
-      - name: Generate release notes
-        if: steps.existing.outputs.exists != 'true'
-        run: |
-          VERSION="${{ steps.v.outputs.version }}"
-          prev_tag=$(git describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || true)
-          if [ -n "$prev_tag" ]; then
-            range="$prev_tag..HEAD"
-            echo "Previous tag: $prev_tag"
-          else
-            range="HEAD"
-            echo "No previous tag found — including full history"
-          fi
-          notes=$(git log "$range" --no-merges --pretty=format:'- %s')
-          [ -n "$notes" ] || notes="Release v$VERSION"
-          printf '%s\n' "$notes" > RELEASE_NOTES.md
-          echo "----- RELEASE_NOTES.md -----"
-          cat RELEASE_NOTES.md
-
       - name: Create GitHub Release
         if: steps.existing.outputs.exists != 'true'
         env:
@@ -95,5 +77,5 @@ jobs:
           gh release create "v$VERSION" \
             --repo "${{ github.repository }}" \
             --title "v$VERSION" \
-            --notes-file RELEASE_NOTES.md \
+            --generate-notes \
             "$DMG"
