@@ -253,7 +253,10 @@ export function resolveShellShortcutAction(
   if (matchesShortcut(event, 'w')) {
     return { kind: 'closeTabOrWindow' };
   }
-  if (matchesShortcut(event, 't', { shift: true })) {
+  // Cmd+Shift+Y (t-Y-pewriter). Deliberately NOT Cmd+Shift+T — that is the
+  // near-universal "reopen recently closed tab" shortcut and must stay free
+  // of surprises.
+  if (matchesShortcut(event, 'y', { shift: true })) {
     return { kind: 'toggleTypewriterMode' };
   }
   if (matchesShortcut(event, 'j', { shift: true })) {

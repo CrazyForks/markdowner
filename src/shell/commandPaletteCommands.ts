@@ -143,7 +143,7 @@ export function buildCommandPaletteCommands(
       id: 'preferences.toggleTypewriterMode',
       category: 'Preferences',
       label: settings.typewriterModeEnabled ? 'Disable Typewriter Mode' : 'Enable Typewriter Mode',
-      shortcut: '⌘⇧T',
+      shortcut: '⌘⇧Y',
       run: () =>
         actions.updateSettings({
           ...settings,

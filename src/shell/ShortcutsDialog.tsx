@@ -62,7 +62,7 @@ const SECTIONS: ShortcutSection[] = [
       { keys: '⌥1', label: 'WYSIWYG mode' },
       { keys: '⌥2', label: 'Editor mode' },
       { keys: '⌥3', label: 'Split View' },
-      { keys: '⌘⇧T', label: 'Toggle Typewriter Mode' },
+      { keys: '⌘⇧Y', label: 'Toggle Typewriter Mode' },
       { keys: '⌘⇧J', label: 'Toggle Focus Mode' },
       { keys: '⌥Z', label: 'Toggle Word Wrap' },
       { keys: '⌘⇧M', label: 'Toggle Table View (Normal / Inline)' },

@@ -218,7 +218,10 @@ describe('resolveShellShortcutAction', () => {
     [{ key: 's', metaKey: true }, { kind: 'save' }],
     [{ key: 'q', metaKey: true }, { kind: 'quit' }],
     [{ key: 'w', metaKey: true }, { kind: 'closeTabOrWindow' }],
-    [{ key: 'T', metaKey: true, shiftKey: true }, { kind: 'toggleTypewriterMode' }],
+    [{ key: 'Y', metaKey: true, shiftKey: true }, { kind: 'toggleTypewriterMode' }],
+    // Cmd+Shift+T is reserved for the OS-wide "reopen closed tab" convention
+    // and must NOT trigger anything here.
+    [{ key: 'T', metaKey: true, shiftKey: true }, { kind: 'none' }],
     [{ key: 'J', metaKey: true, shiftKey: true }, { kind: 'toggleFocusMode' }],
     [{ key: 'm', metaKey: true, shiftKey: true }, { kind: 'toggleTableViewMode' }],
   ] as const)('resolves shell shortcut %o', (event, expected) => {
