@@ -13,6 +13,13 @@ describe('tauri security config', () => {
     expect(tauriConfig.app?.security?.csp?.['img-src']).toContain('https:');
   });
 
+  it('enables scoped asset protocol access for local markdown media', () => {
+    expect(tauriConfig.app?.security?.assetProtocol).toMatchObject({
+      enable: true,
+      scope: expect.arrayContaining(['$HOME/**', '/Volumes/**', '$TEMP/**']),
+    });
+  });
+
   it('keeps bundled app artifacts enabled for desktop builds', () => {
     expect(tauriConfig.bundle?.active).toBe(true);
   });
