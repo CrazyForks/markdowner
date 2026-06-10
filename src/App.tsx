@@ -124,6 +124,8 @@ import {
 } from './lib/findReplace';
 import {
   MARKDOWN_FILE_EXTENSIONS,
+  defaultOpenDocumentDialogPath,
+  defaultOpenWorkspaceDialogPath,
   defaultMarkdownSavePath,
   normalizeOpenDialogPaths,
 } from './lib/fileDialogOptions';
@@ -2921,9 +2923,11 @@ export default function App() {
   };
 
   const handleOpenDocument = async () => {
+    const defaultPath = defaultOpenDocumentDialogPath(snapshot);
     const selected = await openDialog({
       multiple: true,
       directory: false,
+      ...(defaultPath ? { defaultPath } : {}),
       filters: [{ name: 'Markdown', extensions: MARKDOWN_FILE_EXTENSIONS }],
     });
 
@@ -2993,9 +2997,11 @@ export default function App() {
   };
 
   const handleOpenWorkspace = async () => {
+    const defaultPath = defaultOpenWorkspaceDialogPath(snapshot);
     const selected = await openDialog({
       multiple: false,
       directory: true,
+      ...(defaultPath ? { defaultPath } : {}),
     });
 
     if (typeof selected !== 'string') {

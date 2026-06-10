@@ -3233,6 +3233,65 @@ describe('App recent documents', () => {
     });
   });
 
+  it('starts the Cmd+O file dialog in the most recent document directory', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        rootDir: '/tmp/project',
+        activeDocumentName: 'recent.md',
+        activeDocumentPath: '/tmp/project/docs/recent.md',
+        activeDocumentSource: '# Recent',
+        recentDocuments: ['/tmp/project/docs/recent.md'],
+      }),
+    );
+    openDialogMock.mockResolvedValue(null);
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /recent\.md/i });
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+
+    await waitFor(() => {
+      expect(openDialogMock).toHaveBeenCalledWith({
+        multiple: true,
+        directory: false,
+        defaultPath: '/tmp/project/docs',
+        filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }],
+      });
+    });
+  });
+
+  it('starts the Cmd+Shift+O workspace dialog in the current workspace directory', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        rootDir: '/tmp/project',
+        activeDocumentName: 'recent.md',
+        activeDocumentPath: '/tmp/project/docs/recent.md',
+        activeDocumentSource: '# Recent',
+        recentDocuments: ['/tmp/project/docs/recent.md'],
+      }),
+    );
+    openDialogMock.mockResolvedValue(null);
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /recent\.md/i });
+
+    fireEvent.keyDown(window, { key: 'O', metaKey: true, shiftKey: true });
+
+    await waitFor(() => {
+      expect(openDialogMock).toHaveBeenCalledWith({
+        multiple: false,
+        directory: true,
+        defaultPath: '/tmp/project',
+      });
+    });
+  });
+
   it('keeps the latest workspace when an earlier open resolves later', async () => {
     const pendingWorkspaces = new Map<string, (snapshot: AppSnapshot) => void>();
     openDialogMock
@@ -7065,6 +7124,7 @@ describe('App recent documents', () => {
       expect(openDialogMock).toHaveBeenCalledWith({
         multiple: true,
         directory: false,
+        defaultPath: '/tmp/project',
         filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }],
       });
       expect(openDocumentMock).toHaveBeenCalledWith('/tmp/project/from-menu.md');
