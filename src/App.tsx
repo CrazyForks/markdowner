@@ -275,6 +275,7 @@ import {
   resolveWysiwygContentSyncAction,
   resolvePersistedWysiwygMarkdown,
 } from './lib/wysiwygEditorSync';
+import { serializeWysiwygSliceToMarkdown } from './lib/wysiwygCopy';
 import {
   handleWysiwygPlainTextPaste,
   isPlainTextPasteRequest,
@@ -1659,6 +1660,10 @@ export default function App() {
           // Cmd/Ctrl+Shift+V → paste verbatim, bypassing markdown rendering.
           isPlainTextPasteRequest(view),
         ),
+      // Copy/cut put markdown source on the clipboard's text/plain flavor
+      // (the text/html flavor keeps the rich content for rich-text targets).
+      clipboardTextSerializer: (slice: any) =>
+        serializeWysiwygSliceToMarkdown(slice, editorInstanceRef.current),
       handleDOMEvents: {
         beforeinput: (_view: any, event: Event) => {
           const inputEvent = event as InputEvent;
