@@ -31,6 +31,7 @@ import {
   shouldSuppressDuplicateImeTextInput,
   shouldSuppressSyntheticImeEnter,
 } from '@/lib/wysiwygKeyboard';
+import { WYSIWYG_LINK_OPTIONS } from '@/lib/wysiwygLinkOptions';
 import './styles.css';
 
 const MARKDOWN_CONTENT_SCOPE_CLASS = 'markdown-content-scope';
@@ -43,7 +44,7 @@ function Playground() {
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ link: { openOnClick: false }, codeBlock: false }),
+      StarterKit.configure({ link: WYSIWYG_LINK_OPTIONS, codeBlock: false }),
       createCodeBlockExtension(),
       Image,
       Table.configure({ resizable: true }),

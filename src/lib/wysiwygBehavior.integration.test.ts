@@ -23,13 +23,15 @@ import { Editor } from '@tiptap/core';
 import { common, createLowlight } from 'lowlight';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { WYSIWYG_LINK_OPTIONS } from '@/lib/wysiwygLinkOptions';
+
 const lowlight = createLowlight(common);
 
 function buildEditor(initial = ''): Editor {
   return new Editor({
     extensions: [
       StarterKit.configure({
-        link: { openOnClick: false },
+        link: WYSIWYG_LINK_OPTIONS,
         codeBlock: false,
       }),
       CodeBlockLowlight.configure({ lowlight, defaultLanguage: null }),
@@ -187,6 +189,49 @@ describe('WYSIWYG behaviour — markdown link input rule', () => {
       expect(
         linked?.marks?.find((m) => m.type === 'link')?.attrs?.href,
       ).toBe('https://tiptap.dev');
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
+describe('WYSIWYG behaviour — no implicit autolink', () => {
+  function linkMarkCount(editor: Editor): number {
+    let count = 0;
+    editor.state.doc.descendants((node) => {
+      if (node.marks.some((mark) => mark.type.name === 'link')) count += 1;
+    });
+    return count;
+  }
+
+  it('does not link a dotted file name typed with trailing whitespace', () => {
+    // linkifyjs treats "AGENTS.md" as a hostname (.md is a ccTLD); the
+    // default autolink fires once the word is followed by whitespace.
+    const editor = buildEditor();
+    try {
+      typeText(editor, 'AGENTS.md ');
+      expect(linkMarkCount(editor)).toBe(0);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it('does not link a dotted file name in a heading on markdown load', () => {
+    // The autolink appendTransaction also ran on setContent, linking the
+    // first textblock's last word — "# AGENTS.md" as the first line.
+    const editor = buildEditor('# AGENTS.md\n\nbody text\n');
+    try {
+      expect(linkMarkCount(editor)).toBe(0);
+      expect(firstBlock(editor).type).toBe('heading');
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it('still parses explicit markdown links on load', () => {
+    const editor = buildEditor('[docs](https://example.com)\n');
+    try {
+      expect(linkMarkCount(editor)).toBe(1);
     } finally {
       editor.destroy();
     }

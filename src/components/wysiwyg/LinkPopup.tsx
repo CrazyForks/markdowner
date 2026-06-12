@@ -48,6 +48,13 @@ type PopupState =
 
 const POPUP_GUTTER_PX = 8;
 const VIEWPORT_MARGIN_PX = 8;
+/**
+ * Grace period before a hover-opened popup hides once the pointer leaves the
+ * link/popup. 120ms proved too tight to cross the gutter gap reliably (the
+ * popup vanished mid-reach — "링크 수정이 안 돼요"), so give the pointer a
+ * comfortable window.
+ */
+const HOVER_HIDE_DELAY_MS = 320;
 /** Order in which Up/Down arrow keys traverse focusable popup items. */
 const FOCUS_ORDER = ['url-input', 'open', 'copy', 'remove'] as const;
 type FocusKey = (typeof FOCUS_ORDER)[number];
@@ -95,7 +102,14 @@ export function LinkPopup({
   const computeCaretLink = useCallback((): PopupState | null => {
     if (!editor) return null;
     const { state: edState, view } = editor;
-    if (!view.hasFocus()) return null;
+    // `view.hasFocus()` can lag behind the actual DOM focus right after a
+    // click (WebKit delivers focus between the mousedown and the rAF this
+    // runs in), which made the caret popup intermittently fail to open.
+    // Treat "DOM focus anywhere inside the editor surface" as focused too.
+    const editorFocused =
+      view.hasFocus() ||
+      (typeof document !== 'undefined' && view.dom.contains(document.activeElement));
+    if (!editorFocused) return null;
     const linkType = edState.schema.marks.link;
     if (!linkType) return null;
     const { $from } = edState.selection;
@@ -264,7 +278,7 @@ export function LinkPopup({
           const caret = computeCaretLink();
           return caret ?? { open: false };
         });
-      }, 120);
+      }, HOVER_HIDE_DELAY_MS);
     };
 
     dom.addEventListener('mouseover', onMouseOver);
@@ -346,9 +360,29 @@ export function LinkPopup({
     focusItem(next);
   };
 
+  // The popup's from/to are captured when it opens; any transaction since
+  // (typing elsewhere, an external refresh) can shift them. Re-derive the
+  // link range from the CURRENT document before mutating so a commit never
+  // links/unlinks the wrong text. Returns null when no link exists at the
+  // remembered position anymore — the edit target is gone, so bail.
+  const resolveCurrentLinkRange = useCallback((): { from: number; to: number } | null => {
+    if (!editor || !state.open) return null;
+    const linkType = editor.state.schema.marks.link;
+    if (!linkType) return null;
+    const docSize = editor.state.doc.content.size;
+    const probe = Math.min(Math.max(state.from, 0), docSize);
+    const range = getMarkRange(editor.state.doc.resolve(probe), linkType);
+    return range ? { from: range.from, to: range.to } : null;
+  }, [editor, state]);
+
   const commitHref = useCallback(
     (rawHref: string) => {
       if (!editor || !state.open) return;
+      const range = resolveCurrentLinkRange();
+      if (!range) {
+        setState({ open: false });
+        return;
+      }
       const trimmed = rawHref.trim();
       // Empty + "scheme only" placeholders both mean "no URL entered" — treat
       // them as cancellation and drop the link mark. Otherwise a quick click
@@ -361,33 +395,38 @@ export function LinkPopup({
         editor
           .chain()
           .focus()
-          .setTextSelection({ from: state.from, to: state.to })
+          .setTextSelection(range)
           .unsetLink()
-          .setTextSelection(state.to)
+          .setTextSelection(range.to)
           .run();
         setState({ open: false });
         return;
       }
       editor
         .chain()
-        .setTextSelection({ from: state.from, to: state.to })
+        .setTextSelection(range)
         .extendMarkRange('link')
         .setLink({ href: trimmed })
-        .setTextSelection(state.to)
+        .setTextSelection(range.to)
         .focus()
         .run();
     },
-    [editor, state],
+    [editor, state, resolveCurrentLinkRange],
   );
 
   const handleRemove = () => {
     if (!editor || !state.open) return;
+    const range = resolveCurrentLinkRange();
+    if (!range) {
+      setState({ open: false });
+      return;
+    }
     editor
       .chain()
       .focus()
-      .setTextSelection({ from: state.from, to: state.to })
+      .setTextSelection(range)
       .unsetLink()
-      .setTextSelection(state.to)
+      .setTextSelection(range.to)
       .run();
     setState({ open: false });
   };
@@ -538,7 +577,7 @@ export function LinkPopup({
             if (!prev.open || prev.origin !== 'hover') return prev;
             return computeCaretLink() ?? { open: false };
           });
-        }, 120);
+        }, HOVER_HIDE_DELAY_MS);
       }}
     >
       <input
