@@ -29,6 +29,12 @@ export interface UseUpdateCheck {
 
 interface UseUpdateCheckOptions {
   onManualCheckComplete?: (info: UpdateInfo) => void;
+  /**
+   * Awaited before the installer runs. The install script replaces the
+   * bundle and relaunches without consulting the frontend again, so this is
+   * the last chance to flush state (hot-exit draft backups) to disk.
+   */
+  onBeforeInstall?: () => Promise<void> | void;
 }
 
 /**
@@ -57,6 +63,8 @@ export function useUpdateCheck(
   onSettingsChangeRef.current = onSettingsChange;
   const onManualCheckCompleteRef = useRef(options.onManualCheckComplete);
   onManualCheckCompleteRef.current = options.onManualCheckComplete;
+  const onBeforeInstallRef = useRef(options.onBeforeInstall);
+  onBeforeInstallRef.current = options.onBeforeInstall;
 
   const runCheck = useCallback(async (manual = false) => {
     setChecking(true);
@@ -137,6 +145,12 @@ export function useUpdateCheck(
       return;
     }
     setInstalling(true);
+    try {
+      // Best-effort: a failed flush must never block the update itself.
+      await onBeforeInstallRef.current?.();
+    } catch (error) {
+      console.warn('Pre-install state flush failed:', error);
+    }
     try {
       await downloadAndInstallUpdate(info.dmgUrl);
     } catch (error) {

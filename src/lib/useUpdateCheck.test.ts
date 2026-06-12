@@ -1,16 +1,19 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { useUpdateCheck } from './useUpdateCheck';
 
 const checkForUpdateMock = vi.fn();
+const downloadAndInstallUpdateMock = vi.fn();
 
 vi.mock('./updateCheck', async (importOriginal) => {
   const original = await importOriginal<typeof import('./updateCheck')>();
   return {
     ...original,
     checkForUpdate: (...args: unknown[]) => checkForUpdateMock(...args),
+    downloadAndInstallUpdate: (...args: unknown[]) =>
+      downloadAndInstallUpdateMock(...args),
   };
 });
 
@@ -89,5 +92,80 @@ describe('useUpdateCheck periodic re-check', () => {
       await vi.advanceTimersByTimeAsync(72 * HOUR_MS);
     });
     expect(checkForUpdateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('useUpdateCheck install', () => {
+  beforeEach(() => {
+    checkForUpdateMock.mockReset();
+    checkForUpdateMock.mockResolvedValue({
+      available: true,
+      currentVersion: '0.0.0',
+      latestVersion: '9.9.9',
+      dmgUrl: 'https://example.invalid/markdowner.dmg',
+      releaseUrl: 'https://example.invalid',
+      notes: '',
+    });
+    downloadAndInstallUpdateMock.mockReset();
+    downloadAndInstallUpdateMock.mockResolvedValue(undefined);
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  });
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+
+  it('awaits the onBeforeInstall flush before launching the installer', async () => {
+    const callOrder: string[] = [];
+    const onBeforeInstall = vi.fn(async () => {
+      callOrder.push('flush');
+    });
+    downloadAndInstallUpdateMock.mockImplementation(async () => {
+      callOrder.push('install');
+    });
+
+    const settings = settingsWith({
+      updateCheckEnabled: true,
+      lastUpdateCheckAt: null,
+    });
+    const { result } = renderHook(() =>
+      useUpdateCheck(settings, vi.fn(), true, { onBeforeInstall }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.info?.available).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.install();
+    });
+
+    expect(callOrder).toEqual(['flush', 'install']);
+  });
+
+  it('still installs when the pre-install flush fails', async () => {
+    const onBeforeInstall = vi.fn(async () => {
+      throw new Error('flush failed');
+    });
+
+    const settings = settingsWith({
+      updateCheckEnabled: true,
+      lastUpdateCheckAt: null,
+    });
+    const { result } = renderHook(() =>
+      useUpdateCheck(settings, vi.fn(), true, { onBeforeInstall }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.info?.available).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.install();
+    });
+
+    expect(downloadAndInstallUpdateMock).toHaveBeenCalledWith(
+      'https://example.invalid/markdowner.dmg',
+    );
   });
 });

@@ -1,5 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 
+import {
+  normalizeDraftBackupEntries,
+  type DraftBackupEntry,
+} from './draftBackups';
+
 export type EditorMode = 'Wysiwyg' | 'Editor' | 'SplitView';
 export type ThemeKind = 'BuiltInLight' | 'BuiltInDark' | 'CustomCss';
 
@@ -219,4 +224,13 @@ export async function saveOpenTabs(payload: OpenTabsPayload): Promise<void> {
     activeTabPath: payload.activeTabPath,
     cursorPositions: payload.cursorPositions,
   });
+}
+
+export async function loadDraftBackups(): Promise<DraftBackupEntry[]> {
+  const result = await invoke<unknown>('load_draft_backups');
+  return normalizeDraftBackupEntries(result);
+}
+
+export async function saveDraftBackups(entries: DraftBackupEntry[]): Promise<void> {
+  await invoke('save_draft_backups', { entries });
 }

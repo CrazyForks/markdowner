@@ -31,6 +31,8 @@ const completeCliWaitMock = vi.fn();
 const quitAppMock = vi.fn();
 const loadOpenTabsMock = vi.fn();
 const saveOpenTabsMock = vi.fn();
+const loadDraftBackupsMock = vi.fn();
+const saveDraftBackupsMock = vi.fn();
 const searchWorkspaceMock = vi.fn();
 const openDialogMock = vi.fn();
 const saveDialogMock = vi.fn();
@@ -75,6 +77,8 @@ vi.mock('./lib/desktop', () => ({
   quitApp: quitAppMock,
   loadOpenTabs: loadOpenTabsMock,
   saveOpenTabs: saveOpenTabsMock,
+  loadDraftBackups: loadDraftBackupsMock,
+  saveDraftBackups: saveDraftBackupsMock,
   searchWorkspace: searchWorkspaceMock,
 }));
 
@@ -435,6 +439,10 @@ describe('App recent documents', () => {
     loadOpenTabsMock.mockResolvedValue({ openTabs: [], activeTabPath: null });
     saveOpenTabsMock.mockReset();
     saveOpenTabsMock.mockResolvedValue(undefined);
+    loadDraftBackupsMock.mockReset();
+    loadDraftBackupsMock.mockResolvedValue([]);
+    saveDraftBackupsMock.mockReset();
+    saveDraftBackupsMock.mockResolvedValue(undefined);
     searchWorkspaceMock.mockReset();
     searchWorkspaceMock.mockResolvedValue({ files: [] });
     openDialogMock.mockReset();
@@ -7776,7 +7784,7 @@ describe('App recent documents', () => {
     });
   });
 
-  it('prompts to save dirty changes before closing the window', async () => {
+  it('hot exit: closing a dirty window persists the draft backup without prompting', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'meeting-notes.md',
@@ -7786,95 +7794,39 @@ describe('App recent documents', () => {
         mode: 'Editor',
       }),
     );
-    messageMock.mockResolvedValue('Save');
-    saveActiveDocumentMock.mockResolvedValue(
-      baseSnapshot({
-        activeDocumentName: 'meeting-notes.md',
-        activeDocumentPath: '/tmp/project/meeting-notes.md',
-        activeDocumentSource: '# Meeting notes\n\nUnsaved edit',
-        mode: 'Editor',
-      }),
-    );
 
     const { default: App } = await import('./App');
 
     render(<App />);
 
-    const editor = await screen.findByRole('textbox', { name: /source editor/i });
-    fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
-
     await waitFor(() => {
       expect(onCloseRequestedMock).toHaveBeenCalled();
       expect(closeRequestedHandler).toBeTypeOf('function');
     });
+    const editor = await screen.findByRole('textbox', { name: /source editor/i });
+    fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
     await screen.findAllByText(/^meeting-notes\.md$/);
 
     const preventDefault = vi.fn();
     await closeRequestedHandler?.({ preventDefault });
 
     await waitFor(() => {
-      expect(preventDefault).toHaveBeenCalled();
-      expect(messageMock).toHaveBeenCalledWith(
-        "Save changes to 'meeting-notes.md' before closing?",
+      expect(saveDraftBackupsMock).toHaveBeenCalledWith([
         {
-          buttons: {
-            yes: 'Save',
-            no: "Don't Save",
-            cancel: 'Cancel',
-          },
-          kind: 'warning',
-          title: 'Markdowner',
+          path: '/tmp/project/meeting-notes.md',
+          untitledId: null,
+          name: 'meeting-notes.md',
+          draft: '# Meeting notes\n\nUnsaved edit',
         },
-      );
-      // Save path normalizes the trailing newline — VS Code-style
-      // `insertFinalNewline` — so the draft handed to Rust now ends with
-      // exactly one '\n'.
-      expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith(
-        '# Meeting notes\n\nUnsaved edit\n',
-      );
-      expect(saveActiveDocumentMock).toHaveBeenCalled();
-      expect(destroyWindowMock).toHaveBeenCalled();
+      ]);
     });
-  });
-
-  it('closes a dirty window without saving when the close confirmation returns No', async () => {
-    bootstrapMock.mockResolvedValue(
-      baseSnapshot({
-        activeDocumentName: 'meeting-notes.md',
-        activeDocumentPath: '/tmp/project/meeting-notes.md',
-        activeDocumentSource: '# Meeting notes',
-        activeDocumentDirty: true,
-        mode: 'Editor',
-      }),
-    );
-    messageMock.mockResolvedValue('No');
-
-    const { default: App } = await import('./App');
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(onCloseRequestedMock).toHaveBeenCalled();
-      expect(closeRequestedHandler).toBeTypeOf('function');
-    });
-    const editor = await screen.findByRole('textbox', { name: /source editor/i });
-    fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
-    await screen.findAllByText(/^meeting-notes\.md$/);
-
-    const preventDefault = vi.fn();
-    await closeRequestedHandler?.({ preventDefault });
-
-    await waitFor(() => {
-      expect(preventDefault).toHaveBeenCalled();
-      expect(messageMock).toHaveBeenCalled();
-      expect(destroyWindowMock).toHaveBeenCalled();
-    });
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(messageMock).not.toHaveBeenCalled();
     expect(saveActiveDocumentMock).not.toHaveBeenCalled();
     expect(saveActiveDocumentAsMock).not.toHaveBeenCalled();
-    expect(quitAppMock).not.toHaveBeenCalled();
   });
 
-  it('quits a dirty app without saving when Cmd+Q discard is selected', async () => {
+  it('hot exit: Cmd+Q quits a dirty app without prompting and backs up the draft', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'meeting-notes.md',
@@ -7884,7 +7836,6 @@ describe('App recent documents', () => {
         mode: 'Editor',
       }),
     );
-    messageMock.mockResolvedValue('No');
 
     const { default: App } = await import('./App');
 
@@ -7896,26 +7847,23 @@ describe('App recent documents', () => {
     fireEvent.keyDown(window, { key: 'q', metaKey: true });
 
     await waitFor(() => {
-      expect(messageMock).toHaveBeenCalledWith(
-        "Save changes to 'meeting-notes.md' before closing?",
-        {
-          buttons: {
-            yes: 'Save',
-            no: "Don't Save",
-            cancel: 'Cancel',
-          },
-          kind: 'warning',
-          title: 'Markdowner',
-        },
-      );
       expect(quitAppMock).toHaveBeenCalled();
     });
+    expect(messageMock).not.toHaveBeenCalled();
+    expect(saveDraftBackupsMock).toHaveBeenCalledWith([
+      {
+        path: '/tmp/project/meeting-notes.md',
+        untitledId: null,
+        name: 'meeting-notes.md',
+        draft: '# Meeting notes\n\nUnsaved edit',
+      },
+    ]);
     expect(saveActiveDocumentMock).not.toHaveBeenCalled();
     expect(saveActiveDocumentAsMock).not.toHaveBeenCalled();
     expect(destroyWindowMock).not.toHaveBeenCalled();
   });
 
-  it('prompts for the inactive dirty tab name after switching to it on quit', async () => {
+  it('hot exit: quitting backs up an inactive dirty tab from its stashed draft', async () => {
     const alphaPath = '/tmp/project/alpha.md';
     const betaPath = '/tmp/project/beta.md';
 
@@ -7945,7 +7893,6 @@ describe('App recent documents', () => {
         mode: 'Editor',
       }),
     );
-    messageMock.mockResolvedValue('Cancel');
 
     const { default: App } = await import('./App');
 
@@ -7983,82 +7930,25 @@ describe('App recent documents', () => {
     fireEvent.keyDown(window, { key: 'q', metaKey: true });
 
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      );
-      expect(messageMock).toHaveBeenCalledWith(
-        "Save changes to 'beta.md' before closing?",
-        {
-          buttons: {
-            yes: 'Save',
-            no: "Don't Save",
-            cancel: 'Cancel',
-          },
-          kind: 'warning',
-          title: 'Markdowner',
-        },
-      );
+      expect(quitAppMock).toHaveBeenCalled();
     });
-    expect(quitAppMock).not.toHaveBeenCalled();
-  });
-
-  it('keeps the window open when the active document changed externally and user chose save', async () => {
-    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
-    bootstrapMock.mockResolvedValue(
-      baseSnapshot({
-        activeDocumentName: 'meeting-notes.md',
-        activeDocumentPath: '/tmp/project/meeting-notes.md',
-        activeDocumentSource: '# Meeting notes',
-        activeDocumentDirty: true,
-        mode: 'Editor',
-      }),
-    );
-    messageMock.mockResolvedValue('Save');
-
-    const { default: App } = await import('./App');
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(onCloseRequestedMock).toHaveBeenCalled();
-      expect(closeRequestedHandler).toBeTypeOf('function');
-    });
-    const editor = await screen.findByRole('textbox', { name: /source editor/i });
-    fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
-    await screen.findAllByText(/^meeting-notes\.md$/);
-
-    const preventDefault = vi.fn();
-    await closeRequestedHandler?.({ preventDefault });
-
-    await waitFor(() => {
-      expect(preventDefault).toHaveBeenCalled();
-      expect(messageMock).toHaveBeenCalledWith(
-        "Save changes to 'meeting-notes.md' before closing?",
-        {
-          buttons: {
-            yes: 'Save',
-            no: "Don't Save",
-            cancel: 'Cancel',
-          },
-          kind: 'warning',
-          title: 'Markdowner',
-        },
-      );
-      expect(hasActiveDocumentExternalChangesMock).toHaveBeenCalled();
-    });
-
-    expect(destroyWindowMock).not.toHaveBeenCalled();
-    expect(saveActiveDocumentMock).not.toHaveBeenCalled();
-    expect(saveActiveDocumentAsMock).not.toHaveBeenCalled();
+    // Hot exit: the inactive dirty tab's stashed draft is backed up as-is —
+    // no prompt, no tab switch.
+    expect(messageMock).not.toHaveBeenCalled();
+    expect(saveDraftBackupsMock).toHaveBeenCalledWith([
+      {
+        path: betaPath,
+        untitledId: null,
+        name: 'beta.md',
+        draft: '# Beta edited',
+      },
+    ]);
     expect(
-      screen.getByText(
-        /Could not save 'meeting-notes\.md' because it changed on disk\./i,
-      ),
-    ).toBeInTheDocument();
+      screen.getByRole('tab', { name: /alpha\.md/i }),
+    ).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('keeps the dirty window open when close confirmation is cancelled', async () => {
+  it('hot exit: prevents closing while an operation is mid-flight', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'meeting-notes.md',
@@ -8068,7 +7958,8 @@ describe('App recent documents', () => {
         mode: 'Editor',
       }),
     );
-    messageMock.mockResolvedValue('Cancel');
+    // A save that never resolves keeps the app busy for the rest of the test.
+    saveActiveDocumentMock.mockImplementation(() => new Promise(() => {}));
 
     const { default: App } = await import('./App');
 
@@ -8082,20 +7973,19 @@ describe('App recent documents', () => {
     fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
     await screen.findAllByText(/^meeting-notes\.md$/);
 
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+    await waitFor(() => {
+      expect(saveActiveDocumentMock).toHaveBeenCalled();
+    });
+
     const preventDefault = vi.fn();
     await closeRequestedHandler?.({ preventDefault });
 
-    await waitFor(() => {
-      expect(preventDefault).toHaveBeenCalled();
-      expect(messageMock).toHaveBeenCalled();
-    });
-
-    expect(saveActiveDocumentMock).not.toHaveBeenCalled();
-    expect(saveActiveDocumentAsMock).not.toHaveBeenCalled();
-    expect(destroyWindowMock).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalled();
+    expect(messageMock).not.toHaveBeenCalled();
   });
 
-  it('runs Save As before closing an untitled dirty draft', async () => {
+  it('hot exit: an untitled dirty draft is backed up on close instead of prompting Save As', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'Untitled.md',
@@ -8103,15 +7993,6 @@ describe('App recent documents', () => {
         activeDocumentSource: '',
         activeDocumentDirty: true,
         mode: 'Editor',
-      }),
-    );
-    messageMock.mockResolvedValue('Save');
-    saveDialogMock.mockResolvedValue('/tmp/project/notes/untitled.md');
-    saveActiveDocumentAsMock.mockResolvedValue(
-      baseSnapshot({
-        activeDocumentName: 'untitled.md',
-        activeDocumentPath: '/tmp/project/notes/untitled.md',
-        activeDocumentSource: '',
       }),
     );
 
@@ -8131,13 +8012,178 @@ describe('App recent documents', () => {
     await closeRequestedHandler?.({ preventDefault });
 
     await waitFor(() => {
-      expect(preventDefault).toHaveBeenCalled();
-      expect(saveDialogMock).toHaveBeenCalledWith({
-        defaultPath: 'Untitled.md',
-        filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }],
-      });
-      expect(saveActiveDocumentAsMock).toHaveBeenCalledWith('/tmp/project/notes/untitled.md');
-      expect(destroyWindowMock).toHaveBeenCalled();
+      expect(saveDraftBackupsMock).toHaveBeenCalledWith([
+        expect.objectContaining({
+          path: null,
+          untitledId: expect.any(String),
+          draft: 'Some draft content',
+        }),
+      ]);
     });
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(saveDialogMock).not.toHaveBeenCalled();
+    expect(saveActiveDocumentAsMock).not.toHaveBeenCalled();
+    expect(messageMock).not.toHaveBeenCalled();
+  });
+
+  it("removes the draft backup when the user discards via Don't Save on Cmd+W", async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        activeDocumentDirty: true,
+        mode: 'Editor',
+      }),
+    );
+    messageMock.mockResolvedValue('No');
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const editor = await screen.findByRole('textbox', { name: /source editor/i });
+    fireEvent.change(editor, { target: { value: '# Meeting notes\n\nUnsaved edit' } });
+    await screen.findAllByText(/^meeting-notes\.md$/);
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+
+    // The per-tab close confirmation still exists — only window/app close
+    // skips it — and choosing "Don't Save" must purge the backup so the
+    // discarded draft can never come back after a restart.
+    await waitFor(() => {
+      expect(messageMock).toHaveBeenCalledWith(
+        "Save changes to 'meeting-notes.md' before closing?",
+        {
+          buttons: {
+            yes: 'Save',
+            no: "Don't Save",
+            cancel: 'Cancel',
+          },
+          kind: 'warning',
+          title: 'Markdowner',
+        },
+      );
+    });
+    await waitFor(() => {
+      expect(saveDraftBackupsMock).toHaveBeenCalled();
+      expect(saveDraftBackupsMock.mock.lastCall?.[0]).toEqual([]);
+    });
+    expect(saveActiveDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it('restores a backed-up dirty draft for a reopened tab on startup', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'alpha.md',
+        activeDocumentPath: alphaPath,
+        activeDocumentSource: '# Alpha',
+        mode: 'Editor',
+      }),
+    );
+    loadDraftBackupsMock.mockResolvedValue([
+      {
+        path: alphaPath,
+        untitledId: null,
+        name: 'alpha.md',
+        draft: '# Alpha\n\nRestored unsaved edit',
+      },
+    ]);
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha\n\nRestored unsaved edit');
+      expect(
+        within(screen.getByRole('tab', { name: /alpha\.md/i })).getByLabelText(
+          'Unsaved changes',
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('restores an untitled backup as a dirty untitled tab on startup', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [],
+      activeTabPath: null,
+      cursorPositions: {},
+    });
+    loadDraftBackupsMock.mockResolvedValue([
+      {
+        path: null,
+        untitledId: 'previous-session-tab',
+        name: 'Untitled',
+        draft: 'scratch ideas that must survive',
+      },
+    ]);
+    newDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'Untitled.md',
+        activeDocumentPath: null,
+        activeDocumentSource: '',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(newDocumentMock).toHaveBeenCalled();
+      expect(sourceEditor).toHaveValue('scratch ideas that must survive');
+      expect(
+        within(screen.getByRole('tab', { name: /untitled/i })).getByLabelText(
+          'Unsaved changes',
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('drops a startup backup whose draft matches the disk content', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'alpha.md',
+        activeDocumentPath: alphaPath,
+        activeDocumentSource: '# Alpha',
+        mode: 'Editor',
+      }),
+    );
+    loadDraftBackupsMock.mockResolvedValue([
+      { path: alphaPath, untitledId: null, name: 'alpha.md', draft: '# Alpha\n' },
+    ]);
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha');
+    });
+    expect(
+      within(screen.getByRole('tab', { name: /alpha\.md/i })).queryByLabelText(
+        'Unsaved changes',
+      ),
+    ).not.toBeInTheDocument();
   });
 });

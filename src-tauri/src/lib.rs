@@ -9,7 +9,8 @@ use std::{
 };
 
 use markdowner_core::{
-    EditorMode, EditorRuntime, ThemeKind, ThemeSelection, WorkspaceState, storage::CursorPosition,
+    EditorMode, EditorRuntime, ThemeKind, ThemeSelection, WorkspaceState,
+    storage::{CursorPosition, DraftBackupEntry},
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -442,6 +443,30 @@ impl DesktopBackend {
                 .map(|(path, cursor)| (path.to_string_lossy().into_owned(), cursor))
                 .collect(),
         })
+    }
+
+    pub fn save_draft_backups(&self, entries: &[DraftBackupEntry]) -> Result<(), String> {
+        let Some(backups_path) = self.draft_backups_path() else {
+            return Ok(());
+        };
+        markdowner_core::storage::persist_draft_backups(&backups_path, entries)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn load_draft_backups(&self) -> Result<Vec<DraftBackupEntry>, String> {
+        let Some(backups_path) = self.draft_backups_path() else {
+            return Ok(Vec::new());
+        };
+        markdowner_core::storage::load_draft_backups(&backups_path)
+            .map_err(|error| error.to_string())
+    }
+
+    // Hot-exit draft backups live beside the session file so both stores
+    // share the same config-dir lifecycle.
+    fn draft_backups_path(&self) -> Option<PathBuf> {
+        self.runtime
+            .session_store_path()
+            .map(|path| path.with_file_name("draft-backups.json"))
     }
 
     pub fn set_theme_kind(&mut self, theme_kind: ThemeKind) -> AppSnapshot {
@@ -1693,6 +1718,21 @@ fn load_open_tabs(state: State<'_, DesktopAppState>) -> Result<OpenTabsPayload, 
 }
 
 #[tauri::command]
+fn save_draft_backups(
+    entries: Vec<DraftBackupEntry>,
+    state: State<'_, DesktopAppState>,
+) -> Result<(), String> {
+    with_backend(state, |backend| backend.save_draft_backups(&entries))
+}
+
+#[tauri::command]
+fn load_draft_backups(
+    state: State<'_, DesktopAppState>,
+) -> Result<Vec<DraftBackupEntry>, String> {
+    with_backend(state, |backend| backend.load_draft_backups())
+}
+
+#[tauri::command]
 fn set_theme(
     theme_kind: ThemeKind,
     state: State<'_, DesktopAppState>,
@@ -2025,6 +2065,8 @@ pub fn run() {
             record_diagnostics_event,
             load_open_tabs,
             save_open_tabs,
+            load_draft_backups,
+            save_draft_backups,
             open_dropped_path,
             import_image_asset,
             complete_cli_wait,
@@ -2078,7 +2120,7 @@ pub fn run() {
 mod tests {
     use std::{collections::HashMap, fs, path::Path};
 
-    use markdowner_core::ThemeKind;
+    use markdowner_core::{ThemeKind, storage::DraftBackupEntry};
     use tempfile::tempdir;
 
     use super::{
@@ -2816,6 +2858,63 @@ mod tests {
         let payload = backend.load_open_tabs().expect("load ok");
         assert!(payload.open_tabs.is_empty());
         assert!(payload.active_tab_path.is_none());
+    }
+
+    #[test]
+    fn draft_backups_round_trip_through_sibling_file() {
+        let temp = tempdir().unwrap();
+        let session_path = temp.path().join("workspace-session.json");
+        let backend = DesktopBackend::new(Some(session_path));
+
+        let entries = vec![
+            DraftBackupEntry {
+                path: Some("/tmp/a.md".to_string()),
+                untitled_id: None,
+                name: Some("a.md".to_string()),
+                draft: "# unsaved edits".to_string(),
+            },
+            DraftBackupEntry {
+                path: None,
+                untitled_id: Some("tab-1".to_string()),
+                name: Some("Untitled".to_string()),
+                draft: "scratch note".to_string(),
+            },
+        ];
+        backend.save_draft_backups(&entries).expect("save ok");
+
+        assert!(temp.path().join("draft-backups.json").exists());
+        assert_eq!(backend.load_draft_backups().expect("load ok"), entries);
+    }
+
+    #[test]
+    fn save_draft_backups_overwrites_previous_entries() {
+        let temp = tempdir().unwrap();
+        let backend = DesktopBackend::new(Some(temp.path().join("workspace-session.json")));
+
+        backend
+            .save_draft_backups(&[DraftBackupEntry {
+                path: Some("/tmp/a.md".to_string()),
+                untitled_id: None,
+                name: Some("a.md".to_string()),
+                draft: "discarded later".to_string(),
+            }])
+            .expect("first save ok");
+        backend.save_draft_backups(&[]).expect("second save ok");
+
+        assert!(backend.load_draft_backups().expect("load ok").is_empty());
+    }
+
+    #[test]
+    fn load_draft_backups_returns_empty_when_file_missing() {
+        let temp = tempdir().unwrap();
+        let backend = DesktopBackend::new(Some(temp.path().join("workspace-session.json")));
+        assert!(backend.load_draft_backups().expect("load ok").is_empty());
+    }
+
+    #[test]
+    fn load_draft_backups_returns_empty_when_no_session_store_configured() {
+        let backend = DesktopBackend::new(None);
+        assert!(backend.load_draft_backups().expect("load ok").is_empty());
     }
 
     #[test]

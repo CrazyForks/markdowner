@@ -142,7 +142,75 @@ pub fn persist_workspace_session(
     write_document_source(path, &payload)
 }
 
+/// One unsaved buffer captured for hot exit. `path` identifies file-backed
+/// tabs; `untitled_id` (the frontend tab id) identifies untitled buffers.
+/// Serialized in camelCase because the same shape crosses the Tauri boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftBackupEntry {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub untitled_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub draft: String,
+}
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+struct SerializedDraftBackups {
+    #[serde(default)]
+    entries: Vec<DraftBackupEntry>,
+}
+
+pub fn load_draft_backups(path: &Path) -> Result<Vec<DraftBackupEntry>, RuntimeError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(RuntimeError::new(format!(
+                "Could not restore draft backups from '{}': {error}",
+                path.display()
+            )));
+        }
+    };
+
+    let backups: SerializedDraftBackups = serde_json::from_str(&raw).map_err(|error| {
+        RuntimeError::new(format!(
+            "Could not parse draft backups from '{}': {error}",
+            path.display()
+        ))
+    })?;
+
+    Ok(backups.entries)
+}
+
+pub fn persist_draft_backups(
+    path: &Path,
+    entries: &[DraftBackupEntry],
+) -> Result<(), RuntimeError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            RuntimeError::new(format!(
+                "Could not prepare draft backup directory '{}': {error}",
+                parent.display()
+            ))
+        })?;
+    }
+
+    let payload = serde_json::to_string_pretty(&SerializedDraftBackups {
+        entries: entries.to_vec(),
+    })
+    .map_err(|error| {
+        RuntimeError::new(format!(
+            "Could not serialize draft backups for '{}': {error}",
+            path.display()
+        ))
+    })?;
+
+    write_document_source(path, &payload)
+}
 
 pub(crate) fn read_document_source(path: &Path) -> Result<String, RuntimeError> {
     fs::read_to_string(path).map_err(|error| {

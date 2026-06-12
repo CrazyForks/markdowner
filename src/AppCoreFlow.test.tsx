@@ -28,6 +28,8 @@ const openDroppedPathMock = vi.fn();
 const quitAppMock = vi.fn();
 const loadOpenTabsMock = vi.fn();
 const saveOpenTabsMock = vi.fn();
+const loadDraftBackupsMock = vi.fn();
+const saveDraftBackupsMock = vi.fn();
 const openDialogMock = vi.fn();
 const saveDialogMock = vi.fn();
 const messageMock = vi.fn();
@@ -61,6 +63,8 @@ vi.mock('./lib/desktop', () => ({
   quitApp: quitAppMock,
   loadOpenTabs: loadOpenTabsMock,
   saveOpenTabs: saveOpenTabsMock,
+  loadDraftBackups: loadDraftBackupsMock,
+  saveDraftBackups: saveDraftBackupsMock,
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -206,6 +210,10 @@ describe('App core Markdown editing flow', () => {
     });
     saveOpenTabsMock.mockReset();
     saveOpenTabsMock.mockResolvedValue(undefined);
+    loadDraftBackupsMock.mockReset();
+    loadDraftBackupsMock.mockResolvedValue([]);
+    saveDraftBackupsMock.mockReset();
+    saveDraftBackupsMock.mockResolvedValue(undefined);
     openDialogMock.mockReset();
     saveDialogMock.mockReset();
     messageMock.mockReset();

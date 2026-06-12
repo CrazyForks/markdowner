@@ -95,8 +95,14 @@ import {
   quitApp,
   loadOpenTabs,
   saveOpenTabs,
+  loadDraftBackups,
+  saveDraftBackups,
   searchWorkspace,
 } from './lib/desktop';
+import {
+  applyDraftBackupsToRestoredTabs,
+  buildDraftBackupEntries,
+} from './lib/draftBackups';
 import {
   buildEditorDocumentMetrics,
   resolveEditorPreviewSource,
@@ -105,8 +111,6 @@ import { resolveCloseDecisionAction } from './lib/closeDecision';
 import {
   buildCloseConfirmationDialog,
   resolveActiveClosePromptState,
-  resolveClosePromptState,
-  resolveCloseRequestAction,
 } from './lib/closePrompt';
 import {
   resolveActiveDraftSyncPlan,
@@ -368,6 +372,10 @@ const CHORD_PREFIX_TIMEOUT_MS = 1500;
 // at this cadence and force-flush at synchronization points (save, mode
 // switch, tab stash, close prompts) to keep correctness without the cost.
 const WYSIWYG_FLUSH_DEBOUNCE_MS = 120;
+// Debounce window for the hot-exit draft backup file while the user types.
+// Tab-list changes and close/quit flush immediately; this only bounds the
+// data-loss window for hard crashes.
+const DRAFT_BACKUP_DEBOUNCE_MS = 1000;
 // Max gap between a syllable's compositionend and the next syllable's
 // compositionstart for the table-cell caret carry-forward to apply. Continuous
 // CJK typing fires these within tens of ms; deliberate caret moves are slower.
@@ -559,6 +567,7 @@ export default function App() {
   // and re-persisted via saveOpenTabs on a small debounce.
   const cursorByPathRef = useRef<Map<string, SourceCursorLocation>>(new Map());
   const cursorPersistTimerRef = useRef<number | null>(null);
+  const draftBackupTimerRef = useRef<number | null>(null);
   // One-shot startup directive: when the bootstrap effect picks an active
   // tab, it stashes the path here. The active-tab cursor restore effect
   // consumes it once the editor surface for that path is ready and then
@@ -654,6 +663,12 @@ export default function App() {
   useEffect(() => {
     startupTabsReadyRef.current = startupTabsReady;
   }, [startupTabsReady]);
+  // Mirror the live editor draft for the hot-exit backup writers, which run
+  // from effects and async close paths that must see the current text.
+  const localDraftRef = useRef(localDraft);
+  useEffect(() => {
+    localDraftRef.current = localDraft;
+  }, [localDraft]);
   // Monotonic counter for file/tab operations. Each open/new/switch flow
   // captures the value at start; after every async hop it re-checks against
   // the current value and aborts if a newer operation has begun. Without
@@ -1003,8 +1018,8 @@ export default function App() {
   // Reads tabs/activeTabId from refs so the latest values win even if React
   // hasn't committed a pending render yet.
   const persistOpenTabsAndCursorsNow = () => {
-    if (!startupTabsReadyRef.current) return;
-    void saveOpenTabs(
+    if (!startupTabsReadyRef.current) return Promise.resolve();
+    return saveOpenTabs(
       buildOpenTabsPayload({
         tabs: tabsRef.current,
         activeTabId: activeTabIdRef.current,
@@ -1012,6 +1027,23 @@ export default function App() {
       }),
     ).catch((error) => {
       console.warn('[Markdowner] Failed to persist open tabs:', error);
+    });
+  };
+
+  // Snapshot every dirty buffer into the hot-exit backup file. The payload is
+  // rebuilt from the live refs on each write, so any flow that closes or
+  // saves a tab — including an explicit "Don't Save" discard — drops its
+  // entry on the next persist and the draft can never be restored.
+  const persistDraftBackupsNow = (draftOverride?: string | null) => {
+    if (!startupTabsReadyRef.current) return Promise.resolve();
+    return saveDraftBackups(
+      buildDraftBackupEntries({
+        tabs: tabsRef.current,
+        activeTabId: activeTabIdRef.current,
+        localDraft: draftOverride ?? localDraftRef.current,
+      }),
+    ).catch((error) => {
+      console.warn('[Markdowner] Failed to persist draft backups:', error);
     });
   };
 
@@ -2492,8 +2524,36 @@ export default function App() {
           // useful when the user reopens a single CLI-opened file and the
           // map still carries its remembered position.
           cursorByPathRef.current = cursorPositionsMapFromOpenTabsPayload(persistedTabs);
+          // Hot-exit drafts ride alongside the session. A failed read only
+          // skips restoring unsaved buffers, never the tabs themselves.
+          const draftBackups = await loadDraftBackups().catch(() => []);
+          if (cancelled) return;
           if (persistedTabs.openTabs.length === 0) {
-            setStartupTabsReady(true);
+            const untitledOnly = applyDraftBackupsToRestoredTabs({
+              tabs: [],
+              entries: draftBackups,
+              createTabId: generateDocumentTabId,
+            }).tabs;
+            if (untitledOnly.length === 0) {
+              setStartupTabsReady(true);
+              return;
+            }
+            // Give the restored untitled buffer a Rust-side document to host
+            // it (same as switching to an untitled tab), then seed the live
+            // draft from the backup so it comes back dirty.
+            const next = await newDocument();
+            if (cancelled) return;
+            const activeUntitled = untitledOnly[0];
+            tabsRef.current = untitledOnly;
+            activeTabIdRef.current = activeUntitled.id;
+            startTransition(() => {
+              setSnapshot(next);
+              clearExternalChangeState();
+              setLocalDraft(activeUntitled.draft);
+              setTabs(untitledOnly);
+              setActiveTabId(activeUntitled.id);
+              setStartupTabsReady(true);
+            });
             return;
           }
           const restoreResult = await restorePersistedDocumentTabs({
@@ -2524,7 +2584,24 @@ export default function App() {
           mergedTabs = activeHydration.tabs;
           const hydratedActiveTab = activeHydration.activeTab;
           const nextSnapshot = activeHydration.snapshot;
-          const nextLocalDraft = activeHydration.localDraft;
+          let nextLocalDraft = activeHydration.localDraft;
+
+          // Re-attach hot-exit drafts (and recreate untitled buffers) before
+          // the first paint so restored tabs come back dirty instead of
+          // silently reverting to the disk content.
+          mergedTabs = applyDraftBackupsToRestoredTabs({
+            tabs: mergedTabs,
+            entries: draftBackups,
+            createTabId: generateDocumentTabId,
+          }).tabs;
+          if (hydratedActiveTab) {
+            const activeWithBackup = mergedTabs.find(
+              (tab) => tab.id === hydratedActiveTab.id,
+            );
+            if (activeWithBackup && activeWithBackup.draft !== activeWithBackup.source) {
+              nextLocalDraft = activeWithBackup.draft;
+            }
+          }
 
           tabsRef.current = mergedTabs;
           activeTabIdRef.current = nextActiveId;
@@ -2681,6 +2758,12 @@ export default function App() {
     onManualCheckComplete: (result) => {
       setManualUpdateCheckInfo(result.available ? null : result);
     },
+    onBeforeInstall: async () => {
+      // The installer relaunches the app without a close-requested event —
+      // flush the hot-exit backups now so unsaved buffers survive the update.
+      const fresh = flushWysiwygDraftNow();
+      await persistDraftBackupsNow(fresh ?? localDraftRef.current);
+    },
   });
 
   useEffect(() => {
@@ -2754,13 +2837,32 @@ export default function App() {
   }, [snapshot]);
 
   // Persist open tabs whenever the tab list or active tab changes. Only
-  // path-bearing tabs are saved; untitled drafts stay session-local.
+  // path-bearing tabs are saved; untitled drafts live in the backup file.
   useEffect(() => {
     if (!startupTabsReady) return;
     // Cursors travel with the same payload — persistOpenTabsAndCursorsNow
     // reads from the refs that have already been updated for this render.
-    persistOpenTabsAndCursorsNow();
+    void persistOpenTabsAndCursorsNow();
+    // Draft backups must track every tab-list change too: this is the write
+    // that makes a "Don't Save" discard durable before the next launch.
+    void persistDraftBackupsNow();
   }, [tabs, activeTabId, startupTabsReady]);
+
+  // While the user types, keep the hot-exit backup at most one debounce
+  // window stale so even a hard crash loses almost nothing.
+  useEffect(() => {
+    if (!startupTabsReady) return;
+    draftBackupTimerRef.current = window.setTimeout(() => {
+      draftBackupTimerRef.current = null;
+      void persistDraftBackupsNow();
+    }, DRAFT_BACKUP_DEBOUNCE_MS);
+    return () => {
+      if (draftBackupTimerRef.current !== null) {
+        window.clearTimeout(draftBackupTimerRef.current);
+        draftBackupTimerRef.current = null;
+      }
+    };
+  }, [localDraft, startupTabsReady]);
 
   useEffect(() => {
     setCollapsedFolderKeys((current) =>
@@ -4347,89 +4449,30 @@ export default function App() {
     };
   }, []);
 
-  const forceCloseRef = useRef(false);
-
-  const closeTarget = async (target: CloseTarget) => {
-    forceCloseRef.current = true;
-    if (target === 'app') {
-      await quitApp();
-      return;
-    }
-
-    await getCurrentWindow().destroy();
-  };
-
   const handleWindowCloseRequest = useEffectEvent(
-    async (event: { preventDefault: () => void }, target: CloseTarget = 'window') => {
-      // Once the user picked Save (after a successful save) or Don't Save, let any
-      // re-entrant close request from Tauri pass through without re-prompting.
-      if (forceCloseRef.current) {
+    async (event: { preventDefault: () => void }, _target: CloseTarget = 'window') => {
+      // Hot exit (VS Code-style): closing the window or quitting never
+      // prompts about unsaved changes. Dirty buffers — untitled tabs
+      // included — are flushed to the draft backup cache and come back as
+      // dirty tabs on the next launch. Only the explicit per-tab close
+      // prompt (Cmd+W on the last tab) can still discard content.
+      if (busy) {
+        // An open/save operation is mid-flight; exiting now could tear it.
+        event.preventDefault();
         return;
       }
 
-      // Flush any pending WYSIWYG keystrokes so the active-tab dirty check
-      // doesn't drop the user's last ≤120ms of typing on close. For other
-      // tabs we rely on the already-persisted `tab.draft` set by stash on
-      // tab switch (which also flushes).
+      // Flush any pending WYSIWYG keystrokes so the backup carries the
+      // user's last ≤120ms of typing. For other tabs we rely on the
+      // already-stashed `tab.draft` set on tab switch (which also flushes).
       const fresh = flushWysiwygDraftNow();
       const currentDraft = fresh ?? localDraft;
-      const closePromptState = resolveClosePromptState({
-        tabs,
-        activeTabId,
-        activeDraft: currentDraft,
-        target,
-      });
-      const closeRequestAction = resolveCloseRequestAction({
-        activeTabId,
-        busy,
-        closePromptState,
-        forceClose: forceCloseRef.current,
-        target,
-      });
-
-      if (closeRequestAction.kind === 'allow') {
-        return;
-      }
-
-      event.preventDefault();
-
-      if (closeRequestAction.kind === 'preventOnly') {
-        return;
-      }
-
-      const promptDocumentName = closeRequestAction.switchToTabId
-        ? tabs.find((tab) => tab.id === closeRequestAction.switchToTabId)?.name
-        : snapshot.activeDocumentName;
-
-      if (closeRequestAction.switchToTabId) {
-        await switchToTab(closeRequestAction.switchToTabId);
-      }
-
-      try {
-        const closeDecisionAction = await requestCloseDecision(promptDocumentName);
-
-        if (closeDecisionAction.kind === 'save') {
-          await withBusy(async () => {
-            const saved = await saveActiveDocumentForClose();
-            if (saved) {
-              await closeTarget(target);
-            }
-          });
-          return;
-        }
-
-        if (closeDecisionAction.kind === 'discard') {
-          await closeTarget(target);
-          return;
-        }
-
-        if (closeDecisionAction.kind === 'warn') {
-          // Unrecognized decision (e.g., Cancel or unexpected platform value) — keep window open.
-          console.warn('Unrecognized close decision:', closeDecisionAction.decision);
-        }
-      } catch (error) {
-        reportOperationError(error, 'Could not close Markdowner');
-      }
+      await Promise.all([
+        persistDraftBackupsNow(currentDraft),
+        // The cursor debounce (800ms) may not have fired yet — snapshot the
+        // session one last time alongside the backups.
+        persistOpenTabsAndCursorsNow(),
+      ]);
     },
   );
 
