@@ -63,7 +63,20 @@ jobs:
 
       - name: Build universal DMG
         if: steps.existing.outputs.exists != 'true'
-        run: pnpm build universal dmg
+        # hdiutil inside tauri's bundle_dmg.sh is flaky on macOS runners
+        # (XProtect scans the fresh .app and holds it busy — see
+        # actions/runner-images#7522). Retries reuse the compiled artifacts,
+        # so only the bundling step reruns.
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm build universal dmg; then
+              exit 0
+            fi
+            echo "DMG build failed (attempt ${attempt}/3); retrying in 15s..."
+            sleep 15
+          done
+          echo "DMG build failed after 3 attempts."
+          exit 1
 
       - name: Create GitHub Release
         if: steps.existing.outputs.exists != 'true'
