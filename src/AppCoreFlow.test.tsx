@@ -56,6 +56,7 @@ vi.mock('./lib/desktop', () => ({
   setMode: setModeMock,
   setTheme: setThemeMock,
   openDroppedPath: openDroppedPathMock,
+  importImageAsset: vi.fn(),
   quitApp: quitAppMock,
   loadOpenTabs: loadOpenTabsMock,
   saveOpenTabs: saveOpenTabsMock,

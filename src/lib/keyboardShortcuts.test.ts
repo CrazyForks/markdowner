@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { resolveShellBindings } from './keymap';
+
 import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
@@ -162,7 +164,9 @@ describe('resolveFindShortcutAction', () => {
         isSidebarOpen: true,
         sidebarPanel: 'search',
       }),
-    ).toEqual({ kind: 'toggleSidebar' });
+      // Re-pressing the shortcut keeps the panel open and re-focuses the
+      // query input instead of closing the sidebar.
+    ).toEqual({ kind: 'focusSearchPanel' });
   });
 
   it('routes command-f based on explorer focus and document availability', () => {
@@ -202,6 +206,22 @@ describe('resolveShellShortcutAction', () => {
     isSidebarOpen: false,
     sidebarPanel: 'files',
   } as const;
+
+  it('honours keybinding overrides for rebindable commands', () => {
+    const bindings = resolveShellBindings({ 'file.newDocument': 'mod+shift+n' });
+
+    expect(
+      resolveShellShortcutAction(
+        shortcutEvent({ key: 'N', metaKey: true, shiftKey: true }),
+        context,
+        bindings,
+      ),
+    ).toEqual({ kind: 'newDocument' });
+    // The default combo no longer triggers once it is overridden away.
+    expect(
+      resolveShellShortcutAction(shortcutEvent({ key: 'n', metaKey: true }), context, bindings),
+    ).toEqual({ kind: 'none' });
+  });
 
   it.each([
     [{ key: 'n', metaKey: true }, { kind: 'newDocument' }],
@@ -439,6 +459,7 @@ describe('resolveFocusToggleShortcut', () => {
         isSidebarOpen: false,
         sidebarPanel: 'files',
         focusInsideExplorer: false,
+        focusInsideSearch: false,
       }),
     ).toBeNull();
     expect(
@@ -446,6 +467,7 @@ describe('resolveFocusToggleShortcut', () => {
         isSidebarOpen: false,
         sidebarPanel: 'files',
         focusInsideExplorer: false,
+        focusInsideSearch: false,
       }),
     ).toBeNull();
   });
@@ -456,6 +478,7 @@ describe('resolveFocusToggleShortcut', () => {
         isSidebarOpen: true,
         sidebarPanel: 'outline',
         focusInsideExplorer: false,
+        focusInsideSearch: false,
       }),
     ).toEqual({ kind: 'focusOutline' });
   });
@@ -466,6 +489,18 @@ describe('resolveFocusToggleShortcut', () => {
         isSidebarOpen: true,
         sidebarPanel: 'files',
         focusInsideExplorer: true,
+        focusInsideSearch: false,
+      }),
+    ).toEqual({ kind: 'focusEditor' });
+  });
+
+  it('returns focusEditor when focus starts inside the Search panel', () => {
+    expect(
+      resolveFocusToggleShortcut(shortcutEvent({ key: '0', metaKey: true }), {
+        isSidebarOpen: true,
+        sidebarPanel: 'search',
+        focusInsideExplorer: false,
+        focusInsideSearch: true,
       }),
     ).toEqual({ kind: 'focusEditor' });
   });
@@ -476,6 +511,7 @@ describe('resolveFocusToggleShortcut', () => {
         isSidebarOpen: false,
         sidebarPanel: 'search',
         focusInsideExplorer: false,
+        focusInsideSearch: false,
       }),
     ).toEqual({ kind: 'showExplorer' });
   });

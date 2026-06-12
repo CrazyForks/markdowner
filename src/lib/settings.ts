@@ -86,6 +86,11 @@ export interface Settings {
   dismissedUpdateVersion: string | null;
   /** One-time "make Markdowner the default .md app?" prompt was shown. */
   defaultAppPromptSeen: boolean;
+  /**
+   * Keymap overrides: command id → shortcut descriptor (e.g. "mod+shift+f").
+   * Commands without an entry keep their built-in default binding.
+   */
+  keybindingOverrides: Record<string, string>;
 }
 
 export interface DiagnosticsLogStatus {
@@ -161,6 +166,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lastUpdateCheckAt: null,
   dismissedUpdateVersion: null,
   defaultAppPromptSeen: false,
+  keybindingOverrides: {},
 };
 
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>;
@@ -357,7 +363,22 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   if (typeof merged.defaultAppPromptSeen !== 'boolean') {
     merged.defaultAppPromptSeen = DEFAULT_SETTINGS.defaultAppPromptSeen;
   }
+  merged.keybindingOverrides = normalizeKeybindingOverrides(merged.keybindingOverrides);
   return merged;
+}
+
+/** Keep only string→string entries; anything malformed falls back to {}. */
+function normalizeKeybindingOverrides(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const next: Record<string, string> = {};
+  for (const [key, descriptor] of Object.entries(value)) {
+    if (typeof descriptor === 'string' && descriptor.trim().length > 0) {
+      next[key] = descriptor;
+    }
+  }
+  return next;
 }
 
 export async function loadSettings(): Promise<Settings> {

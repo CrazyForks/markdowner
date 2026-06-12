@@ -1,4 +1,10 @@
 import type { EditorMode } from './desktop';
+import {
+  DEFAULT_SHELL_BINDINGS,
+  type KeyBinding,
+  type ShellBindings,
+  type ShellCommandId,
+} from './keymap';
 
 type CommandModifierEvent = Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>;
 
@@ -26,6 +32,7 @@ type FocusToggleContext = {
   isSidebarOpen: boolean;
   sidebarPanel: 'files' | 'outline' | 'search';
   focusInsideExplorer: boolean;
+  focusInsideSearch: boolean;
 };
 
 type FindShortcutContext = {
@@ -119,6 +126,18 @@ export function matchesShortcut(
   return event.key.toLowerCase() === key && event.shiftKey === (options.shift ?? false);
 }
 
+/** Like `matchesShortcut`, but driven by a (possibly user-overridden) binding. */
+function matchesBinding(event: ShortcutEvent, binding: KeyBinding): boolean {
+  if (event.defaultPrevented || !usesCommandModifier(event)) {
+    return false;
+  }
+  return (
+    event.key.toLowerCase() === binding.key &&
+    event.shiftKey === Boolean(binding.shift) &&
+    event.altKey === Boolean(binding.alt)
+  );
+}
+
 export function resolveModeChord(event: ModeChordEvent): ModeChordResolution {
   const key = event.key.toLowerCase();
   if (key === 'meta' || key === 'control' || key === 'shift' || key === 'alt') {
@@ -188,9 +207,10 @@ export function resolveFindShortcutAction(
   }
 
   if (hasCommandModifier && !event.altKey && event.shiftKey && key === 'f') {
-    return context.isSidebarOpen && context.sidebarPanel === 'search'
-      ? { kind: 'toggleSidebar' }
-      : { kind: 'focusSearchPanel' };
+    // Always land in the workspace search input — pressing the shortcut
+    // again while the panel is already open re-focuses the query (VS Code
+    // behaviour) instead of closing the sidebar.
+    return { kind: 'focusSearchPanel' };
   }
 
   if (hasCommandModifier && !event.altKey && !event.shiftKey && key === 'f') {
@@ -206,65 +226,69 @@ export function resolveFindShortcutAction(
 export function resolveShellShortcutAction(
   event: ShortcutEvent,
   context: ShellShortcutContext,
+  bindings: ShellBindings = DEFAULT_SHELL_BINDINGS,
 ): ShellShortcutAction {
-  if (matchesShortcut(event, 'n') || matchesShortcut(event, 't')) {
+  const matches = (commandId: ShellCommandId) => matchesBinding(event, bindings[commandId]);
+
+  if (matches('file.newDocument') || matches('file.newTab')) {
     return { kind: 'newDocument' };
   }
-  if (matchesShortcut(event, 'o', { shift: true })) {
+  if (matches('file.openWorkspace')) {
     return { kind: 'openWorkspace' };
   }
-  if (matchesShortcut(event, 'e', { shift: true })) {
+  if (matches('view.showExplorerPanel')) {
     return context.isSidebarOpen && context.sidebarPanel === 'files'
       ? { kind: 'toggleSidebar' }
       : { kind: 'showExplorerPanel' };
   }
-  if (matchesShortcut(event, 'b', { shift: true })) {
+  if (matches('view.toggleSidebar')) {
     return { kind: 'toggleSidebar' };
   }
-  if (matchesShortcut(event, ',')) {
+  if (matches('app.openSettings')) {
     return { kind: 'toggleSettingsTab' };
   }
-  if (matchesShortcut(event, '/')) {
+  if (matches('help.toggleShortcuts')) {
     return { kind: 'toggleShortcuts' };
   }
-  if (matchesShortcut(event, 'd', { shift: true })) {
+  if (matches('view.openOutlinePanel')) {
     return { kind: 'openOutlinePanel' };
   }
-  if (matchesShortcut(event, 'p', { shift: true })) {
+  if (matches('view.commandPalette')) {
     return { kind: 'toggleCommandPalette' };
   }
-  if (matchesShortcut(event, 'p')) {
+  if (matches('view.quickOpen')) {
     return { kind: 'toggleQuickOpen' };
   }
-  if (matchesShortcut(event, 'i', { shift: true })) {
+  if (matches('view.documentStats')) {
     return context.activeDocumentOpen ? { kind: 'toggleDocumentStats' } : { kind: 'none' };
   }
-  if (matchesShortcut(event, 'o')) {
+  if (matches('file.openDocument')) {
     return { kind: 'openDocument' };
   }
-  if (matchesShortcut(event, 's', { shift: true })) {
+  if (matches('file.saveAs')) {
     return { kind: 'saveAs' };
   }
-  if (matchesShortcut(event, 's')) {
+  if (matches('file.save')) {
     return { kind: 'save' };
   }
-  if (matchesShortcut(event, 'q')) {
+  if (matches('app.quit')) {
     return { kind: 'quit' };
   }
-  if (matchesShortcut(event, 'w')) {
+  if (matches('file.closeTabOrWindow')) {
     return { kind: 'closeTabOrWindow' };
   }
-  if (matchesShortcut(event, 't', { shift: true })) {
+  if (matches('file.reopenClosedTab')) {
     return { kind: 'reopenClosedTab' };
   }
-  // Cmd+Shift+Y (t-Y-pewriter), leaving Cmd+Shift+T for closed-tab restore.
-  if (matchesShortcut(event, 'y', { shift: true })) {
+  // Cmd+Shift+Y (t-Y-pewriter) by default, leaving Cmd+Shift+T for
+  // closed-tab restore.
+  if (matches('view.typewriterMode')) {
     return { kind: 'toggleTypewriterMode' };
   }
-  if (matchesShortcut(event, 'j', { shift: true })) {
+  if (matches('view.focusMode')) {
     return { kind: 'toggleFocusMode' };
   }
-  if (matchesShortcut(event, 'm', { shift: true })) {
+  if (matches('view.tableViewMode')) {
     return { kind: 'toggleTableViewMode' };
   }
   return { kind: 'none' };
@@ -392,7 +416,10 @@ export function resolveFocusToggleShortcut(
   if (context.isSidebarOpen && context.sidebarPanel === 'outline') {
     return { kind: 'focusOutline' };
   }
-  if (context.focusInsideExplorer) {
+  // From either sidebar focus surface (explorer tree or the workspace
+  // search panel) Cmd+0 returns to the editor, whose own selection is the
+  // remembered cursor position.
+  if (context.focusInsideExplorer || context.focusInsideSearch) {
     return { kind: 'focusEditor' };
   }
   return { kind: 'showExplorer' };

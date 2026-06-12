@@ -132,6 +132,7 @@ import {
 } from './lib/fileDialogOptions';
 import { getErrorMessage } from './lib/errors';
 import { createMarkdownImageExtension } from './lib/wysiwygImageExtension';
+import { WYSIWYG_LINK_OPTIONS } from './lib/wysiwygLinkOptions';
 import {
   CLEARED_EXTERNAL_CHANGE_STATE,
   externalChangeDetectedState,
@@ -200,7 +201,8 @@ import {
   resolveOutlinePanelSizing,
   saveSettings,
 } from './lib/settings';
-import { moveTab } from './lib/tabs';
+import { resolveShellBindings } from './lib/keymap';
+import { moveTab, reorderTabByDrag } from './lib/tabs';
 import { useUpdateCheck } from './lib/useUpdateCheck';
 import {
   MARKDOWN_CONTENT_SCOPE_CLASS,
@@ -999,6 +1001,11 @@ export default function App() {
     return Boolean(active?.closest('[data-explorer-root]'));
   };
 
+  const isFocusInsideSearch = () => {
+    const active = document.activeElement as HTMLElement | null;
+    return Boolean(active?.closest('[data-search-root]'));
+  };
+
   const handleOpenOutlinePanel = useEffectEvent(() => {
     applySidebarPanelState('outline', 'toggle');
   });
@@ -1089,7 +1096,29 @@ export default function App() {
         const offset = targetMatch.absoluteOffset;
         const end = offset + (targetMatch.matchEnd - targetMatch.matchStart);
         window.setTimeout(() => {
-          focusSourceSelection(offset, end);
+          // WYSIWYG has no CodeMirror view — map the source offsets onto
+          // ProseMirror positions and reuse the find-match jump (selection +
+          // scroll + focus). Without this, picking a workspace search result
+          // in WYSIWYG mode silently did nothing.
+          if (currentMode === 'Wysiwyg') {
+            const ed = editorInstanceRef.current;
+            const wysiwygFrom = wysiwygPositionAtMarkdownOffset(ed, offset);
+            if (ed && wysiwygFrom !== null) {
+              const wysiwygTo = wysiwygPositionAtMarkdownOffset(ed, end) ?? wysiwygFrom;
+              selectWysiwygFindMatch(ed, {
+                start: offset,
+                end,
+                text: '',
+                regex: false,
+                captures: [],
+                groups: null,
+                wysiwygFrom,
+                wysiwygTo,
+              });
+            }
+            return;
+          }
+          focusSourceSelection(offset, end, { centerIfOffscreen: true });
         }, 16);
       }
     },
@@ -1491,9 +1520,9 @@ export default function App() {
   const wysiwygExtensions = useMemo(
     () => [
       StarterKit.configure({
-        link: {
-          openOnClick: false,
-        },
+        // Links only from explicit markdown / commands — never autolinked
+        // from bare dotted words. See wysiwygLinkOptions.ts for the why.
+        link: WYSIWYG_LINK_OPTIONS,
         // TrailingNode keeps an empty paragraph at the end of the document
         // whenever the last block is something the caret can't comfortably
         // sit "after" (codeBlock, blockquote, table, heading, etc.). Pressing
@@ -1584,11 +1613,11 @@ export default function App() {
         if (focusCodeBlockLanguageSelectorOnArrowUp(view, event)) {
           return true;
         }
-        // Cmd+/ (Ctrl+/) — open the slash command menu at the current caret,
-        // regardless of where the caret sits inside the block. The "type / at
-        // block start" behaviour stays as-is; this shortcut is the
-        // discoverable, position-agnostic equivalent users reach for after
-        // they've typed something on the line.
+        // Cmd+/ (Ctrl+/) — open the Turn-into menu: reformat the caret's line
+        // (or every block in the selection) to the chosen block type. The
+        // "type / at block start" insert flow stays as-is; tables, images,
+        // and dividers can't be reformatted, so the menu refuses to open on
+        // them (enforced by the SlashCommandMenu subscriber).
         if (
           (event.metaKey || event.ctrlKey) &&
           !event.altKey &&
@@ -1596,7 +1625,7 @@ export default function App() {
           event.key === '/'
         ) {
           event.preventDefault();
-          publishEditorEvent('slash:open-at-cursor', {});
+          publishEditorEvent('slash:open-at-cursor', { mode: 'convert' });
           return true;
         }
         // Cmd+K (Ctrl+K on Win/Linux) — open the inline link editor at the
@@ -3952,11 +3981,15 @@ export default function App() {
         return;
       }
 
-      const shellShortcutAction = resolveShellShortcutAction(event, {
-        activeDocumentOpen,
-        isSidebarOpen,
-        sidebarPanel,
-      });
+      const shellShortcutAction = resolveShellShortcutAction(
+        event,
+        {
+          activeDocumentOpen,
+          isSidebarOpen,
+          sidebarPanel,
+        },
+        resolveShellBindings(settings.keybindingOverrides),
+      );
       if (shellShortcutAction.kind !== 'none') {
         event.preventDefault();
         switch (shellShortcutAction.kind) {
@@ -4119,11 +4152,13 @@ export default function App() {
       // Cmd+0 toggles between the Explorer and the active editor. When Outline
       // is already visible, it focuses the Outline rows instead of replacing
       // the current sidebar panel with Explorer. When focus is already inside
-      // the Explorer, Cmd+0 sends focus back to the active editor surface.
+      // the Explorer or the workspace Search panel, Cmd+0 sends focus back to
+      // the active editor surface (whose selection is the remembered cursor).
       const focusToggleShortcut = resolveFocusToggleShortcut(event, {
         isSidebarOpen,
         sidebarPanel,
         focusInsideExplorer: isFocusInsideExplorer(),
+        focusInsideSearch: isFocusInsideSearch(),
       });
       if (focusToggleShortcut) {
         event.preventDefault();
@@ -4480,6 +4515,7 @@ export default function App() {
       setMode: (mode) => void handleSetMode(mode),
       updateSettings: handleSettingsChange,
       openSettings: () => void toggleSettingsTab(),
+      openKeymap: () => setIsShortcutsOpen(true),
       installCliLauncher: () => {
         void (async () => {
           try {
@@ -4632,6 +4668,9 @@ export default function App() {
           activeTabId={activeTabId}
           onSelectTab={(id) => void switchToTab(id)}
           onCloseTab={(id) => void handleCloseTab(id)}
+          onReorderTab={(sourceId, targetId, placeAfter) =>
+            setTabs((prev) => reorderTabByDrag(prev, sourceId, targetId, placeAfter))
+          }
         />
       {isSettingsTabActive ? (
         <SettingsTabContent
@@ -4754,6 +4793,10 @@ export default function App() {
         stats={documentStats}
         shortcutsOpen={isShortcutsOpen}
         onShortcutsOpenChange={setIsShortcutsOpen}
+        keybindingOverrides={settings.keybindingOverrides}
+        onKeybindingOverridesChange={(next) =>
+          handleSettingsChange({ ...settings, keybindingOverrides: next })
+        }
         defaultAppPromptOpen={defaultAppPromptOpen}
         defaultAppPromptBusy={defaultAppPromptBusy}
         onDefaultAppPromptOpenChange={handleDefaultAppPromptOpenChange}

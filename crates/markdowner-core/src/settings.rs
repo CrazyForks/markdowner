@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::EditorMode;
@@ -33,6 +35,9 @@ pub struct Settings {
     pub dismissed_update_version: Option<String>,
     /// One-time "make Markdowner the default .md app?" prompt was shown.
     pub default_app_prompt_seen: bool,
+    /// Keymap overrides: command id → shortcut descriptor (e.g. "mod+shift+f").
+    /// Commands without an entry keep their built-in default binding.
+    pub keybinding_overrides: BTreeMap<String, String>,
 }
 
 impl Default for Settings {
@@ -64,6 +69,7 @@ impl Default for Settings {
             last_update_check_at: None,
             dismissed_update_version: None,
             default_app_prompt_seen: false,
+            keybinding_overrides: BTreeMap::new(),
         }
     }
 }
@@ -85,6 +91,27 @@ mod tests {
         );
         assert_eq!(parsed.outline_font_size, 12);
         assert_eq!(parsed.outline_row_spacing, 0);
+    }
+
+    #[test]
+    fn keybinding_overrides_default_empty_and_round_trip() {
+        let legacy = r#"{"autoSave":true}"#;
+        let parsed: Settings = serde_json::from_str(legacy).expect("legacy settings parse");
+        assert!(parsed.keybinding_overrides.is_empty());
+
+        let json = serde_json::json!({
+            "keybindingOverrides": { "file.newDocument": "mod+shift+n" }
+        });
+        let parsed: Settings = serde_json::from_value(json).expect("override settings parse");
+        assert_eq!(
+            parsed.keybinding_overrides.get("file.newDocument").map(String::as_str),
+            Some("mod+shift+n")
+        );
+        let serialized = serde_json::to_value(&parsed).expect("settings serialize");
+        assert_eq!(
+            serialized["keybindingOverrides"]["file.newDocument"],
+            "mod+shift+n"
+        );
     }
 
     #[test]

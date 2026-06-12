@@ -26,6 +26,7 @@ const saveActiveDocumentAsMock = vi.fn();
 const setModeMock = vi.fn();
 const setThemeMock = vi.fn();
 const openDroppedPathMock = vi.fn();
+const importImageAssetMock = vi.fn();
 const quitAppMock = vi.fn();
 const loadOpenTabsMock = vi.fn();
 const saveOpenTabsMock = vi.fn();
@@ -68,6 +69,7 @@ vi.mock('./lib/desktop', () => ({
   setMode: setModeMock,
   setTheme: setThemeMock,
   openDroppedPath: openDroppedPathMock,
+  importImageAsset: importImageAssetMock,
   quitApp: quitAppMock,
   loadOpenTabs: loadOpenTabsMock,
   saveOpenTabs: saveOpenTabsMock,
@@ -5824,6 +5826,7 @@ describe('App recent documents', () => {
           lastUpdateCheckAt: null,
           dismissedUpdateVersion: null,
           defaultAppPromptSeen: false,
+          keybindingOverrides: {},
         },
       });
     });
@@ -7070,6 +7073,7 @@ describe('App recent documents', () => {
           lastUpdateCheckAt: null,
           dismissedUpdateVersion: null,
           defaultAppPromptSeen: false,
+          keybindingOverrides: {},
         },
       });
     });

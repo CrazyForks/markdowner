@@ -19,6 +19,7 @@ export type CommandPaletteActions = {
   setMode: (mode: EditorMode) => void;
   updateSettings: (settings: Settings) => void;
   openSettings: () => void;
+  openKeymap: () => void;
   installCliLauncher: () => void;
   openDocumentStats: () => void;
   setTheme: (themeKind: ThemeKind) => void;
@@ -187,6 +188,13 @@ export function buildCommandPaletteCommands(
       label: 'Open Settings',
       shortcut: '⌘,',
       run: actions.openSettings,
+    },
+    {
+      id: 'app.openKeymap',
+      category: 'Preferences',
+      label: 'Open Keymap (Keyboard Shortcuts)',
+      shortcut: '⌘/',
+      run: actions.openKeymap,
     },
     {
       id: 'app.installCliLauncher',

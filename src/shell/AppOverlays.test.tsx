@@ -135,6 +135,8 @@ describe('AppOverlays', () => {
         documentPath="/tmp/project/docs/readme.md"
         stats={stats}
         shortcutsOpen={false}
+        keybindingOverrides={{}}
+        onKeybindingOverridesChange={() => {}}
         onShortcutsOpenChange={() => {}}
         defaultAppPromptOpen={false}
         onDefaultAppPromptOpenChange={() => {}}
@@ -184,6 +186,8 @@ describe('AppOverlays', () => {
         documentPath="/tmp/project/docs/readme.md"
         stats={stats}
         shortcutsOpen
+        keybindingOverrides={{}}
+        onKeybindingOverridesChange={vi.fn()}
         onShortcutsOpenChange={onShortcutsChange}
         defaultAppPromptOpen={false}
         onDefaultAppPromptOpenChange={onDefaultAppPromptChange}

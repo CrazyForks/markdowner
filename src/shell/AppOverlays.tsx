@@ -21,6 +21,8 @@ export interface AppOverlaysProps {
   stats: DocumentStats;
   shortcutsOpen: boolean;
   onShortcutsOpenChange: (open: boolean) => void;
+  keybindingOverrides: Record<string, string>;
+  onKeybindingOverridesChange: (next: Record<string, string>) => void;
   defaultAppPromptOpen: boolean;
   defaultAppPromptBusy?: boolean;
   onDefaultAppPromptOpenChange: (open: boolean) => void;
@@ -43,6 +45,8 @@ export function AppOverlays({
   stats,
   shortcutsOpen,
   onShortcutsOpenChange,
+  keybindingOverrides,
+  onKeybindingOverridesChange,
   defaultAppPromptOpen,
   defaultAppPromptBusy,
   onDefaultAppPromptOpenChange,
@@ -79,6 +83,8 @@ export function AppOverlays({
       <ShortcutsDialog
         open={shortcutsOpen}
         onOpenChange={onShortcutsOpenChange}
+        keybindingOverrides={keybindingOverrides}
+        onKeybindingOverridesChange={onKeybindingOverridesChange}
       />
     </>
   );
