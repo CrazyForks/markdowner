@@ -104,6 +104,7 @@ export function SideBar({
       aria-label={showOutline ? 'Outline' : showSearch ? 'Search' : 'Explorer'}
       data-explorer-root={showExplorer ? '' : undefined}
       data-outline-root={showOutline ? '' : undefined}
+      data-search-root={showSearch ? '' : undefined}
       tabIndex={showOutline ? -1 : undefined}
       className={cn(
         'flex min-h-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground transition-opacity duration-300 ease-in-out',

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { CaseSensitive, Regex, WholeWord } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -54,12 +55,48 @@ export function SearchPanel({
   displayWorkspacePath,
 }: SearchPanelProps) {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
   const totalMatches = results.reduce((sum, file) => sum + file.matches.length, 0);
 
   useEffect(() => {
     searchInputRef.current?.focus();
     searchInputRef.current?.select();
   }, [autoFocusToken]);
+
+  const resultRows = () =>
+    Array.from(
+      resultsRef.current?.querySelectorAll<HTMLElement>('[data-search-row]') ?? [],
+    );
+
+  const focusFirstResultRow = () => {
+    resultRows()[0]?.focus();
+  };
+
+  // ArrowUp/Down walk the flat row list (file headers + matches); ArrowUp on
+  // the first row returns to the query input. Enter activates natively via
+  // the button click; Cmd+ArrowDown is the explicit "jump to this match"
+  // chord requested for parity with the input's ArrowDown entry point.
+  const handleResultRowKeyDown = (activate: () => void) =>
+    (event: ReactKeyboardEvent<HTMLElement>) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'ArrowDown') {
+        event.preventDefault();
+        activate();
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      event.preventDefault();
+      const rows = resultRows();
+      const index = rows.indexOf(event.currentTarget as HTMLElement);
+      if (index < 0) return;
+      if (event.key === 'ArrowUp' && index === 0) {
+        searchInputRef.current?.focus();
+        return;
+      }
+      const next = event.key === 'ArrowDown' ? Math.min(index + 1, rows.length - 1) : index - 1;
+      rows[next]?.focus();
+      rows[next]?.scrollIntoView?.({ block: 'nearest' });
+    };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -82,6 +119,12 @@ export function SearchPanel({
             if (event.key === 'Enter') {
               event.preventDefault();
               onRunSearch();
+              return;
+            }
+            // Hand keyboard focus to the result list, VS Code style.
+            if (event.key === 'ArrowDown' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+              event.preventDefault();
+              focusFirstResultRow();
             }
           }}
           placeholder="Search across workspace"
@@ -173,37 +216,57 @@ export function SearchPanel({
           </p>
         )}
         {results.length > 0 ? (
-          <ScrollArea className="mt-2 min-h-0 flex-1">
-            <div className="flex flex-col gap-2 py-1">
+          // Radix's scroll viewport wraps children in a `display: table` div
+          // that grows to the content's intrinsic width — long match previews
+          // pushed past the sidebar edge instead of truncating. Force the
+          // wrapper back to a width-constrained block so `truncate` works.
+          <ScrollArea className="mt-2 min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:w-full">
+            <div ref={resultsRef} className="flex w-full flex-col gap-2 py-1">
               {results.map((file) => (
-                <div key={file.path} className="flex flex-col gap-0.5">
+                <div key={file.path} className="flex min-w-0 flex-col gap-1.5">
                   <button
                     type="button"
-                    className="explorer-tree-row flex min-w-0 flex-col items-start truncate text-left hover:bg-accent hover:text-accent-foreground"
+                    data-search-row=""
+                    tabIndex={-1}
+                    className="explorer-tree-row flex w-full min-w-0 items-center gap-2 text-left hover:bg-accent hover:text-accent-foreground"
                     title={file.path}
                     onClick={() => onSelectMatch(file, file.matches[0])}
+                    onKeyDown={handleResultRowKeyDown(() =>
+                      onSelectMatch(file, file.matches[0]),
+                    )}
                   >
-                    <span className="truncate text-xs font-semibold">
-                      {displayFileName(file.path)}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-semibold">
+                        {displayFileName(file.path)}
+                      </span>
+                      <span className="block w-full truncate text-[10px] text-muted-foreground">
+                        {displayWorkspacePath(file.path, rootDir)}
+                      </span>
                     </span>
-                    <span className="w-full truncate text-[10px] text-muted-foreground">
-                      {displayWorkspacePath(file.path, rootDir)}
+                    <span
+                      aria-label={`${file.matches.length} matches`}
+                      className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums leading-none text-muted-foreground"
+                    >
+                      {file.matches.length}
                     </span>
                   </button>
-                  <div className="flex flex-col gap-0.5 pl-2">
+                  <div className="flex min-w-0 flex-col pl-2">
                     {file.matches.map((match, idx) => (
                       <button
                         key={`${file.path}-${match.absoluteOffset}-${idx}`}
                         type="button"
                         data-testid="sidebar-search-match"
-                        className="explorer-tree-row flex items-baseline gap-2 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                        data-search-row=""
+                        tabIndex={-1}
+                        className="explorer-tree-row flex w-full min-w-0 items-baseline gap-2 py-0.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
                         onClick={() => onSelectMatch(file, match)}
+                        onKeyDown={handleResultRowKeyDown(() => onSelectMatch(file, match))}
                         title={`Line ${match.line}`}
                       >
                         <span className="shrink-0 tabular-nums text-muted-foreground">
                           {match.line}
                         </span>
-                        <span className="min-w-0 truncate">
+                        <span className="min-w-0 flex-1 truncate">
                           {renderPreviewWithHighlight(match)}
                         </span>
                       </button>

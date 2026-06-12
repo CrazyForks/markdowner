@@ -22,6 +22,14 @@ const searchResults: SearchResultFile[] = [
         matchEnd: 5,
         absoluteOffset: 12,
       },
+      {
+        line: 9,
+        column: 1,
+        preview: 'alpha body text',
+        matchStart: 0,
+        matchEnd: 5,
+        absoluteOffset: 80,
+      },
     ],
   },
 ];
@@ -96,18 +104,66 @@ describe('SearchPanel', () => {
     });
 
     expect(screen.getByTestId('sidebar-search-summary')).toHaveTextContent(
-      '1 result in 1 file',
+      '2 results in 1 file',
     );
     expect(screen.getByText('alpha.md')).toBeInTheDocument();
     expect(screen.getByText('guides/alpha.md')).toBeInTheDocument();
     expect(screen.getByText('Alpha').tagName).toBe('MARK');
 
-    fireEvent.click(screen.getByTestId('sidebar-search-match'));
+    fireEvent.click(screen.getAllByTestId('sidebar-search-match')[0]);
 
     expect(props.onSelectMatch).toHaveBeenCalledWith(
       searchResults[0],
       searchResults[0].matches[0],
     );
+  });
+
+  it('moves focus from the query input into the result list with ArrowDown', () => {
+    renderSearchPanel({ query: 'alpha', hasRun: true, results: searchResults });
+
+    const input = screen.getByTestId('sidebar-search-input');
+    input.focus();
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+    // First row is the file header; ArrowDown walks into its matches and
+    // ArrowUp from the first row returns to the input.
+    const fileRow = screen.getByTitle('/tmp/project/guides/alpha.md');
+    expect(document.activeElement).toBe(fileRow);
+
+    fireEvent.keyDown(fileRow, { key: 'ArrowDown' });
+    const matchRows = screen.getAllByTestId('sidebar-search-match');
+    expect(document.activeElement).toBe(matchRows[0]);
+
+    fireEvent.keyDown(matchRows[0], { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(matchRows[1]);
+
+    fireEvent.keyDown(matchRows[1], { key: 'ArrowUp' });
+    fireEvent.keyDown(matchRows[0], { key: 'ArrowUp' });
+    fireEvent.keyDown(fileRow, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('jumps to the focused match with Cmd+ArrowDown', () => {
+    const props = renderSearchPanel({
+      query: 'alpha',
+      hasRun: true,
+      results: searchResults,
+    });
+
+    const matchRows = screen.getAllByTestId('sidebar-search-match');
+    matchRows[1].focus();
+    fireEvent.keyDown(matchRows[1], { key: 'ArrowDown', metaKey: true });
+
+    expect(props.onSelectMatch).toHaveBeenCalledWith(
+      searchResults[0],
+      searchResults[0].matches[1],
+    );
+  });
+
+  it('shows a per-file match count badge', () => {
+    renderSearchPanel({ query: 'alpha', hasRun: true, results: searchResults });
+
+    expect(screen.getByLabelText('2 matches')).toHaveTextContent('2');
   });
 
   it('renders busy, error, empty, and initial states', () => {
