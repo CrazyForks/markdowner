@@ -14,6 +14,8 @@ export type CommandPaletteActions = {
   focusExplorerTree: () => void;
   toggleOutline: () => void;
   openQuickOpen: () => void;
+  navigateBack: () => void;
+  navigateForward: () => void;
   focusSearchPanel: () => void;
   openFindReplace: (replaceMode: boolean) => void;
   setMode: (mode: EditorMode) => void;
@@ -29,6 +31,8 @@ export type CommandPaletteActions = {
 
 type BuildCommandPaletteCommandsInput = {
   activeDocumentOpen: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
   settings: Settings;
   actions: CommandPaletteActions;
 };
@@ -36,7 +40,7 @@ type BuildCommandPaletteCommandsInput = {
 export function buildCommandPaletteCommands(
   input: BuildCommandPaletteCommandsInput,
 ): CommandPaletteCommand[] {
-  const { actions, activeDocumentOpen, settings } = input;
+  const { actions, activeDocumentOpen, canGoBack, canGoForward, settings } = input;
 
   return [
     {
@@ -129,6 +133,22 @@ export function buildCommandPaletteCommands(
       shortcut: option.shortcutSymbol,
       run: () => actions.setMode(option.mode),
     })),
+    {
+      id: 'navigation.back',
+      category: 'Navigation',
+      label: 'Back',
+      shortcut: '⌘[',
+      disabled: !canGoBack,
+      run: actions.navigateBack,
+    },
+    {
+      id: 'navigation.forward',
+      category: 'Navigation',
+      label: 'Forward',
+      shortcut: '⌘]',
+      disabled: !canGoForward,
+      run: actions.navigateForward,
+    },
     {
       id: 'preferences.toggleFocusMode',
       category: 'Preferences',

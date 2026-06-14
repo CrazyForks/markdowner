@@ -351,6 +351,20 @@ export function resolveTabShortcut(event: TabShortcutEvent): TabShortcutResoluti
   return null;
 }
 
+/**
+ * ⌘[ / ⌘] (no Shift) → Back / Forward through the document visit trail, mirroring
+ * Chrome's macOS navigation keys. The Shift variants (⌘⇧[ / ⌘⇧]) belong to
+ * previous/next tab, so this requires Shift to be UP.
+ */
+export function resolveHistoryNavShortcut(event: TabShortcutEvent): 'back' | 'forward' | null {
+  if (!usesCommandModifier(event) || event.shiftKey || event.altKey) {
+    return null;
+  }
+  if (event.key === '[') return 'back';
+  if (event.key === ']') return 'forward';
+  return null;
+}
+
 export function resolveTabShortcutAction({
   shortcut,
   tabs,

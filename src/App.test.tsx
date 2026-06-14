@@ -4566,6 +4566,65 @@ describe('App recent documents', () => {
     });
   });
 
+  it('navigates Back (⌘[) and Forward (⌘]) through the document visit trail', async () => {
+    const editor = createMockTiptapEditor('[Next](./next.md)', [{ text: 'Next', from: 1 }]);
+    tiptapMockState.editor = editor;
+    const currentSnapshot = baseSnapshot({
+      activeDocumentName: 'current.md',
+      activeDocumentPath: '/tmp/project/current.md',
+      activeDocumentSource: '[Next](./next.md)',
+      mode: 'Wysiwyg',
+    });
+    const nextSnapshot = baseSnapshot({
+      activeDocumentName: 'next.md',
+      activeDocumentPath: '/tmp/project/next.md',
+      activeDocumentSource: '# Next',
+      mode: 'Wysiwyg',
+    });
+    bootstrapMock.mockResolvedValue(currentSnapshot);
+    resolveMarkdownLinkMock.mockResolvedValue({
+      kind: 'markdown',
+      absolutePath: '/tmp/project/next.md',
+    });
+    openDocumentMock.mockImplementation(async (path: string) =>
+      path === '/tmp/project/next.md' ? nextSnapshot : currentSnapshot,
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /current\.md/i });
+
+    // Follow the link → next.md
+    clickSurfaceLink(editor.view.dom, './next.md');
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /next\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    // ⌘[ → back to current.md
+    fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => {
+      expect(openDocumentMock).toHaveBeenCalledWith('/tmp/project/current.md');
+      expect(screen.getByRole('tab', { name: /current\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    // ⌘] → forward to next.md
+    fireEvent.keyDown(window, { key: ']', metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /next\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+  });
+
   it('swallows the WebKit Korean IME duplicate-syllable handleTextInput call', async () => {
     // Regression test for the bug where typing `# 안녕하세요` rendered as
     // `# 안안녕하세요`. WebKit's Korean IME fires an extra `handleTextInput`

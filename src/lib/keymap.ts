@@ -96,6 +96,8 @@ export const KEYMAP_ROWS: KeymapRow[] = [
   { id: 'view.documentStats', commandId: 'view.documentStats', label: 'Document Stats', section: 'Navigation' },
   { id: 'fixed.focusToggle', label: 'Toggle Explorer focus', section: 'Navigation', fixedKeys: '⌘0', fixedBinding: { key: '0' } },
   { id: 'fixed.jumpToTab', label: 'Jump to tab 1–9', section: 'Navigation', fixedKeys: '⌘1 – ⌘9' },
+  { id: 'fixed.navigateBack', label: 'Back (previous document)', section: 'Navigation', fixedKeys: '⌘[', fixedBinding: { key: '[' } },
+  { id: 'fixed.navigateForward', label: 'Forward (next document)', section: 'Navigation', fixedKeys: '⌘]', fixedBinding: { key: ']' } },
   { id: 'fixed.nextTab', label: 'Next tab', section: 'Navigation', fixedKeys: '⌘⇧]', fixedBinding: { key: ']', shift: true } },
   { id: 'fixed.previousTab', label: 'Previous tab', section: 'Navigation', fixedKeys: '⌘⇧[', fixedBinding: { key: '[', shift: true } },
   { id: 'fixed.moveTabRight', label: 'Move tab right', section: 'Navigation', fixedKeys: '⌃⇧PgDn' },

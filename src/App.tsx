@@ -235,6 +235,7 @@ import {
   attachMarkdownLinkClickInterceptor,
   findClickedAnchorHref,
 } from './lib/linkOpener';
+import * as visitHistory from './lib/navigationHistory';
 import {
   matchesShortcut,
   resolveEditorFontSizeShortcut,
@@ -242,6 +243,7 @@ import {
   resolveFocusToggleShortcut,
   resolveModeChord,
   resolveModeNumberShortcut,
+  resolveHistoryNavShortcut,
   resolveShellShortcutAction,
   resolveTabShortcut,
   resolveTabShortcutAction,
@@ -564,6 +566,18 @@ export default function App() {
   // need to re-create editorProps on every snapshot change — that would
   // shred ProseMirror's plugin state mid-IME.
   const activeDocumentPathRef = useRef<string | null>(null);
+  // Browser-style Back/Forward visit trail (global, across the active document).
+  // State drives the command-palette enablement; the ref gives handlers a
+  // synchronous read. `historySkipPathRef` suppresses recording for the one
+  // active-document change caused by a tab switch or a back/forward navigation
+  // (keyed by path so a missed effect can't leave a stale flag set).
+  const [navHistory, setNavHistory] = useState(visitHistory.createNavigationHistory());
+  const navHistoryRef = useRef(navHistory);
+  const historySkipPathRef = useRef<string | null>(null);
+  const applyNavHistory = (next: visitHistory.NavigationHistory) => {
+    navHistoryRef.current = next;
+    setNavHistory(next);
+  };
   // Remembered caret per absolute file path. Filled from the persisted
   // session on launch, updated as the user moves the caret (both modes),
   // and re-persisted via saveOpenTabs on a small debounce.
@@ -1445,6 +1459,16 @@ export default function App() {
   // inside stable editorProps closures can resolve relative markdown links.
   useEffect(() => {
     activeDocumentPathRef.current = snapshot.activeDocumentPath;
+    // Record the visit trail. Skip untitled buffers (no path), and the one
+    // change caused by a tab switch / back-forward navigation (which set
+    // historySkipPathRef to the exact target path).
+    const path = snapshot.activeDocumentPath;
+    if (!path) return;
+    if (historySkipPathRef.current === path) {
+      historySkipPathRef.current = null;
+      return;
+    }
+    applyNavHistory(visitHistory.recordNavigation(navHistoryRef.current, path));
   }, [snapshot.activeDocumentPath]);
 
   const publishWysiwygMarkdownDraft = useEffectEvent((markdown: string) => {
@@ -3289,6 +3313,35 @@ export default function App() {
   // editor tab (applying the returned snapshot so the UI actually reconciles —
   // the bug behind earlier silent no-ops); other files go to the OS handler,
   // external URLs to the default browser.
+  // Open a markdown file (by absolute path) into the editor — reusing the
+  // active tab unless it has unsaved edits or a new tab was requested. Shared
+  // by link-following and Back/Forward navigation. The visit trail is recorded
+  // by the activeDocumentPath effect, so this stays navigation-agnostic.
+  const openMarkdownDocumentByPath = useEffectEvent(
+    async (absolutePath: string, options: { openInNewTab: boolean }) => {
+      const token = nextEditorOpRequest();
+      let applied = false;
+      await withBusy(async () => {
+        stashActiveTabDraft();
+        await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
+        if (isEditorOpStale(token)) return;
+
+        const next = await openDocument(absolutePath);
+        if (isEditorOpStale(token)) return;
+
+        applySnapshot(next);
+        upsertActiveTabFromSnapshot(next, {
+          reuseTabId: options.openInNewTab || hasActiveTabEdits ? null : activeTabIdRef.current,
+        });
+        applied = true;
+      }, 'Could not open linked document');
+
+      if (applied && !isEditorOpStale(token)) {
+        focusActiveEditor();
+      }
+    },
+  );
+
   const openEditorMarkdownLink = useEffectEvent(
     async (
       href: string,
@@ -3299,30 +3352,9 @@ export default function App() {
       const resolved = await resolveMarkdownLink(href, activeDocumentPathRef.current);
 
       switch (resolved.kind) {
-        case 'markdown': {
-          const token = nextEditorOpRequest();
-          let applied = false;
-          await withBusy(async () => {
-            stashActiveTabDraft();
-            await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
-            if (isEditorOpStale(token)) return;
-
-            const next = await openDocument(resolved.absolutePath);
-            if (isEditorOpStale(token)) return;
-
-            applySnapshot(next);
-            upsertActiveTabFromSnapshot(next, {
-              reuseTabId:
-                options.openInNewTab || hasActiveTabEdits ? null : activeTabIdRef.current,
-            });
-            applied = true;
-          }, 'Could not open linked document');
-
-          if (applied && !isEditorOpStale(token)) {
-            focusActiveEditor();
-          }
+        case 'markdown':
+          await openMarkdownDocumentByPath(resolved.absolutePath, options);
           return;
-        }
         case 'file':
           await openPathInDefaultApp(resolved.absolutePath);
           return;
@@ -3335,6 +3367,20 @@ export default function App() {
       }
     },
   );
+
+  // Back/Forward through the global visit trail (⌘[ / ⌘] and the command
+  // palette). Moves the trail index, marks the target path so the resulting
+  // open does NOT record a new entry, then reuses the link-open machinery.
+  const navigateHistory = useEffectEvent((direction: 'back' | 'forward') => {
+    const result =
+      direction === 'back'
+        ? visitHistory.goBack(navHistoryRef.current)
+        : visitHistory.goForward(navHistoryRef.current);
+    if (!result) return;
+    historySkipPathRef.current = result.path;
+    applyNavHistory(result.state);
+    void openMarkdownDocumentByPath(result.path, { openInNewTab: false });
+  });
 
   const handleNewDocument = async () => {
     // Every invocation appends a fresh Untitled tab (Zed-style): untitled
@@ -3995,6 +4041,10 @@ export default function App() {
           setLocalDraft('');
           return;
         }
+        // Switching tabs is not a visit-trail navigation — don't record it.
+        if (transition.kind === 'openPath') {
+          historySkipPathRef.current = transition.path;
+        }
         const next =
           transition.kind === 'openPath'
             ? await openDocument(transition.path)
@@ -4407,6 +4457,14 @@ export default function App() {
         return;
       }
 
+      // ⌘[ / ⌘] → Back / Forward through the document visit trail (Chrome-style).
+      const historyNav = resolveHistoryNavShortcut(event);
+      if (historyNav) {
+        event.preventDefault();
+        navigateHistory(historyNav);
+        return;
+      }
+
       // Cmd+K starts a chord. Subsequent Cmd+W/E/S (or plain w/e/s) selects a view mode.
       if (matchesShortcut(event, 'k')) {
         event.preventDefault();
@@ -4709,6 +4767,8 @@ export default function App() {
 
   const paletteCommands = buildCommandPaletteCommands({
     activeDocumentOpen,
+    canGoBack: visitHistory.canGoBack(navHistory),
+    canGoForward: visitHistory.canGoForward(navHistory),
     settings,
     actions: {
       newDocument: () => void handleNewDocument(),
@@ -4721,6 +4781,8 @@ export default function App() {
       focusExplorerTree,
       toggleOutline: () => handleOpenOutlinePanel(),
       openQuickOpen: () => setIsQuickOpenOpen(true),
+      navigateBack: () => navigateHistory('back'),
+      navigateForward: () => navigateHistory('forward'),
       focusSearchPanel: () => handleFocusSearchPanel(),
       openFindReplace,
       setMode: (mode) => void handleSetMode(mode),

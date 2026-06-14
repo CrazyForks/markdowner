@@ -19,6 +19,8 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     focusExplorerTree: vi.fn(),
     toggleOutline: vi.fn(),
     openQuickOpen: vi.fn(),
+    navigateBack: vi.fn(),
+    navigateForward: vi.fn(),
     focusSearchPanel: vi.fn(),
     openFindReplace: vi.fn(),
     setMode: vi.fn(),
@@ -44,6 +46,8 @@ function settings(overrides: Partial<Settings> = {}): Settings {
 function commandIds(activeDocumentOpen = true) {
   return buildCommandPaletteCommands({
     activeDocumentOpen,
+    canGoBack: true,
+    canGoForward: true,
     settings: settings(),
     actions: actions(),
   }).map((command) => command.id);
@@ -66,6 +70,8 @@ describe('buildCommandPaletteCommands', () => {
       'view.mode.Wysiwyg',
       'view.mode.Editor',
       'view.mode.SplitView',
+      'navigation.back',
+      'navigation.forward',
       'preferences.toggleFocusMode',
       'preferences.toggleTypewriterMode',
       'preferences.toggleWordWrap',
@@ -86,6 +92,8 @@ describe('buildCommandPaletteCommands', () => {
   it('disables document-only commands when no document is open', () => {
     const commands = buildCommandPaletteCommands({
       activeDocumentOpen: false,
+      canGoBack: true,
+      canGoForward: true,
       settings: settings(),
       actions: actions(),
     });
@@ -94,6 +102,28 @@ describe('buildCommandPaletteCommands', () => {
     expect(commands.find((command) => command.id === 'file.saveAs')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'view.findInFile')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'app.documentStats')?.disabled).toBe(true);
+  });
+
+  it('disables Back/Forward per canGoBack/canGoForward and wires the actions', () => {
+    const navigateBack = vi.fn();
+    const navigateForward = vi.fn();
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: false,
+      settings: settings(),
+      actions: actions({ navigateBack, navigateForward }),
+    });
+
+    const back = commands.find((command) => command.id === 'navigation.back');
+    const forward = commands.find((command) => command.id === 'navigation.forward');
+    expect(back?.disabled).toBe(false);
+    expect(forward?.disabled).toBe(true);
+
+    back?.run();
+    forward?.run();
+    expect(navigateBack).toHaveBeenCalledTimes(1);
+    expect(navigateForward).toHaveBeenCalledTimes(1);
   });
 
   it('derives preference toggle labels and emits updated settings', () => {
@@ -106,6 +136,8 @@ describe('buildCommandPaletteCommands', () => {
     });
     const commands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
       settings: current,
       actions: actions({ updateSettings }),
     });
@@ -134,6 +166,8 @@ describe('buildCommandPaletteCommands', () => {
     const normal = settings({ tableViewMode: 'normal' });
     const normalCommands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
       settings: normal,
       actions: actions({ updateSettings }),
     });
@@ -145,6 +179,8 @@ describe('buildCommandPaletteCommands', () => {
 
     const inlineCommands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
       settings: settings({ tableViewMode: 'inline' }),
       actions: actions(),
     });
@@ -155,6 +191,8 @@ describe('buildCommandPaletteCommands', () => {
   it('exposes shortcuts for the focus-mode and word-wrap toggles', () => {
     const commands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
       settings: settings(),
       actions: actions(),
     });
@@ -166,6 +204,8 @@ describe('buildCommandPaletteCommands', () => {
     const commandActions = actions();
     const commands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
       settings: settings(),
       actions: commandActions,
     });
