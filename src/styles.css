@@ -1069,6 +1069,12 @@ section[data-mode='Wysiwyg'] {
   color: var(--foreground);
   font-size: 13px;
   outline: none;
+  /* `.link-popup` sets `user-select: none` to keep its chrome unselectable;
+     that inherits into this input and, in WebKit (WKWebView), breaks caret
+     placement and text selection — clicking the URL text to edit it stops
+     working. Restore normal text interaction here. */
+  -webkit-user-select: text;
+  user-select: text;
 }
 .link-popup-input:focus-visible {
   border-color: var(--ring);
