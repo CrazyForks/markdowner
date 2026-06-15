@@ -56,6 +56,15 @@ function dimensions(editor: Editor): [number, number] {
   return [rows, cols];
 }
 
+function tableCount(editor: Editor): number {
+  let count = 0;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'table') count += 1;
+    return true;
+  });
+  return count;
+}
+
 /** Row-major cell text contents. */
 function cellTexts(editor: Editor): string[] {
   const out: string[] = [];
@@ -147,5 +156,11 @@ describe('table column/row editing commands', () => {
     editor.chain().focus().deleteRow().run();
     expect(dimensions(editor)).toEqual([1, 2]);
     expect(cellTexts(editor)).toEqual(['A', 'B']);
+  });
+
+  it('deleteTable removes the table the caret is in', () => {
+    caretInCell(editor, 1, 0); // body cell "C"
+    editor.chain().focus().deleteTable().run();
+    expect(tableCount(editor)).toBe(0);
   });
 });

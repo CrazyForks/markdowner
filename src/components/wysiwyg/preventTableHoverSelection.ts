@@ -66,6 +66,9 @@ export const PreventTableHoverSelection = Extension.create({
       }
     };
 
+    const primaryButtonIsUp = (event: MouseEvent) =>
+      !primaryButtonDown || (event.buttons & 1) === 0;
+
     return [
       new Plugin({
         key: pluginKey,
@@ -139,8 +142,22 @@ export const PreventTableHoverSelection = Extension.create({
             forceTableDragTeardown(editorView);
           };
 
+          const onDocumentMouseMove = (event: MouseEvent) => {
+            // prosemirror-tables listens for drag mousemove on view.root
+            // (document), so a stale drag can still mutate the selection while
+            // the cursor is travelling over portal chrome such as the floating
+            // table toolbar. handleDOMEvents only sees moves whose target is
+            // inside editorView.dom; this capture listener closes the gap.
+            if (!primaryButtonIsUp(event)) return;
+            if (tableEditingKey.getState(editorView.state) == null) return;
+            primaryButtonDown = false;
+            forceTableDragTeardown(editorView);
+            event.stopPropagation();
+          };
+
           ownerDocument.addEventListener('pointerdown', onPointerDown, true);
           ownerDocument.addEventListener('mousedown', onPointerDown, true);
+          ownerDocument.addEventListener('mousemove', onDocumentMouseMove, true);
           ownerDocument.addEventListener('pointerup', onRelease, true);
           ownerDocument.addEventListener('pointercancel', onCancel, true);
           ownerDocument.addEventListener('mouseup', onRelease, true);
@@ -150,6 +167,7 @@ export const PreventTableHoverSelection = Extension.create({
             destroy() {
               ownerDocument.removeEventListener('pointerdown', onPointerDown, true);
               ownerDocument.removeEventListener('mousedown', onPointerDown, true);
+              ownerDocument.removeEventListener('mousemove', onDocumentMouseMove, true);
               ownerDocument.removeEventListener('pointerup', onRelease, true);
               ownerDocument.removeEventListener('pointercancel', onCancel, true);
               ownerDocument.removeEventListener('mouseup', onRelease, true);
@@ -168,7 +186,7 @@ export const PreventTableHoverSelection = Extension.create({
               // so it can't extend first. No-op during a genuine drag (button
               // held) and for clean hovers (no active drag), so column-resize
               // hover detection is unaffected.
-              const buttonUp = !primaryButtonDown || (event as MouseEvent).buttons === 0;
+              const buttonUp = primaryButtonIsUp(event as MouseEvent);
               if (!buttonUp) return false;
               if (tableEditingKey.getState(view.state) == null) return false;
               forceTableDragTeardown(view);

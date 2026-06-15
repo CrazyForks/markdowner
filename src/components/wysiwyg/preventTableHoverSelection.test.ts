@@ -11,7 +11,7 @@ import TableRow from '@tiptap/extension-table-row';
 import StarterKit from '@tiptap/starter-kit';
 import { Editor } from '@tiptap/core';
 import { CellSelection, tableEditingKey } from '@tiptap/pm/tables';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PreventTableHoverSelection } from './preventTableHoverSelection';
 
@@ -82,6 +82,34 @@ describe('PreventTableHoverSelection', () => {
       handlers?.mousemove?.(editor.view, { target: td } as unknown as MouseEvent),
     );
     expect(handled).toBe(true);
+  });
+
+  it('tears down a stale table drag before idle mousemove reaches floating toolbar chrome', () => {
+    const cells = cellPositions(editor);
+    editor.view.dispatch(editor.state.tr.setMeta(tableEditingKey, cells[0]));
+    expect(tableEditingKey.getState(editor.state)).not.toBeNull();
+
+    const toolbarButton = document.createElement('button');
+    toolbarButton.type = 'button';
+    document.body.appendChild(toolbarButton);
+    const onMouseup = vi.fn();
+    document.addEventListener('mouseup', onMouseup);
+
+    try {
+      toolbarButton.dispatchEvent(
+        new MouseEvent('mousemove', {
+          bubbles: true,
+          buttons: 0,
+          clientX: 180,
+          clientY: 40,
+        }),
+      );
+
+      expect(onMouseup).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('mouseup', onMouseup);
+      toolbarButton.remove();
+    }
   });
 
   it('lets mousemove through while the primary button is genuinely held', () => {

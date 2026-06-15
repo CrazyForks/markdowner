@@ -7,8 +7,16 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+import { Editor } from '@tiptap/core';
+import { Table } from '@tiptap/extension-table';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
+import TableRow from '@tiptap/extension-table-row';
+import { tableEditingKey } from '@tiptap/pm/tables';
+import StarterKit from '@tiptap/starter-kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { PreventTableHoverSelection } from './preventTableHoverSelection';
 import { TableToolbar } from './TableToolbar';
 
 type CommandName =
@@ -97,6 +105,56 @@ function createTableEditor({ inTable = true } = {}) {
   return editor;
 }
 
+function buildRealTableEditor(): Editor {
+  const el = document.createElement('div');
+  document.body.appendChild(el);
+  const editor = new Editor({
+    element: el,
+    extensions: [
+      StarterKit.configure({ codeBlock: false }),
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      PreventTableHoverSelection,
+    ],
+    content: '<p>x</p>',
+  });
+  editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run();
+  return editor;
+}
+
+function cellPositions(editor: Editor): number[] {
+  const out: number[] = [];
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'tableHeader' || node.type.name === 'tableCell') out.push(pos);
+    return true;
+  });
+  return out;
+}
+
+function dimensions(editor: Editor): [number, number] {
+  let rows = 0;
+  let cols = 0;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'tableRow') {
+      rows += 1;
+      if (rows === 1) cols = node.childCount;
+    }
+    return true;
+  });
+  return [rows, cols];
+}
+
+function tableCount(editor: Editor): number {
+  let count = 0;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'table') count += 1;
+    return true;
+  });
+  return count;
+}
+
 describe('TableToolbar', () => {
   afterEach(() => {
     cleanup();
@@ -174,6 +232,45 @@ describe('TableToolbar', () => {
 
     const toolbar = await screen.findByRole('toolbar', { name: /table editing/i });
     expect(within(toolbar).getByRole('button', { name: /add column after/i })).toBeInTheDocument();
+  });
+
+  it('applies real Tiptap row insertion and table deletion from toolbar clicks after stale drag teardown', async () => {
+    const editor = buildRealTableEditor();
+    const host = editor.view.dom.parentElement;
+    (editor.view as any).hasFocus = () => true;
+    (editor.view as any).coordsAtPos = () => ({
+      top: 88,
+      bottom: 110,
+      left: 120,
+      right: 220,
+    });
+
+    try {
+      const cells = cellPositions(editor);
+      editor.chain().setTextSelection(cells[2] + 1).run();
+
+      render(<TableToolbar editor={editor as any} />);
+
+      const toolbar = await screen.findByRole('toolbar', { name: /table editing/i });
+      const addRowAfter = within(toolbar).getByRole('button', { name: /add row after/i });
+
+      editor.view.dispatch(editor.state.tr.setMeta(tableEditingKey, cells[2]));
+      fireEvent.mouseMove(addRowAfter, {
+        buttons: 0,
+        clientX: 180,
+        clientY: 40,
+      });
+      fireEvent.click(addRowAfter);
+
+      expect(dimensions(editor)).toEqual([3, 2]);
+
+      fireEvent.click(within(toolbar).getByRole('button', { name: /delete table/i }));
+
+      expect(tableCount(editor)).toBe(0);
+    } finally {
+      editor.destroy();
+      host?.remove();
+    }
   });
 
   // Accidental-drag suppression + click-only cell-selection collapse moved
