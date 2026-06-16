@@ -11,6 +11,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import { publishEditorEvent } from '@/lib/editorEvents';
+import { useEditorSurfaceClamp } from './useEditorSurfaceClamp';
 
 interface Props {
   editor: Editor | null;
@@ -146,6 +147,10 @@ export function SelectionToolbar({ editor, enabled = true }: Props) {
     };
   }, [editor, enabled, computePosition]);
 
+  // Keep the toolbar within the editor surface so a selection near the window
+  // edge doesn't render a clipped toolbar.
+  const clamp = useEditorSurfaceClamp(editor, toolbarRef, position);
+
   const isActive = useCallback(
     (name: string, attrs?: Record<string, unknown>) => {
       if (!editor) return false;
@@ -206,7 +211,7 @@ export function SelectionToolbar({ editor, enabled = true }: Props) {
       aria-label="Text formatting"
       data-testid="selection-toolbar"
       className="selection-toolbar"
-      style={{ top: position.top, left: position.left }}
+      style={{ top: position.top + clamp.dy, left: position.left + clamp.dx }}
       onMouseDown={(event) => {
         // Don't let mousedown collapse the active selection.
         event.preventDefault();

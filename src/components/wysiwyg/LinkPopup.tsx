@@ -14,6 +14,7 @@ import { Check, Copy, ExternalLink, Unlink } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { publishEditorEvent, subscribeEditorEvent } from '@/lib/editorEvents';
+import { useEditorSurfaceClamp } from './useEditorSurfaceClamp';
 
 interface Props {
   editor: Editor | null;
@@ -537,10 +538,20 @@ export function LinkPopup({ editor, enabled = true }: Props) {
     };
   }, [placement, state]);
 
+  // Keep the popup within the editor surface so editing a link near the window
+  // edge doesn't render a clipped popup.
+  const clamp = useEditorSurfaceClamp(editor, containerRef, positionStyle);
+
   if (!enabled || !state.open || !positionStyle) return null;
 
   const portalTarget = typeof document === 'undefined' ? null : document.body;
   if (!portalTarget) return null;
+
+  const clampedStyle: CSSProperties = {
+    ...positionStyle,
+    top: (typeof positionStyle.top === 'number' ? positionStyle.top : 0) + clamp.dy,
+    left: (typeof positionStyle.left === 'number' ? positionStyle.left : 0) + clamp.dx,
+  };
 
   const stopMouseDown = (event: { preventDefault: () => void; target: EventTarget | null }) => {
     // Don't blur the URL input when clicking the toolbar shell.
@@ -556,7 +567,7 @@ export function LinkPopup({ editor, enabled = true }: Props) {
       data-testid="link-popup"
       data-placement={placement}
       className="link-popup"
-      style={positionStyle}
+      style={clampedStyle}
       onMouseDown={stopMouseDown}
       onMouseEnter={clearHideTimer}
       onMouseLeave={() => {

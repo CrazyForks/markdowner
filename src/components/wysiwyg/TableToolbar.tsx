@@ -13,6 +13,7 @@ import {
 import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
+import { useEditorSurfaceClamp } from './useEditorSurfaceClamp';
 
 interface Props {
   editor: Editor | null;
@@ -121,6 +122,10 @@ export function TableToolbar({ editor, enabled = true }: Props) {
     };
   }, [editor, enabled, computePosition]);
 
+  // Keep the toolbar within the editor surface so it isn't clipped at the
+  // window edge when the active cell sits near a border.
+  const clamp = useEditorSurfaceClamp(editor, toolbarRef, position);
+
   // NOTE: stale-cell-selection / accidental-drag handling now lives entirely
   // in the PreventTableHoverSelection ProseMirror plugin (pointer-tracked,
   // engine-robust). The toolbar used to run its own mousedown/mousemove/
@@ -170,7 +175,7 @@ export function TableToolbar({ editor, enabled = true }: Props) {
       aria-label="Table editing"
       data-testid="table-toolbar"
       className="table-toolbar"
-      style={{ top: position.top, left: position.left }}
+      style={{ top: position.top + clamp.dy, left: position.left + clamp.dx }}
       onMouseDown={(event) => {
         event.preventDefault();
       }}
