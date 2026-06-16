@@ -1684,6 +1684,14 @@ fn save_active_document_as(
     })
 }
 
+/// Write an exported document (HTML, …) to a path chosen via the frontend save
+/// dialog. Kept separate from the document-save commands because it never
+/// mutates the active-document state.
+#[tauri::command]
+fn write_export_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn has_active_document_external_changes(state: State<'_, DesktopAppState>) -> Result<bool, String> {
     with_backend(state, DesktopBackend::has_active_document_external_changes)
@@ -2044,6 +2052,7 @@ pub fn run() {
             replace_active_document_source,
             save_active_document,
             save_active_document_as,
+            write_export_file,
             has_active_document_external_changes,
             active_document_disk_source,
             set_mode,

@@ -91,6 +91,7 @@ import {
   resolveMarkdownLink,
   saveActiveDocument,
   saveActiveDocumentAs,
+  exportTextFile,
   setMode,
   setTheme,
   openDroppedPath,
@@ -102,6 +103,7 @@ import {
   saveDraftBackups,
   searchWorkspace,
 } from './lib/desktop';
+import { buildExportHtml, exportBaseName, printExportedHtml } from '@/lib/exportDocument';
 import {
   applyDraftBackupsToRestoredTabs,
   buildDraftBackupEntries,
@@ -3708,6 +3710,44 @@ export default function App() {
     });
   };
 
+  const handleExportToHtml = async () => {
+    if (!activeDocumentOpen) return;
+    const baseName = exportBaseName(snapshot.activeDocumentName);
+    const selected = await saveDialog({
+      defaultPath: `${baseName}.html`,
+      filters: [{ name: 'HTML', extensions: ['html'] }],
+    });
+    if (typeof selected !== 'string') return;
+    try {
+      const html = buildExportHtml({
+        title: baseName,
+        source: localDraft,
+        activeDocumentPath: snapshot.activeDocumentPath,
+      });
+      await exportTextFile(selected, html);
+      announceShell(`Exported HTML to ${selected}`);
+    } catch (error) {
+      reportOperationError(error, 'Could not export to HTML');
+    }
+  };
+
+  const handleExportToPdf = () => {
+    if (!activeDocumentOpen) return;
+    try {
+      const html = buildExportHtml({
+        title: exportBaseName(snapshot.activeDocumentName),
+        source: localDraft,
+        activeDocumentPath: snapshot.activeDocumentPath,
+        forPrint: true,
+        paperSize: settings.pdfPaperSize,
+      });
+      printExportedHtml(html);
+      announceShell('Opened the print dialog — choose “Save as PDF” to export.');
+    } catch (error) {
+      reportOperationError(error, 'Could not export to PDF');
+    }
+  };
+
   const autoSaveEligibility = resolveAutoSaveEligibility({
     autoSave: settings.autoSave,
     busy,
@@ -4776,6 +4816,8 @@ export default function App() {
       openWorkspace: () => void handleOpenWorkspace(),
       save: () => void handleSave(),
       saveAs: () => void handleSaveAs(),
+      exportHtml: () => void handleExportToHtml(),
+      exportPdf: () => handleExportToPdf(),
       toggleSidebar: () => handleToggleSidebar(),
       showExplorerPanel: () => handleShowExplorerPanel(),
       focusExplorerTree,
@@ -4839,6 +4881,8 @@ export default function App() {
             onSave={() => void handleSave()}
             onSaveAs={() => void handleSaveAs()}
             onImportTheme={() => void handleImportTheme()}
+            onExportHtml={() => void handleExportToHtml()}
+            onExportPdf={() => handleExportToPdf()}
             onSetMode={(mode) => void handleSetMode(mode)}
             onSetTheme={(theme) => void handleSetTheme(theme)}
             onFollowSystemTheme={() => void handleFollowSystemTheme()}

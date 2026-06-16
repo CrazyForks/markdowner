@@ -4,10 +4,12 @@ import {
   Code,
   Columns2,
   Eye,
+  FileCode,
   FileUp,
   Menu,
   Monitor,
   Moon,
+  Printer,
   Save,
   Settings,
   Sun,
@@ -36,6 +38,8 @@ interface AppMenuProps {
   onSave: () => void;
   onSaveAs: () => void;
   onImportTheme: () => void;
+  onExportHtml: () => void;
+  onExportPdf: () => void;
   onSetMode: (mode: EditorMode) => void;
   onSetTheme: (theme: ThemeKind) => void;
   onFollowSystemTheme: () => void;
@@ -165,6 +169,8 @@ export function AppMenu({
   onSave,
   onSaveAs,
   onImportTheme,
+  onExportHtml,
+  onExportPdf,
   onSetMode,
   onSetTheme,
   onFollowSystemTheme,
@@ -249,6 +255,25 @@ export function AppMenu({
             onSelect={() => run(onImportTheme)}
           >
             Import CSS…
+          </MenuAction>
+
+          <MenuSeparator />
+          <MenuSectionLabel>Export</MenuSectionLabel>
+          <MenuAction
+            disabled={!activeDocumentOpen || busy}
+            icon={<FileCode className="size-4" />}
+            title="Export the document as a styled HTML file"
+            onSelect={() => run(onExportHtml)}
+          >
+            Export to HTML…
+          </MenuAction>
+          <MenuAction
+            disabled={!activeDocumentOpen || busy}
+            icon={<Printer className="size-4" />}
+            title="Export to PDF via the print dialog"
+            onSelect={() => run(onExportPdf)}
+          >
+            Export to PDF…
           </MenuAction>
 
           <MenuSeparator />

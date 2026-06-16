@@ -115,6 +115,15 @@ export async function quitApp() {
 }
 
 /**
+ * Write exported document text (e.g. HTML) to a path the user picked via the
+ * save dialog. Distinct from the document-save commands: it never touches the
+ * active-document state.
+ */
+export async function exportTextFile(path: string, contents: string): Promise<void> {
+  await invoke<void>('write_export_file', { path, contents });
+}
+
+/**
  * Outcome of asking the Rust shell to classify a markdown link's href.
  * Mirrors the `ResolvedLink` enum in `src-tauri/src/link_actions.rs`.
  */

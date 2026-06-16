@@ -39,6 +39,8 @@ function renderAppMenu(overrides: Partial<React.ComponentProps<typeof AppMenu>> 
       onSave={() => {}}
       onSaveAs={() => {}}
       onImportTheme={() => {}}
+      onExportHtml={() => {}}
+      onExportPdf={() => {}}
       onSetMode={() => {}}
       onSetTheme={() => {}}
       onFollowSystemTheme={() => {}}
@@ -87,5 +89,26 @@ describe('AppMenu mode shortcuts', () => {
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
     fireEvent.click(screen.getByRole('menuitemradio', { name: /Split View/ }));
     expect(onSetMode).toHaveBeenCalledWith('SplitView');
+  });
+
+  it('invokes the export handlers from the Export menu items', () => {
+    const onExportHtml = vi.fn();
+    const onExportPdf = vi.fn();
+    renderAppMenu({ onExportHtml, onExportPdf });
+    fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
+
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export to HTML/ }));
+    expect(onExportHtml).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export to PDF/ }));
+    expect(onExportPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the export items when no document is open', () => {
+    renderAppMenu({ activeDocumentOpen: false });
+    fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
+    expect(screen.getByRole('menuitem', { name: /Export to HTML/ })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /Export to PDF/ })).toBeDisabled();
   });
 });

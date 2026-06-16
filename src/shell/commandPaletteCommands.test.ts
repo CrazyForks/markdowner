@@ -14,6 +14,8 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     openWorkspace: vi.fn(),
     save: vi.fn(),
     saveAs: vi.fn(),
+    exportHtml: vi.fn(),
+    exportPdf: vi.fn(),
     toggleSidebar: vi.fn(),
     showExplorerPanel: vi.fn(),
     focusExplorerTree: vi.fn(),
@@ -61,6 +63,8 @@ describe('buildCommandPaletteCommands', () => {
       'file.openWorkspace',
       'file.save',
       'file.saveAs',
+      'file.exportHtml',
+      'file.exportPdf',
       'view.toggleSidebar',
       'view.showExplorer',
       'view.toggleOutline',
@@ -100,8 +104,27 @@ describe('buildCommandPaletteCommands', () => {
 
     expect(commands.find((command) => command.id === 'file.save')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'file.saveAs')?.disabled).toBe(true);
+    expect(commands.find((command) => command.id === 'file.exportHtml')?.disabled).toBe(true);
+    expect(commands.find((command) => command.id === 'file.exportPdf')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'view.findInFile')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'app.documentStats')?.disabled).toBe(true);
+  });
+
+  it('wires the export commands to their actions', () => {
+    const exportHtml = vi.fn();
+    const exportPdf = vi.fn();
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: actions({ exportHtml, exportPdf }),
+    });
+
+    commands.find((command) => command.id === 'file.exportHtml')?.run();
+    commands.find((command) => command.id === 'file.exportPdf')?.run();
+    expect(exportHtml).toHaveBeenCalledTimes(1);
+    expect(exportPdf).toHaveBeenCalledTimes(1);
   });
 
   it('disables Back/Forward per canGoBack/canGoForward and wires the actions', () => {

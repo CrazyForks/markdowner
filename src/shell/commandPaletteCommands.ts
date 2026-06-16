@@ -9,6 +9,8 @@ export type CommandPaletteActions = {
   openWorkspace: () => void;
   save: () => void;
   saveAs: () => void;
+  exportHtml: () => void;
+  exportPdf: () => void;
   toggleSidebar: () => void;
   showExplorerPanel: () => void;
   focusExplorerTree: () => void;
@@ -79,6 +81,20 @@ export function buildCommandPaletteCommands(
       shortcut: '⌘⇧S',
       disabled: !activeDocumentOpen,
       run: actions.saveAs,
+    },
+    {
+      id: 'file.exportHtml',
+      category: 'File',
+      label: 'Export to HTML…',
+      disabled: !activeDocumentOpen,
+      run: actions.exportHtml,
+    },
+    {
+      id: 'file.exportPdf',
+      category: 'File',
+      label: 'Export to PDF…',
+      disabled: !activeDocumentOpen,
+      run: actions.exportPdf,
     },
     {
       id: 'view.toggleSidebar',
