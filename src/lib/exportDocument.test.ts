@@ -180,6 +180,42 @@ describe('buildExportHtml', () => {
     expect(html).not.toContain('asset://');
   });
 
+  it('inlines relative raw HTML img tags as data URIs for a self-contained export', async () => {
+    const embedImages = vi.fn(async (sources: string[]) =>
+      sources.map((source) => ({ source, dataUri: `data:image/jpeg;base64,EMBED(${source})` })),
+    );
+    const html = await buildExportHtml({
+      title: 'Doc',
+      source: '<p><img src="assets/kmsg-logo.jpg" alt="kmsg logo" width="220" /></p>',
+      activeDocumentPath: '/tmp/project/README.md',
+      embedImages,
+    });
+
+    expect(embedImages).toHaveBeenCalledWith(['/tmp/project/assets/kmsg-logo.jpg']);
+    expect(html).toContain(
+      'src="data:image/jpeg;base64,EMBED(/tmp/project/assets/kmsg-logo.jpg)"',
+    );
+    expect(html).toContain('alt="kmsg logo"');
+    expect(html).toContain('width="220"');
+    expect(html).not.toContain('&lt;img');
+    expect(html).not.toContain('asset://');
+  });
+
+  it('does not rewrite raw HTML img examples inside fenced code blocks', async () => {
+    const embedImages = vi.fn(async () => []);
+    const html = await buildExportHtml({
+      title: 'Doc',
+      source: '```html\n<img src="assets/kmsg-logo.jpg" alt="kmsg logo" />\n```',
+      activeDocumentPath: '/tmp/project/README.md',
+      embedImages,
+    });
+
+    expect(embedImages).not.toHaveBeenCalled();
+    expect(html).toContain('assets/kmsg-logo.jpg');
+    expect(html).toContain('kmsg logo');
+    expect(html).not.toContain('markdowner-raw-html-image');
+  });
+
   it('falls back gracefully when an image cannot be embedded', async () => {
     const embedImages = vi.fn(async (sources: string[]) =>
       sources.map((source) => ({ source, dataUri: null })),

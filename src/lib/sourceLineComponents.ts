@@ -28,6 +28,14 @@ type ImageSrcResolver = (
   activeDocumentPath: string | null | undefined,
 ) => string | undefined;
 
+export const RAW_HTML_IMAGE_TITLE_PREFIX = 'markdowner-raw-html-image:';
+
+type RawHtmlImageAttributes = {
+  width?: string;
+  height?: string;
+  title?: string;
+};
+
 interface SourceLineMarkdownComponentsOptions {
   activeDocumentPath?: string | null;
   /**
@@ -50,6 +58,26 @@ function sourcePositionAttributes(node: MarkdownSourceNode | undefined) {
   };
 }
 
+function parseRawHtmlImageTitle(title: unknown): RawHtmlImageAttributes | null {
+  if (typeof title !== 'string' || !title.startsWith(RAW_HTML_IMAGE_TITLE_PREFIX)) {
+    return null;
+  }
+
+  try {
+    const raw = decodeURIComponent(title.slice(RAW_HTML_IMAGE_TITLE_PREFIX.length));
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const attributes: RawHtmlImageAttributes = {};
+    for (const key of ['width', 'height', 'title'] as const) {
+      if (typeof parsed[key] === 'string' && parsed[key].length > 0) {
+        attributes[key] = parsed[key];
+      }
+    }
+    return attributes;
+  } catch {
+    return {};
+  }
+}
+
 export function createSourceLineComponent(tagName: keyof HTMLElementTagNameMap) {
   return function SourceLineComponent(props: MarkdownSourceLineProps) {
     const { node, ...elementProps } = props as MarkdownSourceLineProps & Record<string, unknown>;
@@ -66,13 +94,17 @@ function createSourceLineImageComponent(
   resolveImageSrc: ImageSrcResolver,
 ) {
   return function SourceLineImageComponent(props: MarkdownSourceLineProps) {
-    const { node, src, ...elementProps } = props as MarkdownSourceLineProps & {
+    const { node, src, title, ...elementProps } = props as MarkdownSourceLineProps & {
       src?: string;
+      title?: string;
     } & Record<string, unknown>;
+    const rawHtmlAttributes = parseRawHtmlImageTitle(title);
 
     return createElement('img', {
       ...elementProps,
+      ...(rawHtmlAttributes ?? {}),
       src: resolveImageSrc(src, activeDocumentPath),
+      title: rawHtmlAttributes ? rawHtmlAttributes.title : title,
       ...sourcePositionAttributes(node),
     });
   };

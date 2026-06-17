@@ -8,7 +8,10 @@ import {
   resolveMarkdownImageLocalPath,
   resolveMarkdownImageSrc,
 } from './markdownImageSrc';
-import { createSourceLineMarkdownComponents } from './sourceLineComponents';
+import {
+  RAW_HTML_IMAGE_TITLE_PREFIX,
+  createSourceLineMarkdownComponents,
+} from './sourceLineComponents';
 import { MARKDOWN_CONTENT_SCOPE_CLASS } from './themeScope';
 
 const MARKDOWN_EXTENSION_RE = /\.(md|markdown|mdown|mkd)$/i;
@@ -145,9 +148,113 @@ export function renderMarkdownToHtml(
 }
 
 const HTTP_URL_RE = /^https?:\/\//i;
+const RAW_HTML_IMAGE_PARAGRAPH_RE = /<p\b[^>]*>\s*(<img\b[^>]*>)\s*<\/p>/gi;
+const RAW_HTML_IMAGE_RE = /<img\b[^>]*>/gi;
 
 /** Reads local files / fetches remote URLs and returns each as a `data:` URI. */
 export type ImageEmbedder = (sources: string[]) => Promise<EmbeddedImageResult[]>;
+
+function decodeHtmlAttribute(value: string): string {
+  return value.replace(/&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos);/gi, (match, entity) => {
+    const lower = entity.toLowerCase();
+    if (lower === 'amp') return '&';
+    if (lower === 'lt') return '<';
+    if (lower === 'gt') return '>';
+    if (lower === 'quot') return '"';
+    if (lower === 'apos') return "'";
+    const codePoint = lower.startsWith('#x')
+      ? Number.parseInt(lower.slice(2), 16)
+      : Number.parseInt(lower.slice(1), 10);
+    return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+      ? String.fromCodePoint(codePoint)
+      : match;
+  });
+}
+
+function parseHtmlTagAttributes(tag: string): Map<string, string> {
+  const attributes = new Map<string, string>();
+  const body = tag.replace(/^<img\b/i, '').replace(/\/?>\s*$/i, '');
+  const attrRe = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = attrRe.exec(body)) !== null) {
+    const name = match[1]?.toLowerCase();
+    if (!name) continue;
+    const rawValue = match[2] ?? match[3] ?? match[4] ?? '';
+    attributes.set(name, decodeHtmlAttribute(rawValue));
+  }
+
+  return attributes;
+}
+
+function escapeMarkdownImageAlt(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
+}
+
+function escapeMarkdownTitle(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function markdownLinkDestination(value: string): string {
+  return `<${value.replace(/[<>\r\n]/g, (char) => encodeURIComponent(char))}>`;
+}
+
+function safeImageDimension(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return /^\d+(?:\.\d+)?%?$/.test(trimmed) ? trimmed : undefined;
+}
+
+function markdownImageFromRawHtmlTag(tag: string): string | null {
+  const attributes = parseHtmlTagAttributes(tag);
+  const src = attributes.get('src')?.trim();
+  if (!src) return null;
+
+  const rawAttributes = {
+    width: safeImageDimension(attributes.get('width')),
+    height: safeImageDimension(attributes.get('height')),
+    title: attributes.get('title')?.trim() || undefined,
+  };
+  const metadata = encodeURIComponent(JSON.stringify(rawAttributes));
+  const title = `${RAW_HTML_IMAGE_TITLE_PREFIX}${metadata}`;
+
+  return `![${escapeMarkdownImageAlt(attributes.get('alt') ?? '')}](${markdownLinkDestination(
+    src,
+  )} "${escapeMarkdownTitle(title)}")`;
+}
+
+function normalizeRawHtmlImagesInSegment(source: string): string {
+  const replaceRawImage = (tag: string) => markdownImageFromRawHtmlTag(tag) ?? tag;
+  return source
+    .replace(RAW_HTML_IMAGE_PARAGRAPH_RE, (_match, tag: string) => replaceRawImage(tag))
+    .replace(RAW_HTML_IMAGE_RE, (tag) => replaceRawImage(tag));
+}
+
+function normalizeRawHtmlImagesForExport(source: string): string {
+  let fence: { marker: '`' | '~'; length: number } | null = null;
+
+  return source
+    .split(/(?<=\n)/)
+    .map((line) => {
+      const text = line.replace(/\r?\n$/, '');
+      const match = /^(?: {0,3})(`{3,}|~{3,})/.exec(text);
+      if (match) {
+        const marker = match[1][0] as '`' | '~';
+        const length = match[1].length;
+        if (!fence) {
+          fence = { marker, length };
+          return line;
+        }
+        if (marker === fence.marker && length >= fence.length) {
+          fence = null;
+          return line;
+        }
+      }
+
+      return fence ? line : normalizeRawHtmlImagesInSegment(line);
+    })
+    .join('');
+}
 
 /**
  * Render once to discover every image the document references, classified into
@@ -267,8 +374,13 @@ export async function buildExportHtml(options: ExportHtmlOptions): Promise<strin
     embedImages = readImagesBase64,
   } = options;
 
-  const resolveImageSrc = await buildEmbeddingImageResolver(source, activeDocumentPath, embedImages);
-  const body = renderMarkdownToHtml(source, activeDocumentPath, resolveImageSrc);
+  const exportSource = normalizeRawHtmlImagesForExport(source);
+  const resolveImageSrc = await buildEmbeddingImageResolver(
+    exportSource,
+    activeDocumentPath,
+    embedImages,
+  );
+  const body = renderMarkdownToHtml(exportSource, activeDocumentPath, resolveImageSrc);
   const css = collectDocumentCss(doc);
   // For PDF the renderer paginates into paper-sized slices and applies the page
   // margins itself, so the body just fills the page width and keeps media in bounds.
