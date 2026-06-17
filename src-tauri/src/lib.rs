@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use base64::Engine as _;
 use markdowner_core::{
     EditorMode, EditorRuntime, ThemeKind, ThemeSelection, WorkspaceState,
     storage::{CursorPosition, DraftBackupEntry},
@@ -1717,19 +1718,112 @@ fn read_text_files(paths: Vec<String>) -> Result<Vec<ReadTextFileResult>, String
 struct PdfExportFile {
     path: String,
     html: String,
+    paper_size: String,
 }
 
 #[tauri::command]
-fn write_pdf_file(path: String, html: String) -> Result<(), String> {
-    pdf_export::write_pdf_file(&path, &html)
+fn write_pdf_file(path: String, html: String, paper_size: String) -> Result<(), String> {
+    pdf_export::write_pdf_file(&path, &html, &paper_size)
 }
 
 #[tauri::command]
 fn write_pdf_files(files: Vec<PdfExportFile>) -> Result<(), String> {
     for file in files {
-        pdf_export::write_pdf_file(&file.path, &file.html)?;
+        pdf_export::write_pdf_file(&file.path, &file.html, &file.paper_size)?;
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EmbeddedImage {
+    source: String,
+    data_uri: Option<String>,
+}
+
+/// Read each local file / fetch each remote URL and return it as a base64
+/// `data:` URI so exported documents can embed images self-contained. Sources
+/// that cannot be read (missing file, failed download) come back with a `None`
+/// `data_uri` and are left as-is by the caller rather than failing the export.
+#[tauri::command]
+fn read_images_base64(sources: Vec<String>) -> Vec<EmbeddedImage> {
+    sources
+        .into_iter()
+        .map(|source| {
+            let data_uri = read_image_data_uri(&source);
+            EmbeddedImage { source, data_uri }
+        })
+        .collect()
+}
+
+fn read_image_data_uri(source: &str) -> Option<String> {
+    let bytes = if source.starts_with("http://") || source.starts_with("https://") {
+        fetch_remote_bytes(source)?
+    } else {
+        std::fs::read(source).ok()?
+    };
+    if bytes.is_empty() {
+        return None;
+    }
+    let mime = infer_image_mime(&bytes, source);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Some(format!("data:{mime};base64,{encoded}"))
+}
+
+/// Download a remote asset via `curl`, matching the updater's "shell out to
+/// curl" convention (no HTTP-client dependency; curl ships with macOS).
+fn fetch_remote_bytes(url: &str) -> Option<Vec<u8>> {
+    let output = std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "30", url])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(output.stdout)
+}
+
+/// Detect the image MIME type from the leading magic bytes, falling back to the
+/// source's file extension (covers text formats like SVG when sniffing misses).
+fn infer_image_mime(bytes: &[u8], source: &str) -> &'static str {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return "image/png";
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return "image/jpeg";
+    }
+    if bytes.starts_with(b"GIF8") {
+        return "image/gif";
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return "image/webp";
+    }
+    if bytes.starts_with(&[0x42, 0x4D]) {
+        return "image/bmp";
+    }
+    let head = &bytes[..bytes.len().min(256)];
+    if head.windows(4).any(|window| window == b"<svg") {
+        return "image/svg+xml";
+    }
+
+    let lower = source.split(['?', '#']).next().unwrap_or(source).to_lowercase();
+    if lower.ends_with(".svg") {
+        "image/svg+xml"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".bmp") {
+        "image/bmp"
+    } else if lower.ends_with(".avif") {
+        "image/avif"
+    } else if lower.ends_with(".ico") {
+        "image/x-icon"
+    } else {
+        "image/png"
+    }
 }
 
 #[tauri::command]
@@ -2094,6 +2188,7 @@ pub fn run() {
             save_active_document_as,
             write_export_file,
             read_text_files,
+            read_images_base64,
             write_pdf_file,
             write_pdf_files,
             has_active_document_external_changes,
@@ -2173,6 +2268,7 @@ pub fn run() {
 mod tests {
     use std::{collections::HashMap, fs, path::Path};
 
+    use base64::Engine as _;
     use markdowner_core::{ThemeKind, storage::DraftBackupEntry};
     use tempfile::tempdir;
 
@@ -2185,9 +2281,10 @@ mod tests {
         MENU_FILE_TITLE, MENU_VIEW_TITLE, TopLevelMenuSection, VIEW_MENU_COMMANDS,
         cli_binary_install_is_ours, cli_binary_wrapper_script_for_target,
         cli_launcher_alias_command_for_path, copy_image_into_asset_folder,
-        ctrl_g_launcher_managed_block, install_cli_binary_at, install_cli_launcher_alias,
-        install_ctrl_g_launcher_block, login_shell_path_value, menu_command_from_id,
-        open_startup_path, path_value_contains_dir, resolve_cli_path,
+        ctrl_g_launcher_managed_block, infer_image_mime, install_cli_binary_at,
+        install_cli_launcher_alias, install_ctrl_g_launcher_block, login_shell_path_value,
+        menu_command_from_id, open_startup_path, path_value_contains_dir, read_image_data_uri,
+        resolve_cli_path,
         shell_config_path_for_shell, top_level_menu_sections, uninstall_cli_binary_at,
         uninstall_ctrl_g_launcher_block,
     };
@@ -2989,5 +3086,42 @@ mod tests {
             resolve_cli_path(absolute.to_str().unwrap(), Some(Path::new("/tmp/ignored")));
 
         assert_eq!(resolved, absolute);
+    }
+
+    #[test]
+    fn read_image_data_uri_encodes_a_local_png_as_a_data_uri() {
+        // 1×1 transparent PNG.
+        let png: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("pic.png");
+        fs::write(&path, png).unwrap();
+
+        let uri = read_image_data_uri(path.to_str().unwrap()).expect("should encode the image");
+        assert!(uri.starts_with("data:image/png;base64,"));
+        let encoded = uri.strip_prefix("data:image/png;base64,").unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        assert_eq!(decoded, png);
+    }
+
+    #[test]
+    fn read_image_data_uri_returns_none_for_a_missing_file() {
+        assert_eq!(read_image_data_uri("/no/such/image.png"), None);
+    }
+
+    #[test]
+    fn infer_image_mime_detects_formats_from_magic_bytes_and_extension() {
+        assert_eq!(infer_image_mime(&[0xFF, 0xD8, 0xFF, 0xE0], "x.bin"), "image/jpeg");
+        assert_eq!(infer_image_mime(b"GIF89a", "x.bin"), "image/gif");
+        assert_eq!(infer_image_mime(b"<svg xmlns=...>", "x"), "image/svg+xml");
+        // Falls back to the extension when the bytes are not a known signature.
+        assert_eq!(infer_image_mime(b"not-an-image", "logo.webp?v=2"), "image/webp");
     }
 }

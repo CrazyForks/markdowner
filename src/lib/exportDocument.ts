@@ -3,6 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import { readImagesBase64, type EmbeddedImageResult } from './desktop';
+import {
+  resolveMarkdownImageLocalPath,
+  resolveMarkdownImageSrc,
+} from './markdownImageSrc';
 import { createSourceLineMarkdownComponents } from './sourceLineComponents';
 import { MARKDOWN_CONTENT_SCOPE_CLASS } from './themeScope';
 
@@ -117,20 +122,86 @@ function escapeHtml(value: string): string {
  * the shared preview components. Reusing those components keeps the export
  * pixel-identical to the in-app preview.
  */
+type ImageSrcResolver = (
+  src: string | undefined,
+  activeDocumentPath: string | null | undefined,
+) => string | undefined;
+
 export function renderMarkdownToHtml(
   source: string,
   activeDocumentPath: string | null,
+  resolveImageSrc?: ImageSrcResolver,
 ): string {
   return renderToStaticMarkup(
     createElement(
       ReactMarkdown,
       {
         remarkPlugins: [remarkGfm],
-        components: createSourceLineMarkdownComponents({ activeDocumentPath }),
+        components: createSourceLineMarkdownComponents({ activeDocumentPath, resolveImageSrc }),
       },
       source,
     ),
   );
+}
+
+const HTTP_URL_RE = /^https?:\/\//i;
+
+/** Reads local files / fetches remote URLs and returns each as a `data:` URI. */
+export type ImageEmbedder = (sources: string[]) => Promise<EmbeddedImageResult[]>;
+
+/**
+ * Render once to discover every image the document references, classified into
+ * embeddable sources: absolute local paths (read from disk) and http(s) URLs
+ * (fetched). Using react-markdown's own render guarantees we collect exactly the
+ * images the final export will emit.
+ */
+function collectEmbeddableImageSources(
+  source: string,
+  activeDocumentPath: string | null,
+): Set<string> {
+  const sources = new Set<string>();
+  renderMarkdownToHtml(source, activeDocumentPath, (src) => {
+    const localPath = resolveMarkdownImageLocalPath(src, activeDocumentPath);
+    if (localPath) {
+      sources.add(localPath);
+    } else if (src && HTTP_URL_RE.test(src)) {
+      sources.add(src);
+    }
+    return src;
+  });
+  return sources;
+}
+
+/**
+ * Build an image resolver that yields self-contained `data:` URIs for every
+ * image that could be embedded, falling back to the live asset-protocol URL
+ * (local) or the original URL (remote) when embedding fails.
+ */
+async function buildEmbeddingImageResolver(
+  source: string,
+  activeDocumentPath: string | null,
+  embed: ImageEmbedder,
+): Promise<ImageSrcResolver> {
+  const embeddable = collectEmbeddableImageSources(source, activeDocumentPath);
+  if (embeddable.size === 0) {
+    return resolveMarkdownImageSrc;
+  }
+
+  const results = await embed([...embeddable]);
+  const dataUriBySource = new Map(
+    results.filter((result) => result.dataUri).map((result) => [result.source, result.dataUri!]),
+  );
+
+  return (src, docPath) => {
+    const localPath = resolveMarkdownImageLocalPath(src, docPath);
+    if (localPath) {
+      return dataUriBySource.get(localPath) ?? resolveMarkdownImageSrc(src, docPath);
+    }
+    if (src && HTTP_URL_RE.test(src)) {
+      return dataUriBySource.get(src) ?? src;
+    }
+    return resolveMarkdownImageSrc(src, docPath);
+  };
 }
 
 /**
@@ -169,19 +240,23 @@ export interface ExportHtmlOptions {
   title: string;
   source: string;
   activeDocumentPath: string | null;
-  /** Add print page rules (used by PDF export via the print dialog). */
+  /** Add print page rules + pagination-friendly layout (used by PDF export). */
   forPrint?: boolean;
   paperSize?: 'A4' | 'Letter';
   /** Injectable for tests; defaults to the live document. */
   doc?: Document;
+  /** Injectable for tests; defaults to the Tauri image reader/fetcher. */
+  embedImages?: ImageEmbedder;
 }
 
 /**
  * Build a self-contained, styled HTML document for the current markdown. Used
- * for both "Export to HTML" (written to disk) and "Export to PDF" (printed from
- * a hidden iframe).
+ * for both "Export to HTML" (written to disk) and "Export to PDF". Local images
+ * are inlined as base64 `data:` URIs (and remote images fetched the same way) so
+ * the document renders identically outside the app — a plain browser for HTML,
+ * and the standalone WebKit instance that paginates the PDF.
  */
-export function buildExportHtml(options: ExportHtmlOptions): string {
+export async function buildExportHtml(options: ExportHtmlOptions): Promise<string> {
   const {
     title,
     source,
@@ -189,15 +264,22 @@ export function buildExportHtml(options: ExportHtmlOptions): string {
     forPrint = false,
     paperSize = 'A4',
     doc = document,
+    embedImages = readImagesBase64,
   } = options;
 
-  const body = renderMarkdownToHtml(source, activeDocumentPath);
+  const resolveImageSrc = await buildEmbeddingImageResolver(source, activeDocumentPath, embedImages);
+  const body = renderMarkdownToHtml(source, activeDocumentPath, resolveImageSrc);
   const css = collectDocumentCss(doc);
-  const pageRule = forPrint ? `@page { size: ${paperSize}; margin: 16mm; }` : '';
+  // For PDF the renderer paginates into paper-sized slices and applies the page
+  // margins itself, so the body just fills the page width and keeps media in bounds.
+  const printCss = forPrint
+    ? `@page { size: ${paperSize}; }
+.markdowner-export { box-sizing: border-box; width: 100%; max-width: none; }
+img, svg, video { max-width: 100%; height: auto; }`
+    : `.markdowner-export { box-sizing: border-box; max-width: 820px; margin: 0 auto; padding: 40px 32px; }`;
   const exportCss = `${css}
-${pageRule}
 html, body { margin: 0; background: var(--background, #ffffff); }
-.markdowner-export { box-sizing: border-box; max-width: 820px; margin: 0 auto; padding: 40px 32px; }`;
+${printCss}`;
 
   return `<!doctype html>
 <html ${rootAttributes(doc)}>

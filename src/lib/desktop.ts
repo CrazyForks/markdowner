@@ -132,13 +132,37 @@ export async function readTextFiles(paths: readonly string[]): Promise<ReadTextF
   return invoke<ReadTextFileResult[]>('read_text_files', { paths });
 }
 
+export interface EmbeddedImageResult {
+  /** The source passed in — an absolute local path or an http(s) URL. */
+  source: string;
+  /** `data:` URI for the image bytes, or `null` if it could not be read. */
+  dataUri: string | null;
+}
+
+/**
+ * Read the given local files / fetch the given remote URLs and return each as a
+ * base64 `data:` URI, so exported documents can embed images self-contained.
+ */
+export async function readImagesBase64(
+  sources: readonly string[],
+): Promise<EmbeddedImageResult[]> {
+  return invoke<EmbeddedImageResult[]>('read_images_base64', { sources });
+}
+
+export type PdfPaperSize = 'A4' | 'Letter';
+
 export interface PdfExportFile {
   path: string;
   html: string;
+  paperSize: PdfPaperSize;
 }
 
-export async function exportPdfFile(path: string, html: string): Promise<void> {
-  await invoke<void>('write_pdf_file', { path, html });
+export async function exportPdfFile(
+  path: string,
+  html: string,
+  paperSize: PdfPaperSize,
+): Promise<void> {
+  await invoke<void>('write_pdf_file', { path, html, paperSize });
 }
 
 export async function exportPdfFiles(files: readonly PdfExportFile[]): Promise<void> {

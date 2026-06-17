@@ -128,3 +128,41 @@ export function resolveMarkdownImageSrc(
   const resolvedPath = normalizePosixPath(`${baseDirectory}/${decodedImagePath}`);
   return `${convertFileSrc(resolvedPath)}${suffix}`;
 }
+
+/**
+ * Resolve a markdown image `src` to the absolute local filesystem path it points
+ * at, or `null` when it is not a readable local file (remote, `data:`, `blob:`,
+ * `asset:`, protocol-relative or anchor). Mirrors {@link resolveMarkdownImageSrc}
+ * but returns the raw path (no `convertFileSrc`, query/hash stripped) so exporters
+ * can read the bytes and embed them as `data:` URIs.
+ */
+export function resolveMarkdownImageLocalPath(
+  src: string | null | undefined,
+  activeDocumentPath: string | null | undefined,
+): string | null {
+  if (!src) {
+    return null;
+  }
+
+  if (REMOTE_OR_EMBEDDED_SRC.test(src) || src.startsWith('//') || src.startsWith('#')) {
+    return null;
+  }
+
+  const { imagePath } = splitPathSuffix(src);
+  const fileUrlPath = fileUrlToPath(imagePath);
+  if (fileUrlPath !== null) {
+    return fileUrlPath;
+  }
+
+  const decodedImagePath = decodeFilePath(imagePath);
+  if (isAbsoluteLocalPath(decodedImagePath)) {
+    return decodedImagePath;
+  }
+
+  const baseDirectory = activeDocumentPath ? dirname(activeDocumentPath) : null;
+  if (!baseDirectory) {
+    return null;
+  }
+
+  return normalizePosixPath(`${baseDirectory}/${decodedImagePath}`);
+}

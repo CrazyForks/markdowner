@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { resolveMarkdownImageSrc } from './markdownImageSrc';
+import { resolveMarkdownImageLocalPath, resolveMarkdownImageSrc } from './markdownImageSrc';
 
 vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (filePath: string) => `asset://${filePath}`,
@@ -35,5 +35,36 @@ describe('resolveMarkdownImageSrc', () => {
     expect(resolveMarkdownImageSrc('/tmp/markdowner/logo.png', '/tmp/markdowner/README.md')).toBe(
       'asset:///tmp/markdowner/logo.png',
     );
+  });
+});
+
+describe('resolveMarkdownImageLocalPath', () => {
+  it('resolves relative paths against the document directory (no asset protocol)', () => {
+    expect(
+      resolveMarkdownImageLocalPath('./assets/og.png', '/tmp/markdowner/README.md'),
+    ).toBe('/tmp/markdowner/assets/og.png');
+  });
+
+  it('returns absolute local paths verbatim, dropping any query/hash', () => {
+    expect(resolveMarkdownImageLocalPath('/tmp/logo.png?v=2', '/tmp/README.md')).toBe(
+      '/tmp/logo.png',
+    );
+  });
+
+  it('decodes file: URLs to plain paths', () => {
+    expect(resolveMarkdownImageLocalPath('file:///tmp/a%20b.png', '/tmp/README.md')).toBe(
+      '/tmp/a b.png',
+    );
+  });
+
+  it('returns null for remote, data, blob and anchor sources', () => {
+    expect(resolveMarkdownImageLocalPath('https://example.com/a.png', '/tmp/a.md')).toBeNull();
+    expect(resolveMarkdownImageLocalPath('data:image/png;base64,abc', '/tmp/a.md')).toBeNull();
+    expect(resolveMarkdownImageLocalPath('blob:http://x/abc', '/tmp/a.md')).toBeNull();
+    expect(resolveMarkdownImageLocalPath('#anchor', '/tmp/a.md')).toBeNull();
+  });
+
+  it('returns null for a relative path when the document is unsaved', () => {
+    expect(resolveMarkdownImageLocalPath('./pic.png', null)).toBeNull();
   });
 });

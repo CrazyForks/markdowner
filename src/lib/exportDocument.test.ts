@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildExportHtml,
@@ -7,6 +7,10 @@ import {
   exportBaseName,
   renderMarkdownToHtml,
 } from './exportDocument';
+
+vi.mock('@tauri-apps/api/core', () => ({
+  convertFileSrc: (filePath: string) => `asset://${filePath}`,
+}));
 
 describe('exportBaseName', () => {
   it('strips markdown extensions', () => {
@@ -123,8 +127,12 @@ describe('buildExportHtml', () => {
     delete document.documentElement.dataset.cbHighlight;
   });
 
-  it('produces a standalone document mirroring the live theme attributes', () => {
-    const html = buildExportHtml({ title: 'My Doc', source: '# Hello', activeDocumentPath: null });
+  it('produces a standalone document mirroring the live theme attributes', async () => {
+    const html = await buildExportHtml({
+      title: 'My Doc',
+      source: '# Hello',
+      activeDocumentPath: null,
+    });
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(html).toContain('<title>My Doc</title>');
     expect(html).toContain('data-cb-theme="one-dark"');
@@ -135,8 +143,8 @@ describe('buildExportHtml', () => {
     expect(html).not.toContain('@page');
   });
 
-  it('adds print page rules sized to the requested paper when printing', () => {
-    const html = buildExportHtml({
+  it('adds print page rules sized to the requested paper when printing', async () => {
+    const html = await buildExportHtml({
       title: 'P',
       source: 'x',
       activeDocumentPath: null,
@@ -146,8 +154,54 @@ describe('buildExportHtml', () => {
     expect(html).toContain('@page { size: Letter');
   });
 
-  it('escapes the title to avoid breaking the document', () => {
-    const html = buildExportHtml({ title: 'a<b>&"', source: 'x', activeDocumentPath: null });
+  it('escapes the title to avoid breaking the document', async () => {
+    const html = await buildExportHtml({ title: 'a<b>&"', source: 'x', activeDocumentPath: null });
     expect(html).toContain('<title>a&lt;b&gt;&amp;&quot;</title>');
+  });
+
+  it('inlines local and remote images as data URIs for a self-contained export', async () => {
+    const embedImages = vi.fn(async (sources: string[]) =>
+      sources.map((source) => ({ source, dataUri: `data:image/png;base64,EMBED(${source})` })),
+    );
+    const html = await buildExportHtml({
+      title: 'Doc',
+      source: '![local](./pic.png)\n\n![remote](https://example.com/badge.svg)',
+      activeDocumentPath: '/tmp/project/README.md',
+      embedImages,
+    });
+
+    // Local path is resolved relative to the document before reading.
+    expect(embedImages).toHaveBeenCalledWith(
+      expect.arrayContaining(['/tmp/project/pic.png', 'https://example.com/badge.svg']),
+    );
+    expect(html).toContain('src="data:image/png;base64,EMBED(/tmp/project/pic.png)"');
+    expect(html).toContain('src="data:image/png;base64,EMBED(https://example.com/badge.svg)"');
+    // The Tauri-only asset:// protocol must not leak into the exported document.
+    expect(html).not.toContain('asset://');
+  });
+
+  it('falls back gracefully when an image cannot be embedded', async () => {
+    const embedImages = vi.fn(async (sources: string[]) =>
+      sources.map((source) => ({ source, dataUri: null })),
+    );
+    const html = await buildExportHtml({
+      title: 'Doc',
+      source: '![remote](https://example.com/badge.svg)',
+      activeDocumentPath: null,
+      embedImages,
+    });
+    // Remote images keep their original URL when embedding fails.
+    expect(html).toContain('src="https://example.com/badge.svg"');
+  });
+
+  it('does not read images for a document without any', async () => {
+    const embedImages = vi.fn(async () => []);
+    await buildExportHtml({
+      title: 'Doc',
+      source: '# No images here',
+      activeDocumentPath: '/tmp/a.md',
+      embedImages,
+    });
+    expect(embedImages).not.toHaveBeenCalled();
   });
 });

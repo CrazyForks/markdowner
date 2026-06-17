@@ -3737,7 +3737,7 @@ export default function App() {
     });
     if (typeof selected !== 'string') return;
     try {
-      const html = buildExportHtml({
+      const html = await buildExportHtml({
         title: baseName,
         source: localDraft,
         activeDocumentPath: snapshot.activeDocumentPath,
@@ -3761,14 +3761,14 @@ export default function App() {
     });
     if (typeof selected !== 'string') return;
     try {
-      const html = buildExportHtml({
+      const html = await buildExportHtml({
         title: baseName,
         source: localDraft,
         activeDocumentPath: snapshot.activeDocumentPath,
         forPrint: true,
         paperSize: settings.pdfPaperSize,
       });
-      await exportPdfFile(selected, html);
+      await exportPdfFile(selected, html, settings.pdfPaperSize);
       announceShell(`Exported PDF to ${selected}`);
     } catch (error) {
       reportOperationError(error, 'Could not export to PDF');
@@ -3792,22 +3792,25 @@ export default function App() {
     try {
       const sources = await readTextFiles(targets.map((target) => target.sourcePath));
       const sourceByPath = new Map(sources.map((file) => [file.path, file.contents]));
-      const files = targets.map((target) => {
-        const source = sourceByPath.get(target.sourcePath);
-        if (source == null) {
-          throw new Error(`Could not read markdown file: ${target.sourcePath}`);
-        }
-        return {
-          path: target.outputPath,
-          html: buildExportHtml({
-            title: target.title,
-            source,
-            activeDocumentPath: target.sourcePath,
-            forPrint: true,
+      const files = await Promise.all(
+        targets.map(async (target) => {
+          const source = sourceByPath.get(target.sourcePath);
+          if (source == null) {
+            throw new Error(`Could not read markdown file: ${target.sourcePath}`);
+          }
+          return {
+            path: target.outputPath,
+            html: await buildExportHtml({
+              title: target.title,
+              source,
+              activeDocumentPath: target.sourcePath,
+              forPrint: true,
+              paperSize: settings.pdfPaperSize,
+            }),
             paperSize: settings.pdfPaperSize,
-          }),
-        };
-      });
+          };
+        }),
+      );
       await exportPdfFiles(files);
       announceShell(`Exported ${files.length} PDFs to ${rootDir}/exports`);
     } catch (error) {

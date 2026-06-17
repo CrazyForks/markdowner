@@ -22,8 +22,20 @@ type MarkdownSourceLineProps = {
   node?: MarkdownSourceNode;
 };
 
+/** Resolves a markdown image `src` to the URL the rendered `<img>` should use. */
+type ImageSrcResolver = (
+  src: string | undefined,
+  activeDocumentPath: string | null | undefined,
+) => string | undefined;
+
 interface SourceLineMarkdownComponentsOptions {
   activeDocumentPath?: string | null;
+  /**
+   * Override how image sources are resolved. Defaults to the asset-protocol
+   * resolver used by the live preview; exporters pass a resolver that yields
+   * self-contained `data:` URIs.
+   */
+  resolveImageSrc?: ImageSrcResolver;
 }
 
 function sourcePositionAttributes(node: MarkdownSourceNode | undefined) {
@@ -49,7 +61,10 @@ export function createSourceLineComponent(tagName: keyof HTMLElementTagNameMap) 
   };
 }
 
-function createSourceLineImageComponent(activeDocumentPath: string | null | undefined) {
+function createSourceLineImageComponent(
+  activeDocumentPath: string | null | undefined,
+  resolveImageSrc: ImageSrcResolver,
+) {
   return function SourceLineImageComponent(props: MarkdownSourceLineProps) {
     const { node, src, ...elementProps } = props as MarkdownSourceLineProps & {
       src?: string;
@@ -57,7 +72,7 @@ function createSourceLineImageComponent(activeDocumentPath: string | null | unde
 
     return createElement('img', {
       ...elementProps,
-      src: resolveMarkdownImageSrc(src, activeDocumentPath),
+      src: resolveImageSrc(src, activeDocumentPath),
       ...sourcePositionAttributes(node),
     });
   };
@@ -145,7 +160,10 @@ export function createSourceLineMarkdownComponents(
     code: PreviewCodeComponent,
     table: createSourceLineComponent('table'),
     tr: createSourceLineComponent('tr'),
-    img: createSourceLineImageComponent(options.activeDocumentPath),
+    img: createSourceLineImageComponent(
+      options.activeDocumentPath,
+      options.resolveImageSrc ?? resolveMarkdownImageSrc,
+    ),
   } satisfies Components;
 }
 

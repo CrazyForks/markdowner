@@ -38,6 +38,7 @@ const resolveMarkdownLinkMock = vi.fn();
 const openExternalUrlMock = vi.fn();
 const openPathInDefaultAppMock = vi.fn();
 const readTextFilesMock = vi.fn();
+const readImagesBase64Mock = vi.fn();
 const exportPdfFileMock = vi.fn();
 const exportPdfFilesMock = vi.fn();
 const exportTextFileMock = vi.fn();
@@ -91,6 +92,7 @@ vi.mock('./lib/desktop', () => ({
   openExternalUrl: openExternalUrlMock,
   openPathInDefaultApp: openPathInDefaultAppMock,
   readTextFiles: readTextFilesMock,
+  readImagesBase64: readImagesBase64Mock,
   exportPdfFile: exportPdfFileMock,
   exportPdfFiles: exportPdfFilesMock,
   exportTextFile: exportTextFileMock,
@@ -495,6 +497,8 @@ describe('App recent documents', () => {
     openPathInDefaultAppMock.mockResolvedValue(undefined);
     readTextFilesMock.mockReset();
     readTextFilesMock.mockResolvedValue([]);
+    readImagesBase64Mock.mockReset();
+    readImagesBase64Mock.mockResolvedValue([]);
     exportPdfFileMock.mockReset();
     exportPdfFileMock.mockResolvedValue(undefined);
     exportPdfFilesMock.mockReset();
@@ -2393,6 +2397,7 @@ describe('App recent documents', () => {
       expect(exportPdfFileMock).toHaveBeenCalledWith(
         '/tmp/project/exports/meeting-notes.pdf',
         expect.stringContaining('<h1'),
+        'A4',
       );
     });
     expect(exportPdfFileMock.mock.calls[0]?.[1]).toContain('Meeting notes');
@@ -2435,10 +2440,12 @@ describe('App recent documents', () => {
         {
           path: '/tmp/project/exports/README.pdf',
           html: expect.stringContaining('Readme'),
+          paperSize: 'A4',
         },
         {
           path: '/tmp/project/exports/docs/guide.pdf',
           html: expect.stringContaining('Guide'),
+          paperSize: 'A4',
         },
       ]);
     });
