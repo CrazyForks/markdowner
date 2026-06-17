@@ -7,11 +7,100 @@ import { createSourceLineMarkdownComponents } from './sourceLineComponents';
 import { MARKDOWN_CONTENT_SCOPE_CLASS } from './themeScope';
 
 const MARKDOWN_EXTENSION_RE = /\.(md|markdown|mdown|mkd)$/i;
+const PATH_SEPARATOR_RE = /[\\/]/;
 
 /** Strip the markdown extension from a document name for an export filename. */
 export function exportBaseName(activeDocumentName: string | null | undefined): string {
   if (!activeDocumentName) return 'Untitled';
   return activeDocumentName.replace(MARKDOWN_EXTENSION_RE, '') || 'Untitled';
+}
+
+function detectPathSeparator(path: string): '/' | '\\' {
+  return path.includes('\\') && !path.includes('/') ? '\\' : '/';
+}
+
+function trimTrailingSeparators(path: string): string {
+  return path.replace(/[\\/]+$/, '');
+}
+
+function trimSeparators(path: string): string {
+  return path.replace(/^[\\/]+|[\\/]+$/g, '');
+}
+
+function pathSegments(path: string): string[] {
+  return path.split(PATH_SEPARATOR_RE).filter(Boolean);
+}
+
+function replaceMarkdownExtension(path: string, extension: string): string {
+  return MARKDOWN_EXTENSION_RE.test(path)
+    ? path.replace(MARKDOWN_EXTENSION_RE, extension)
+    : `${path}${extension}`;
+}
+
+function fileName(path: string): string {
+  const segments = pathSegments(path);
+  return segments.length > 0 ? segments[segments.length - 1] : path;
+}
+
+function joinPath(separator: '/' | '\\', ...parts: string[]): string {
+  const [first, ...rest] = parts.filter((part) => part.length > 0);
+  if (!first) return '';
+  return [
+    trimTrailingSeparators(first),
+    ...rest.map(trimSeparators).filter((part) => part.length > 0),
+  ].join(separator);
+}
+
+export function defaultPdfExportPath(
+  activeDocumentPath: string | null | undefined,
+  activeDocumentName: string | null | undefined,
+): string {
+  if (!activeDocumentPath) return `${exportBaseName(activeDocumentName)}.pdf`;
+  return replaceMarkdownExtension(activeDocumentPath, '.pdf');
+}
+
+export interface WorkspacePdfExportTarget {
+  sourcePath: string;
+  outputPath: string;
+  title: string;
+}
+
+export function buildWorkspacePdfExportTargets(input: {
+  rootDir: string;
+  workspaceDocuments: readonly string[];
+}): WorkspacePdfExportTarget[] {
+  const rootDir = trimTrailingSeparators(input.rootDir);
+  if (!rootDir) return [];
+
+  const separator = detectPathSeparator(rootDir);
+  const rootPrefix = `${rootDir}${separator}`;
+  const seen = new Set<string>();
+  const targets: WorkspacePdfExportTarget[] = [];
+
+  for (const sourcePath of input.workspaceDocuments) {
+    if (!sourcePath || seen.has(sourcePath) || !MARKDOWN_EXTENSION_RE.test(sourcePath)) {
+      continue;
+    }
+    if (!sourcePath.startsWith(rootPrefix)) {
+      continue;
+    }
+
+    const relativePath = sourcePath.slice(rootPrefix.length);
+    const [topLevel] = pathSegments(relativePath);
+    if (topLevel?.toLowerCase() === 'exports') {
+      continue;
+    }
+
+    const relativePdfPath = replaceMarkdownExtension(relativePath, '.pdf');
+    targets.push({
+      sourcePath,
+      outputPath: joinPath(separator, rootDir, 'exports', relativePdfPath),
+      title: exportBaseName(fileName(sourcePath)),
+    });
+    seen.add(sourcePath);
+  }
+
+  return targets;
 }
 
 function escapeHtml(value: string): string {

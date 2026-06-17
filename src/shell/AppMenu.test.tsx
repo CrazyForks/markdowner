@@ -32,6 +32,7 @@ function renderAppMenu(overrides: Partial<React.ComponentProps<typeof AppMenu>> 
     <AppMenu
       busy={false}
       activeDocumentOpen
+      hasWorkspaceRoot
       currentMode="Editor"
       modeOptions={MODE_OPTIONS}
       themeKind="BuiltInLight"
@@ -41,6 +42,7 @@ function renderAppMenu(overrides: Partial<React.ComponentProps<typeof AppMenu>> 
       onImportTheme={() => {}}
       onExportHtml={() => {}}
       onExportPdf={() => {}}
+      onExportWorkspacePdfs={() => {}}
       onSetMode={() => {}}
       onSetTheme={() => {}}
       onFollowSystemTheme={() => {}}
@@ -94,7 +96,8 @@ describe('AppMenu mode shortcuts', () => {
   it('invokes the export handlers from the Export menu items', () => {
     const onExportHtml = vi.fn();
     const onExportPdf = vi.fn();
-    renderAppMenu({ onExportHtml, onExportPdf });
+    const onExportWorkspacePdfs = vi.fn();
+    renderAppMenu({ onExportHtml, onExportPdf, onExportWorkspacePdfs });
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
 
     fireEvent.click(screen.getByRole('menuitem', { name: /Export to HTML/ }));
@@ -103,6 +106,10 @@ describe('AppMenu mode shortcuts', () => {
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
     fireEvent.click(screen.getByRole('menuitem', { name: /Export to PDF/ }));
     expect(onExportPdf).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export All Markdown to PDFs/ }));
+    expect(onExportWorkspacePdfs).toHaveBeenCalledTimes(1);
   });
 
   it('disables the export items when no document is open', () => {
@@ -110,5 +117,14 @@ describe('AppMenu mode shortcuts', () => {
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
     expect(screen.getByRole('menuitem', { name: /Export to HTML/ })).toBeDisabled();
     expect(screen.getByRole('menuitem', { name: /Export to PDF/ })).toBeDisabled();
+    expect(
+      screen.getByRole('menuitem', { name: /Export All Markdown to PDFs/ }),
+    ).not.toBeDisabled();
+  });
+
+  it('disables all-markdown PDF export without a workspace root', () => {
+    renderAppMenu({ hasWorkspaceRoot: false });
+    fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
+    expect(screen.getByRole('menuitem', { name: /Export All Markdown to PDFs/ })).toBeDisabled();
   });
 });

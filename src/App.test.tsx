@@ -37,6 +37,10 @@ const searchWorkspaceMock = vi.fn();
 const resolveMarkdownLinkMock = vi.fn();
 const openExternalUrlMock = vi.fn();
 const openPathInDefaultAppMock = vi.fn();
+const readTextFilesMock = vi.fn();
+const exportPdfFileMock = vi.fn();
+const exportPdfFilesMock = vi.fn();
+const exportTextFileMock = vi.fn();
 const openDialogMock = vi.fn();
 const saveDialogMock = vi.fn();
 const messageMock = vi.fn();
@@ -86,6 +90,10 @@ vi.mock('./lib/desktop', () => ({
   resolveMarkdownLink: resolveMarkdownLinkMock,
   openExternalUrl: openExternalUrlMock,
   openPathInDefaultApp: openPathInDefaultAppMock,
+  readTextFiles: readTextFilesMock,
+  exportPdfFile: exportPdfFileMock,
+  exportPdfFiles: exportPdfFilesMock,
+  exportTextFile: exportTextFileMock,
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -485,6 +493,14 @@ describe('App recent documents', () => {
     openExternalUrlMock.mockResolvedValue(undefined);
     openPathInDefaultAppMock.mockReset();
     openPathInDefaultAppMock.mockResolvedValue(undefined);
+    readTextFilesMock.mockReset();
+    readTextFilesMock.mockResolvedValue([]);
+    exportPdfFileMock.mockReset();
+    exportPdfFileMock.mockResolvedValue(undefined);
+    exportPdfFilesMock.mockReset();
+    exportPdfFilesMock.mockResolvedValue(undefined);
+    exportTextFileMock.mockReset();
+    exportTextFileMock.mockResolvedValue(undefined);
     openDialogMock.mockReset();
     saveDialogMock.mockReset();
     messageMock.mockReset();
@@ -2348,6 +2364,83 @@ describe('App recent documents', () => {
       expect(saveActiveDocumentAsMock).toHaveBeenCalledWith(
         '/tmp/project/archive/meeting-notes-copy.md',
       );
+    });
+  });
+
+  it('asks for a PDF path before exporting the active document to PDF', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        recentDocuments: ['/tmp/project/meeting-notes.md'],
+      }),
+    );
+    saveDialogMock.mockResolvedValue('/tmp/project/exports/meeting-notes.pdf');
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to pdf…$/i }));
+
+    await waitFor(() => {
+      expect(saveDialogMock).toHaveBeenCalledWith({
+        defaultPath: '/tmp/project/meeting-notes.pdf',
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+      expect(exportPdfFileMock).toHaveBeenCalledWith(
+        '/tmp/project/exports/meeting-notes.pdf',
+        expect.stringContaining('<h1'),
+      );
+    });
+    expect(exportPdfFileMock.mock.calls[0]?.[1]).toContain('Meeting notes');
+  });
+
+  it('exports every workspace markdown file to PDFs under the project exports folder', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        rootDir: '/tmp/project',
+        workspaceDocuments: [
+          '/tmp/project/README.md',
+          '/tmp/project/docs/guide.md',
+          '/tmp/project/exports/old.md',
+        ],
+        activeDocumentName: 'README.md',
+        activeDocumentPath: '/tmp/project/README.md',
+        activeDocumentSource: '# Readme',
+      }),
+    );
+    readTextFilesMock.mockResolvedValue([
+      { path: '/tmp/project/README.md', contents: '# Readme' },
+      { path: '/tmp/project/docs/guide.md', contents: '# Guide' },
+    ]);
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(
+      within(menu).getByRole('menuitem', { name: /^export all markdown to pdfs…$/i }),
+    );
+
+    await waitFor(() => {
+      expect(readTextFilesMock).toHaveBeenCalledWith([
+        '/tmp/project/README.md',
+        '/tmp/project/docs/guide.md',
+      ]);
+      expect(exportPdfFilesMock).toHaveBeenCalledWith([
+        {
+          path: '/tmp/project/exports/README.pdf',
+          html: expect.stringContaining('Readme'),
+        },
+        {
+          path: '/tmp/project/exports/docs/guide.pdf',
+          html: expect.stringContaining('Guide'),
+        },
+      ]);
     });
   });
 

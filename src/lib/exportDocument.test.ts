@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { buildExportHtml, exportBaseName, renderMarkdownToHtml } from './exportDocument';
+import {
+  buildExportHtml,
+  buildWorkspacePdfExportTargets,
+  defaultPdfExportPath,
+  exportBaseName,
+  renderMarkdownToHtml,
+} from './exportDocument';
 
 describe('exportBaseName', () => {
   it('strips markdown extensions', () => {
@@ -22,6 +28,85 @@ describe('renderMarkdownToHtml', () => {
     expect(html).toContain('<h1');
     expect(html).toContain('Title');
     expect(html).toContain('<li');
+  });
+});
+
+describe('defaultPdfExportPath', () => {
+  it('defaults to a PDF beside the saved active document', () => {
+    expect(defaultPdfExportPath('/tmp/project/docs/guide.md', 'guide.md')).toBe(
+      '/tmp/project/docs/guide.pdf',
+    );
+  });
+
+  it('falls back to the document name for untitled documents', () => {
+    expect(defaultPdfExportPath(null, 'Draft.markdown')).toBe('Draft.pdf');
+  });
+});
+
+describe('buildWorkspacePdfExportTargets', () => {
+  it('preserves the project-relative folder structure under exports', () => {
+    expect(
+      buildWorkspacePdfExportTargets({
+        rootDir: '/tmp/project',
+        workspaceDocuments: [
+          '/tmp/project/README.md',
+          '/tmp/project/docs/guide.markdown',
+          '/tmp/project/deep/nested/spec.MKD',
+        ],
+      }),
+    ).toEqual([
+      {
+        sourcePath: '/tmp/project/README.md',
+        outputPath: '/tmp/project/exports/README.pdf',
+        title: 'README',
+      },
+      {
+        sourcePath: '/tmp/project/docs/guide.markdown',
+        outputPath: '/tmp/project/exports/docs/guide.pdf',
+        title: 'guide',
+      },
+      {
+        sourcePath: '/tmp/project/deep/nested/spec.MKD',
+        outputPath: '/tmp/project/exports/deep/nested/spec.pdf',
+        title: 'spec',
+      },
+    ]);
+  });
+
+  it('skips files already inside exports and de-duplicates source paths', () => {
+    expect(
+      buildWorkspacePdfExportTargets({
+        rootDir: '/tmp/project',
+        workspaceDocuments: [
+          '/tmp/project/docs/guide.md',
+          '/tmp/project/docs/guide.md',
+          '/tmp/project/exports/docs/guide.md',
+          '/tmp/project/notes.txt',
+          '/tmp/other/outside.md',
+        ],
+      }),
+    ).toEqual([
+      {
+        sourcePath: '/tmp/project/docs/guide.md',
+        outputPath: '/tmp/project/exports/docs/guide.pdf',
+        title: 'guide',
+      },
+    ]);
+  });
+
+  it('keeps the source path separator style when building export targets', () => {
+    expect(
+      buildWorkspacePdfExportTargets({
+        rootDir: 'C:\\Users\\chann\\project',
+        workspaceDocuments: ['C:\\Users\\chann\\project\\docs\\guide.md'],
+      }),
+    ).toEqual([
+      {
+        sourcePath: 'C:\\Users\\chann\\project\\docs\\guide.md',
+        outputPath: 'C:\\Users\\chann\\project\\exports\\docs\\guide.pdf',
+        title: 'guide',
+      },
+    ]);
   });
 });
 

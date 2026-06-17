@@ -123,6 +123,28 @@ export async function exportTextFile(path: string, contents: string): Promise<vo
   await invoke<void>('write_export_file', { path, contents });
 }
 
+export interface ReadTextFileResult {
+  path: string;
+  contents: string;
+}
+
+export async function readTextFiles(paths: readonly string[]): Promise<ReadTextFileResult[]> {
+  return invoke<ReadTextFileResult[]>('read_text_files', { paths });
+}
+
+export interface PdfExportFile {
+  path: string;
+  html: string;
+}
+
+export async function exportPdfFile(path: string, html: string): Promise<void> {
+  await invoke<void>('write_pdf_file', { path, html });
+}
+
+export async function exportPdfFiles(files: readonly PdfExportFile[]): Promise<void> {
+  await invoke<void>('write_pdf_files', { files });
+}
+
 /**
  * Outcome of asking the Rust shell to classify a markdown link's href.
  * Mirrors the `ResolvedLink` enum in `src-tauri/src/link_actions.rs`.

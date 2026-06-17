@@ -5,6 +5,7 @@ import {
   Columns2,
   Eye,
   FileCode,
+  Files,
   FileUp,
   Menu,
   Monitor,
@@ -31,6 +32,7 @@ interface AppMenuProps {
   className?: string;
   busy: boolean;
   activeDocumentOpen: boolean;
+  hasWorkspaceRoot: boolean;
   currentMode: EditorMode;
   modeOptions: ReadonlyArray<AppMenuModeOption>;
   themeKind: ThemeKind;
@@ -40,6 +42,7 @@ interface AppMenuProps {
   onImportTheme: () => void;
   onExportHtml: () => void;
   onExportPdf: () => void;
+  onExportWorkspacePdfs: () => void;
   onSetMode: (mode: EditorMode) => void;
   onSetTheme: (theme: ThemeKind) => void;
   onFollowSystemTheme: () => void;
@@ -162,6 +165,7 @@ export function AppMenu({
   className,
   busy,
   activeDocumentOpen,
+  hasWorkspaceRoot,
   currentMode,
   modeOptions,
   themeKind,
@@ -171,6 +175,7 @@ export function AppMenu({
   onImportTheme,
   onExportHtml,
   onExportPdf,
+  onExportWorkspacePdfs,
   onSetMode,
   onSetTheme,
   onFollowSystemTheme,
@@ -270,10 +275,18 @@ export function AppMenu({
           <MenuAction
             disabled={!activeDocumentOpen || busy}
             icon={<Printer className="size-4" />}
-            title="Export to PDF via the print dialog"
+            title="Export the document as a PDF file"
             onSelect={() => run(onExportPdf)}
           >
             Export to PDF…
+          </MenuAction>
+          <MenuAction
+            disabled={!hasWorkspaceRoot || busy}
+            icon={<Files className="size-4" />}
+            title="Export all Markdown files in the workspace as PDFs"
+            onSelect={() => run(onExportWorkspacePdfs)}
+          >
+            Export All Markdown to PDFs…
           </MenuAction>
 
           <MenuSeparator />

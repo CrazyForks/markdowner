@@ -92,7 +92,10 @@ import {
   resolveMarkdownLink,
   saveActiveDocument,
   saveActiveDocumentAs,
+  exportPdfFile,
+  exportPdfFiles,
   exportTextFile,
+  readTextFiles,
   setMode,
   setTheme,
   openDroppedPath,
@@ -104,7 +107,12 @@ import {
   saveDraftBackups,
   searchWorkspace,
 } from './lib/desktop';
-import { buildExportHtml, exportBaseName, printExportedHtml } from '@/lib/exportDocument';
+import {
+  buildExportHtml,
+  buildWorkspacePdfExportTargets,
+  defaultPdfExportPath,
+  exportBaseName,
+} from '@/lib/exportDocument';
 import {
   applyDraftBackupsToRestoredTabs,
   buildDraftBackupEntries,
@@ -3741,20 +3749,69 @@ export default function App() {
     }
   };
 
-  const handleExportToPdf = () => {
+  const handleExportToPdf = async () => {
     if (!activeDocumentOpen) return;
+    const baseName = exportBaseName(snapshot.activeDocumentName);
+    const selected = await saveDialog({
+      defaultPath: defaultPdfExportPath(
+        snapshot.activeDocumentPath,
+        snapshot.activeDocumentName,
+      ),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (typeof selected !== 'string') return;
     try {
       const html = buildExportHtml({
-        title: exportBaseName(snapshot.activeDocumentName),
+        title: baseName,
         source: localDraft,
         activeDocumentPath: snapshot.activeDocumentPath,
         forPrint: true,
         paperSize: settings.pdfPaperSize,
       });
-      printExportedHtml(html);
-      announceShell('Opened the print dialog — choose “Save as PDF” to export.');
+      await exportPdfFile(selected, html);
+      announceShell(`Exported PDF to ${selected}`);
     } catch (error) {
       reportOperationError(error, 'Could not export to PDF');
+    }
+  };
+
+  const handleExportWorkspaceToPdfs = async () => {
+    const rootDir = snapshot.rootDir;
+    if (!rootDir) {
+      announceShell('Open a workspace to export all Markdown files to PDFs');
+      return;
+    }
+    const targets = buildWorkspacePdfExportTargets({
+      rootDir,
+      workspaceDocuments: snapshot.workspaceDocuments,
+    });
+    if (targets.length === 0) {
+      announceShell('No Markdown files found to export');
+      return;
+    }
+    try {
+      const sources = await readTextFiles(targets.map((target) => target.sourcePath));
+      const sourceByPath = new Map(sources.map((file) => [file.path, file.contents]));
+      const files = targets.map((target) => {
+        const source = sourceByPath.get(target.sourcePath);
+        if (source == null) {
+          throw new Error(`Could not read markdown file: ${target.sourcePath}`);
+        }
+        return {
+          path: target.outputPath,
+          html: buildExportHtml({
+            title: target.title,
+            source,
+            activeDocumentPath: target.sourcePath,
+            forPrint: true,
+            paperSize: settings.pdfPaperSize,
+          }),
+        };
+      });
+      await exportPdfFiles(files);
+      announceShell(`Exported ${files.length} PDFs to ${rootDir}/exports`);
+    } catch (error) {
+      reportOperationError(error, 'Could not export workspace to PDFs');
     }
   };
 
@@ -4829,7 +4886,8 @@ export default function App() {
       save: () => void handleSave(),
       saveAs: () => void handleSaveAs(),
       exportHtml: () => void handleExportToHtml(),
-      exportPdf: () => handleExportToPdf(),
+      exportPdf: () => void handleExportToPdf(),
+      exportWorkspacePdfs: () => void handleExportWorkspaceToPdfs(),
       revealActiveFileInFinder: () => {
         void (async () => {
           const path = snapshot.activeDocumentPath;
@@ -4914,6 +4972,7 @@ export default function App() {
             className="mr-2"
             busy={busy}
             activeDocumentOpen={activeDocumentOpen}
+            hasWorkspaceRoot={snapshot.rootDir != null}
             currentMode={currentMode}
             modeOptions={EDITOR_MODE_OPTIONS}
             themeKind={snapshot.theme.kind}
@@ -4922,7 +4981,8 @@ export default function App() {
             onSaveAs={() => void handleSaveAs()}
             onImportTheme={() => void handleImportTheme()}
             onExportHtml={() => void handleExportToHtml()}
-            onExportPdf={() => handleExportToPdf()}
+            onExportPdf={() => void handleExportToPdf()}
+            onExportWorkspacePdfs={() => void handleExportWorkspaceToPdfs()}
             onSetMode={(mode) => void handleSetMode(mode)}
             onSetTheme={(theme) => void handleSetTheme(theme)}
             onFollowSystemTheme={() => void handleFollowSystemTheme()}

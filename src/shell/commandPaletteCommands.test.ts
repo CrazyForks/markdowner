@@ -16,6 +16,7 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     saveAs: vi.fn(),
     exportHtml: vi.fn(),
     exportPdf: vi.fn(),
+    exportWorkspacePdfs: vi.fn(),
     revealActiveFileInFinder: vi.fn(),
     revealProjectInFinder: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -67,6 +68,7 @@ describe('buildCommandPaletteCommands', () => {
       'file.saveAs',
       'file.exportHtml',
       'file.exportPdf',
+      'file.exportWorkspacePdfs',
       'file.revealInFinder',
       'file.revealProjectInFinder',
       'view.toggleSidebar',
@@ -110,25 +112,47 @@ describe('buildCommandPaletteCommands', () => {
     expect(commands.find((command) => command.id === 'file.saveAs')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'file.exportHtml')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'file.exportPdf')?.disabled).toBe(true);
+    expect(commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.disabled).toBe(
+      true,
+    );
     expect(commands.find((command) => command.id === 'view.findInFile')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'app.documentStats')?.disabled).toBe(true);
+  });
+
+  it('disables workspace PDF export without a workspace root', () => {
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      hasWorkspaceRoot: false,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: actions(),
+    });
+
+    expect(commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.disabled).toBe(
+      true,
+    );
   });
 
   it('wires the export commands to their actions', () => {
     const exportHtml = vi.fn();
     const exportPdf = vi.fn();
+    const exportWorkspacePdfs = vi.fn();
     const commands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
+      hasWorkspaceRoot: true,
       canGoBack: true,
       canGoForward: true,
       settings: settings(),
-      actions: actions({ exportHtml, exportPdf }),
+      actions: actions({ exportHtml, exportPdf, exportWorkspacePdfs }),
     });
 
     commands.find((command) => command.id === 'file.exportHtml')?.run();
     commands.find((command) => command.id === 'file.exportPdf')?.run();
+    commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.run();
     expect(exportHtml).toHaveBeenCalledTimes(1);
     expect(exportPdf).toHaveBeenCalledTimes(1);
+    expect(exportWorkspacePdfs).toHaveBeenCalledTimes(1);
   });
 
   it('disables the reveal-in-Finder commands without a file path or workspace', () => {

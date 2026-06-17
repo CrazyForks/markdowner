@@ -12,7 +12,7 @@ use markdowner_core::{
     EditorMode, EditorRuntime, ThemeKind, ThemeSelection, WorkspaceState,
     storage::{CursorPosition, DraftBackupEntry},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{
     AppHandle, Emitter, Manager, Runtime, State,
@@ -24,6 +24,7 @@ use tauri_plugin_cli::CliExt;
 mod diagnostics;
 mod default_handler;
 mod link_actions;
+mod pdf_export;
 mod updater;
 
 const MENU_COMMAND_EVENT: &str = "markdowner://menu-command";
@@ -1692,6 +1693,45 @@ fn write_export_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadTextFileResult {
+    path: String,
+    contents: String,
+}
+
+#[tauri::command]
+fn read_text_files(paths: Vec<String>) -> Result<Vec<ReadTextFileResult>, String> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let contents = std::fs::read_to_string(&path)
+                .map_err(|error| format!("Could not read '{}': {error}", path))?;
+            Ok(ReadTextFileResult { path, contents })
+        })
+        .collect()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfExportFile {
+    path: String,
+    html: String,
+}
+
+#[tauri::command]
+fn write_pdf_file(path: String, html: String) -> Result<(), String> {
+    pdf_export::write_pdf_file(&path, &html)
+}
+
+#[tauri::command]
+fn write_pdf_files(files: Vec<PdfExportFile>) -> Result<(), String> {
+    for file in files {
+        pdf_export::write_pdf_file(&file.path, &file.html)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn has_active_document_external_changes(state: State<'_, DesktopAppState>) -> Result<bool, String> {
     with_backend(state, DesktopBackend::has_active_document_external_changes)
@@ -2053,6 +2093,9 @@ pub fn run() {
             save_active_document,
             save_active_document_as,
             write_export_file,
+            read_text_files,
+            write_pdf_file,
+            write_pdf_files,
             has_active_document_external_changes,
             active_document_disk_source,
             set_mode,
