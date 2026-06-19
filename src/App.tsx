@@ -1680,6 +1680,15 @@ export default function App() {
     () => ({
       attributes: {
         class: `editor-surface tiptap-surface ${MARKDOWN_CONTENT_SCOPE_CLASS}`,
+        // Suppress macOS WebKit's native text correction / word-suggestion
+        // popovers on the contenteditable surface. ProseMirror sets none of
+        // these by default (unlike CodeMirror, which already does), so the
+        // system spellcheck + predictive-text overlays would otherwise fire
+        // mid-typing. Same attribute set CodeMirror uses for the source pane.
+        spellcheck: 'false',
+        autocorrect: 'off',
+        autocapitalize: 'off',
+        writingsuggestions: 'false',
       },
       // Link clicks are handled by a capture-phase listener on the editor DOM
       // (see the attachMarkdownLinkClickInterceptor effect) rather than
