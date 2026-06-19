@@ -349,7 +349,10 @@ function installBundle(options, env) {
   }
 
   console.log(`==> Installing to ${dest}`);
-  runMaybeSudo(useSudo, 'ditto', [appBundle, dest]);
+  // Absolute path: a bare `ditto` can resolve to an unrelated user-installed
+  // tool earlier on PATH (e.g. ~/.local/bin/ditto), which fails the copy after
+  // the old bundle has already been removed.
+  runMaybeSudo(useSudo, '/usr/bin/ditto', [appBundle, dest]);
   runMaybeSudo(useSudo, 'xattr', ['-dr', 'com.apple.quarantine', dest], {
     allowFailure: true,
     stdio: 'ignore',
@@ -424,9 +427,25 @@ const options = parseArgs(argv);
 const env = { ...process.env };
 
 let managedTargetDir = null;
-if ((options.install || options.distribution) && options.doBuild && !env.CARGO_TARGET_DIR) {
-  env.CARGO_TARGET_DIR = defaultCargoTargetDir;
-  managedTargetDir = defaultCargoTargetDir;
+if ((options.install || options.distribution) && !env.CARGO_TARGET_DIR) {
+  if (options.doBuild) {
+    env.CARGO_TARGET_DIR = defaultCargoTargetDir;
+    managedTargetDir = defaultCargoTargetDir;
+  } else if (
+    fs.existsSync(
+      path.join(
+        bundleProfileDir(options, { CARGO_TARGET_DIR: defaultCargoTargetDir }),
+        'bundle',
+        'macos',
+        'Markdowner.app',
+      ),
+    )
+  ) {
+    // --no-build install: prefer the bundle this script last built over a
+    // stale one a bare `cargo tauri build` may have left in the default
+    // `target/` dir (where cargoTargetRoot would otherwise look).
+    env.CARGO_TARGET_DIR = defaultCargoTargetDir;
+  }
 }
 
 if (managedTargetDir && options.doBuild) {
