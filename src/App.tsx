@@ -214,6 +214,7 @@ import {
 } from './lib/modeCursor';
 import {
   DEFAULT_SETTINGS,
+  type CodeBlockTheme,
   type Settings,
   getChangedSettingsKeys,
   installCliLauncher,
@@ -436,6 +437,10 @@ export default function App() {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  // Raw code block theme picked while previewing from the command palette (not
+  // persisted). It is resolved through the light/dark sync below, so null means
+  // "no preview — use the saved theme".
+  const [codeBlockThemePreview, setCodeBlockThemePreview] = useState<CodeBlockTheme | null>(null);
   const [isDocumentStatsOpen, setIsDocumentStatsOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isFindReplaceOpen, setIsFindReplaceOpen] = useState(false);
@@ -2886,18 +2891,29 @@ export default function App() {
     applyImportedStylesheet(snapshot);
   }, [snapshot]);
 
+  // A live command-palette preview overrides the saved theme. Either way the
+  // value is resolved here (not when the preview is set), so the light/dark sync
+  // stays correct even if the OS theme flips while the picker is open.
+  const effectiveCodeBlockTheme = resolveCodeBlockTheme(
+    codeBlockThemePreview != null
+      ? { ...settings, codeBlockTheme: codeBlockThemePreview }
+      : settings,
+    snapshot.theme.kind,
+  );
+
+  // Never leave a non-persisted preview applied once the palette is dismissed.
+  useEffect(() => {
+    if (!isCommandPaletteOpen) setCodeBlockThemePreview(null);
+  }, [isCommandPaletteOpen]);
+
   // Surface code-block highlight + theme as data attributes so the WYSIWYG
   // and split-view markdown surfaces can pick up the user-selected palette
-  // through CSS (no JS recolouring needed).
+  // through CSS (no JS recolouring needed). A live command-palette preview, when
+  // active, overrides the saved theme without persisting it.
   useEffect(() => {
-    document.documentElement.dataset.cbTheme = resolveCodeBlockTheme(settings, snapshot.theme.kind);
+    document.documentElement.dataset.cbTheme = effectiveCodeBlockTheme;
     document.documentElement.dataset.cbHighlight = settings.codeBlockHighlight ? 'on' : 'off';
-  }, [
-    settings.codeBlockHighlight,
-    settings.codeBlockTheme,
-    settings.codeBlockThemeSync,
-    snapshot.theme.kind,
-  ]);
+  }, [settings.codeBlockHighlight, effectiveCodeBlockTheme]);
 
   useEffect(() => {
     document.title = buildWindowTitle(snapshot);
@@ -4961,6 +4977,11 @@ export default function App() {
       setTheme: (themeKind) => void handleSetTheme(themeKind),
       followSystemTheme: () => void handleFollowSystemTheme(),
       importTheme: () => void handleImportTheme(),
+      previewCodeBlockTheme: (theme) => setCodeBlockThemePreview(theme),
+      setCodeBlockTheme: (theme) => {
+        setCodeBlockThemePreview(null);
+        handleSettingsChange({ ...settings, codeBlockTheme: theme });
+      },
     },
   });
 
@@ -5189,7 +5210,7 @@ export default function App() {
             value={localDraft}
             extensions={sourceEditorExtensions}
             themeKind={snapshot.theme.kind}
-            codeBlockTheme={resolveCodeBlockTheme(settings, snapshot.theme.kind)}
+            codeBlockTheme={effectiveCodeBlockTheme}
             codeBlockHighlight={settings.codeBlockHighlight}
             onChange={handleSourceEditorChange}
             onStatistics={handleSourceEditorStatistics}

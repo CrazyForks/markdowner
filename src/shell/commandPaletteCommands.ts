@@ -1,5 +1,10 @@
 import type { EditorMode, ThemeKind } from '@/lib/desktop';
-import { DEFAULT_SETTINGS, type Settings } from '@/lib/settings';
+import {
+  CODE_BLOCK_THEMES,
+  DEFAULT_SETTINGS,
+  type CodeBlockTheme,
+  type Settings,
+} from '@/lib/settings';
 import { EDITOR_MODE_OPTIONS } from '@/lib/shellDisplay';
 import type { CommandPaletteCommand } from './CommandPalette';
 
@@ -32,6 +37,10 @@ export type CommandPaletteActions = {
   setTheme: (themeKind: ThemeKind) => void;
   followSystemTheme: () => void;
   importTheme: () => void;
+  /** Live-preview a code block theme without persisting (null clears the preview). */
+  previewCodeBlockTheme: (theme: CodeBlockTheme | null) => void;
+  /** Commit and persist the selected code block theme. */
+  setCodeBlockTheme: (theme: CodeBlockTheme) => void;
 };
 
 type BuildCommandPaletteCommandsInput = {
@@ -305,6 +314,23 @@ export function buildCommandPaletteCommands(
       category: 'Theme',
       label: 'Theme: Follow System',
       run: actions.followSystemTheme,
+    },
+    {
+      id: 'theme.codeBlockTheme',
+      category: 'Theme',
+      label: 'Change Code Block Theme…',
+      submenu: {
+        title: 'Code Block Theme',
+        placeholder: 'Select a code block theme…',
+        initialSelectedId: `cbtheme.${settings.codeBlockTheme}`,
+        onCancel: () => actions.previewCodeBlockTheme(null),
+        items: CODE_BLOCK_THEMES.map((theme) => ({
+          id: `cbtheme.${theme.value}`,
+          label: theme.label,
+          preview: () => actions.previewCodeBlockTheme(theme.value),
+          run: () => actions.setCodeBlockTheme(theme.value),
+        })),
+      },
     },
     {
       id: 'theme.import',

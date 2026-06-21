@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Settings } from '@/lib/settings';
-import { DEFAULT_SETTINGS } from '@/lib/settings';
+import { CODE_BLOCK_THEMES, DEFAULT_SETTINGS } from '@/lib/settings';
 import {
   buildCommandPaletteCommands,
   type CommandPaletteActions,
@@ -37,6 +37,8 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     setTheme: vi.fn(),
     followSystemTheme: vi.fn(),
     importTheme: vi.fn(),
+    previewCodeBlockTheme: vi.fn(),
+    setCodeBlockTheme: vi.fn(),
     ...overrides,
   };
 }
@@ -95,6 +97,7 @@ describe('buildCommandPaletteCommands', () => {
       'theme.light',
       'theme.dark',
       'theme.system',
+      'theme.codeBlockTheme',
       'theme.import',
     ]);
   });
@@ -147,9 +150,9 @@ describe('buildCommandPaletteCommands', () => {
       actions: actions({ exportHtml, exportPdf, exportWorkspacePdfs }),
     });
 
-    commands.find((command) => command.id === 'file.exportHtml')?.run();
-    commands.find((command) => command.id === 'file.exportPdf')?.run();
-    commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.run();
+    commands.find((command) => command.id === 'file.exportHtml')?.run?.();
+    commands.find((command) => command.id === 'file.exportPdf')?.run?.();
+    commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.run?.();
     expect(exportHtml).toHaveBeenCalledTimes(1);
     expect(exportPdf).toHaveBeenCalledTimes(1);
     expect(exportWorkspacePdfs).toHaveBeenCalledTimes(1);
@@ -188,8 +191,8 @@ describe('buildCommandPaletteCommands', () => {
     expect(file?.disabled).toBe(false);
     expect(project?.disabled).toBe(false);
 
-    file?.run();
-    project?.run();
+    file?.run?.();
+    project?.run?.();
     expect(revealActiveFileInFinder).toHaveBeenCalledTimes(1);
     expect(revealProjectInFinder).toHaveBeenCalledTimes(1);
   });
@@ -210,8 +213,8 @@ describe('buildCommandPaletteCommands', () => {
     expect(back?.disabled).toBe(false);
     expect(forward?.disabled).toBe(true);
 
-    back?.run();
-    forward?.run();
+    back?.run?.();
+    forward?.run?.();
     expect(navigateBack).toHaveBeenCalledTimes(1);
     expect(navigateForward).toHaveBeenCalledTimes(1);
   });
@@ -241,13 +244,13 @@ describe('buildCommandPaletteCommands', () => {
     expect(commands.find((command) => command.id === 'preferences.toggleAutoSave')?.label)
       .toBe('Disable Auto Save');
 
-    commands.find((command) => command.id === 'preferences.toggleWordWrap')?.run();
+    commands.find((command) => command.id === 'preferences.toggleWordWrap')?.run?.();
     expect(updateSettings).toHaveBeenCalledWith({
       ...current,
       editorLineWrap: true,
     });
 
-    commands.find((command) => command.id === 'preferences.resetDefaults')?.run();
+    commands.find((command) => command.id === 'preferences.resetDefaults')?.run?.();
     expect(updateSettings).toHaveBeenLastCalledWith(DEFAULT_SETTINGS);
   });
 
@@ -264,7 +267,7 @@ describe('buildCommandPaletteCommands', () => {
     const toggle = normalCommands.find((c) => c.id === 'preferences.toggleTableViewMode');
     expect(toggle?.label).toBe('Table View: Inline (no wrap, scroll)');
     expect(toggle?.shortcut).toBe('⌘⇧M');
-    toggle?.run();
+    toggle?.run?.();
     expect(updateSettings).toHaveBeenCalledWith({ ...normal, tableViewMode: 'inline' });
 
     const inlineCommands = buildCommandPaletteCommands({
@@ -300,14 +303,43 @@ describe('buildCommandPaletteCommands', () => {
       actions: commandActions,
     });
 
-    commands.find((command) => command.id === 'view.showExplorer')?.run();
+    commands.find((command) => command.id === 'view.showExplorer')?.run?.();
     expect(commandActions.showExplorerPanel).toHaveBeenCalledTimes(1);
     expect(commandActions.focusExplorerTree).toHaveBeenCalledTimes(1);
 
-    commands.find((command) => command.id === 'view.mode.SplitView')?.run();
+    commands.find((command) => command.id === 'view.mode.SplitView')?.run?.();
     expect(commandActions.setMode).toHaveBeenCalledWith('SplitView');
 
-    commands.find((command) => command.id === 'theme.light')?.run();
+    commands.find((command) => command.id === 'theme.light')?.run?.();
     expect(commandActions.setTheme).toHaveBeenCalledWith('BuiltInLight');
+  });
+
+  it('exposes a code block theme submenu wired to preview and commit actions', () => {
+    const commandActions = actions();
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings({ codeBlockTheme: 'github-dark' }),
+      actions: commandActions,
+    });
+
+    const opener = commands.find((command) => command.id === 'theme.codeBlockTheme');
+    expect(opener?.run).toBeUndefined();
+    const submenu = opener?.submenu;
+    expect(submenu).toBeDefined();
+    // One entry per available theme, highlighting the current selection by default.
+    expect(submenu?.items).toHaveLength(CODE_BLOCK_THEMES.length);
+    expect(submenu?.initialSelectedId).toBe('cbtheme.github-dark');
+
+    const oneLight = submenu?.items.find((item) => item.id === 'cbtheme.one-light');
+    oneLight?.preview?.();
+    expect(commandActions.previewCodeBlockTheme).toHaveBeenCalledWith('one-light');
+    oneLight?.run?.();
+    expect(commandActions.setCodeBlockTheme).toHaveBeenCalledWith('one-light');
+
+    // Leaving the submenu without committing clears the preview.
+    submenu?.onCancel?.();
+    expect(commandActions.previewCodeBlockTheme).toHaveBeenCalledWith(null);
   });
 });

@@ -18,7 +18,24 @@ export interface CommandPaletteCommand {
   category?: string;
   shortcut?: string;
   disabled?: boolean;
-  run: () => void | Promise<void>;
+  /** Opens a nested picker in place of the root list instead of running an action. */
+  submenu?: CommandPaletteSubmenu;
+  /** Fired when this item is highlighted inside a submenu (drives live preview). */
+  preview?: () => void;
+  run?: () => void | Promise<void>;
+}
+
+/** A nested list shown in place of the root command list (VS Code / Zed style). */
+export interface CommandPaletteSubmenu {
+  /** Heading shown above the nested list. */
+  title: string;
+  /** Search placeholder while the nested list is open. */
+  placeholder?: string;
+  items: CommandPaletteCommand[];
+  /** Item id to highlight when the submenu opens (e.g. the current value). */
+  initialSelectedId?: string;
+  /** Fired when the submenu is left without committing, to revert any preview. */
+  onCancel?: () => void;
 }
 
 export interface CommandPaletteProps {
@@ -60,10 +77,15 @@ function filterCommands(
 export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [submenu, setSubmenu] = useState<CommandPaletteSubmenu | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const listboxId = useId();
 
-  const filtered = useMemo(() => filterCommands(commands, query), [commands, query]);
+  const activeCommands = submenu ? submenu.items : commands;
+  const filtered = useMemo(
+    () => filterCommands(activeCommands, query),
+    [activeCommands, query],
+  );
   const activeOptionId =
     filtered.length > 0 ? `${listboxId}-option-${highlightedIndex}` : undefined;
 
@@ -71,12 +93,16 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
     if (!open) {
       setQuery('');
       setHighlightedIndex(0);
+      setSubmenu(null);
     }
   }, [open]);
 
+  // Live-preview the highlighted item while a submenu is open. Fires on open
+  // (with the initial selection) and on every navigation/filter change.
   useEffect(() => {
-    setHighlightedIndex(0);
-  }, [query]);
+    if (!submenu) return;
+    filtered[highlightedIndex]?.preview?.();
+  }, [submenu, filtered, highlightedIndex]);
 
   useEffect(() => {
     const list = listRef.current;
@@ -87,11 +113,31 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
     }
   }, [highlightedIndex, filtered]);
 
+  const enterSubmenu = (next: CommandPaletteSubmenu) => {
+    const index = next.initialSelectedId
+      ? next.items.findIndex((item) => item.id === next.initialSelectedId)
+      : 0;
+    setSubmenu(next);
+    setQuery('');
+    setHighlightedIndex(index >= 0 ? index : 0);
+  };
+
+  const exitSubmenu = () => {
+    submenu?.onCancel?.();
+    setSubmenu(null);
+    setQuery('');
+    setHighlightedIndex(0);
+  };
+
   const commitSelection = (index: number) => {
     const target = filtered[index];
     if (!target || target.disabled) return;
+    if (target.submenu) {
+      enterSubmenu(target.submenu);
+      return;
+    }
     onOpenChange(false);
-    void target.run();
+    void target.run?.();
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -143,19 +189,35 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
       <DialogContent
         showCloseButton={false}
         className="sm:max-w-lg p-0 gap-0 overflow-hidden top-[20%] translate-y-0"
+        onEscapeKeyDown={(event) => {
+          // In a submenu, Escape steps back to the root list instead of closing.
+          if (submenu) {
+            event.preventDefault();
+            exitSubmenu();
+          }
+        }}
       >
         <DialogHeader className="sr-only">
           <DialogTitle>Command Palette</DialogTitle>
           <DialogDescription>Search and run a command.</DialogDescription>
         </DialogHeader>
+        {submenu ? (
+          <div className="flex items-center gap-2 px-3 pt-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{submenu.title}</span>
+            <span className="ml-auto">Esc to go back</span>
+          </div>
+        ) : null}
         <div className="border-b border-border px-3 py-2">
           <Input
             autoFocus
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setHighlightedIndex(0);
+            }}
             onKeyDown={handleKeyDown}
-            placeholder="Type a command…"
-            aria-label="Command palette search"
+            placeholder={submenu?.placeholder ?? 'Type a command…'}
+            aria-label={submenu ? `${submenu.title} search` : 'Command palette search'}
             aria-controls={listboxId}
             aria-activedescendant={activeOptionId}
             aria-autocomplete="list"
@@ -176,7 +238,7 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
               data-empty-state="command-palette"
               className="px-3 py-6 text-center text-sm text-muted-foreground"
             >
-              {commands.length === 0 ? 'No commands available.' : 'No matches.'}
+              {activeCommands.length === 0 ? 'No commands available.' : 'No matches.'}
             </li>
           ) : (
             filtered.map((command, index) => {
