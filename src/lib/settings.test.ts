@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   CODE_BLOCK_THEMES,
@@ -7,11 +7,18 @@ import {
   EDITOR_WRAP_COLUMN_MIN,
   codeBlockThemeForThemeKind,
   getChangedSettingsKeys,
+  loadSettings,
   normalizeEditorFontSize,
   normalizeWrapColumn,
   resolveEditorFontSizeAdjustment,
   resolveOutlinePanelSizing,
 } from './settings';
+
+const invokeMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: invokeMock,
+}));
 
 describe('code block syntax highlighting settings', () => {
   it('defaults to One Dark with theme sync enabled', () => {
@@ -99,6 +106,21 @@ describe('settings numeric display helpers', () => {
       outlineFontSize: DEFAULT_SETTINGS.outlineFontSize,
       outlineRowSpacing: 8,
     });
+  });
+});
+
+describe('focus and typewriter mode defaults', () => {
+  it('keeps focus and typewriter mode off when persisted settings are missing or malformed', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      focusModeEnabled: 'true',
+      typewriterModeEnabled: 1,
+    });
+
+    const settings = await loadSettings();
+
+    expect(settings.focusModeEnabled).toBe(false);
+    expect(settings.typewriterModeEnabled).toBe(false);
   });
 });
 

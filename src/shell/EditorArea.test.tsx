@@ -51,4 +51,23 @@ describe('EditorArea mode switch', () => {
     expect(shell.querySelector('.notion-page-header')).toBeNull();
     expect(screen.getByTestId('wysiwyg-marker').parentElement).toHaveClass('notion-editor-content');
   });
+
+  it('keeps typewriter spacing off the flex pane in source mode', () => {
+    render(<EditorArea {...baseProps} currentMode="Editor" typewriterModeEnabled />);
+
+    const pane = screen.getByTestId('editor-surface-source');
+
+    expect(pane).not.toHaveClass('editor-typewriter-mode');
+    expect(pane).toHaveAttribute('data-typewriter-mode', 'true');
+  });
+
+  it('keeps typewriter spacing off the scroll pane in WYSIWYG mode', () => {
+    render(<EditorArea {...baseProps} currentMode="Wysiwyg" typewriterModeEnabled />);
+
+    const pane = screen.getByTestId('editor-surface-wysiwyg');
+    const shell = screen.getByTestId('notion-editor-shell');
+
+    expect(pane).not.toHaveClass('editor-typewriter-mode');
+    expect(shell).toHaveClass('editor-typewriter-mode');
+  });
 });

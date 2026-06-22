@@ -325,6 +325,12 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   if (typeof merged.editorShowWrapLine !== 'boolean') {
     merged.editorShowWrapLine = DEFAULT_SETTINGS.editorShowWrapLine;
   }
+  if (typeof merged.focusModeEnabled !== 'boolean') {
+    merged.focusModeEnabled = DEFAULT_SETTINGS.focusModeEnabled;
+  }
+  if (typeof merged.typewriterModeEnabled !== 'boolean') {
+    merged.typewriterModeEnabled = DEFAULT_SETTINGS.typewriterModeEnabled;
+  }
   if (typeof merged.assetFolder !== 'string' || merged.assetFolder.trim().length === 0) {
     merged.assetFolder = DEFAULT_SETTINGS.assetFolder;
   } else {

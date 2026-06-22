@@ -144,6 +144,8 @@ export function EditorArea({
   };
   const editorModeClassName = cn(
     focusModeEnabled && 'editor-focus-mode',
+  );
+  const typewriterModeClassName = cn(
     typewriterModeEnabled && 'editor-typewriter-mode',
   );
   return (
@@ -360,7 +362,7 @@ export function EditorArea({
           {activeDocumentOpen ? (
             <div
               data-testid="notion-editor-shell"
-              className="notion-editor-shell"
+              className={cn('notion-editor-shell', typewriterModeClassName)}
             >
               <div className="notion-editor-content">
                 {editorContent}

@@ -336,9 +336,11 @@ img.ProseMirror-separator {
     opacity: 1;
   }
   .editor-typewriter-mode {
-    scroll-padding-block: 45%;
     padding-top: 35vh;
     padding-bottom: 35vh;
+  }
+  .editor-pane-wysiwyg[data-typewriter-mode='true'] {
+    scroll-padding-block: 45%;
   }
   /* Task lists in both renderers: TipTap emits ul[data-type="taskList"],
      remark-gfm (split-view preview) emits ul.contains-task-list — style the
