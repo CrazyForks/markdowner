@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CODE_BLOCK_THEMES,
+  DEFAULT_IGNORE_LIST,
   DEFAULT_SETTINGS,
   EDITOR_WRAP_COLUMN_MAX,
   EDITOR_WRAP_COLUMN_MIN,
@@ -162,6 +163,62 @@ describe('diagnostics logging defaults', () => {
 describe('default app prompt defaults', () => {
   it('starts unseen so the first launch asks once', () => {
     expect(DEFAULT_SETTINGS.defaultAppPromptSeen).toBe(false);
+  });
+});
+
+describe('ignore list', () => {
+  it('defaults to the recommended folder names', () => {
+    expect(DEFAULT_SETTINGS.ignoreList).toEqual([...DEFAULT_IGNORE_LIST]);
+    expect(DEFAULT_SETTINGS.ignoreList).toContain('node_modules');
+    expect(DEFAULT_SETTINGS.ignoreList).toContain('.venv');
+    expect(DEFAULT_SETTINGS.ignoreList).not.toContain('.git');
+  });
+
+  it('falls back to defaults when persisted settings omit the list', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({ autoSave: true });
+
+    const settings = await loadSettings();
+
+    expect(settings.ignoreList).toEqual([...DEFAULT_IGNORE_LIST]);
+  });
+
+  it('trims, drops blanks, and dedupes persisted entries while preserving order', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      ignoreList: ['  .claude  ', '', '   ', '.diffs', '.claude', 'node_modules'],
+    });
+
+    const settings = await loadSettings();
+
+    expect(settings.ignoreList).toEqual(['.claude', '.diffs', 'node_modules']);
+  });
+
+  it('preserves an explicit empty list (ignore nothing but .git)', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({ ignoreList: [] });
+
+    const settings = await loadSettings();
+
+    expect(settings.ignoreList).toEqual([]);
+  });
+
+  it('falls back to defaults when the persisted value is not an array', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({ ignoreList: 'node_modules' });
+
+    const settings = await loadSettings();
+
+    expect(settings.ignoreList).toEqual([...DEFAULT_IGNORE_LIST]);
+  });
+
+  it('tracks ignore-list edits as a change', () => {
+    expect(
+      getChangedSettingsKeys(DEFAULT_SETTINGS, {
+        ...DEFAULT_SETTINGS,
+        ignoreList: [...DEFAULT_SETTINGS.ignoreList, '.claude'],
+      }),
+    ).toEqual(['ignoreList']);
   });
 });
 

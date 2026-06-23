@@ -325,6 +325,11 @@ impl DesktopBackend {
         Ok(self.snapshot())
     }
 
+    /// Apply the folder-ignore list used by subsequent workspace scans.
+    pub fn set_ignore_list(&mut self, ignore_list: Vec<String>) {
+        self.runtime.set_ignore_list(ignore_list);
+    }
+
     pub fn open_workspace_document(&mut self, path: &Path) -> Result<AppSnapshot, String> {
         self.runtime
             .open_workspace_document(path)
@@ -1645,8 +1650,18 @@ fn open_document(
 }
 
 #[tauri::command]
-fn open_workspace(path: String, state: State<'_, DesktopAppState>) -> Result<AppSnapshot, String> {
-    with_backend(state, |backend| backend.open_workspace(Path::new(&path)))
+fn open_workspace(
+    path: String,
+    state: State<'_, DesktopAppState>,
+    app_handle: AppHandle,
+) -> Result<AppSnapshot, String> {
+    let ignore_list = load_desktop_settings(&app_handle)
+        .unwrap_or_default()
+        .ignore_list;
+    with_backend(state, |backend| {
+        backend.set_ignore_list(ignore_list);
+        backend.open_workspace(Path::new(&path))
+    })
 }
 
 #[tauri::command]
@@ -1975,11 +1990,15 @@ fn open_dropped_path(
     state: State<'_, DesktopAppState>,
     app_handle: AppHandle,
 ) -> Result<AppSnapshot, String> {
+    let ignore_list = load_desktop_settings(&app_handle)
+        .unwrap_or_default()
+        .ignore_list;
     with_backend_and_menu(state, app_handle, |backend| {
         let path_obj = Path::new(&path);
         if path_obj.is_file() {
             backend.open_document(path_obj)
         } else if path_obj.is_dir() {
+            backend.set_ignore_list(ignore_list);
             backend.open_workspace(path_obj)
         } else {
             Err(format!("Path not found: {}", path_obj.display()))
@@ -2139,8 +2158,12 @@ pub fn run() {
                         Some(cwd_path)
                     };
                     let resolved = resolve_cli_path(&argv[1], cwd_arg);
+                    let ignore_list = load_desktop_settings(app)
+                        .unwrap_or_default()
+                        .ignore_list;
                     let state = app.state::<DesktopAppState>();
                     if let Ok(mut backend) = state.0.lock() {
+                        backend.set_ignore_list(ignore_list);
                         let _ = open_startup_path(&mut backend, &resolved);
                         let _ = window.emit("markdowner://update-snapshot", backend.snapshot());
                     }
@@ -2156,12 +2179,12 @@ pub fn run() {
         })
         .setup(move |app| {
             let session_store = session_store_path(app.handle());
-            let startup_mode = load_desktop_settings(app.handle())
-                .map(|settings| settings.default_mode)
-                .unwrap_or(EditorMode::Wysiwyg);
+            let startup_settings = load_desktop_settings(app.handle()).unwrap_or_default();
+            let startup_mode = startup_settings.default_mode;
             let mut state = DesktopAppState::new(session_store.clone(), startup_mode);
 
             if let Ok(backend) = state.0.get_mut() {
+                backend.set_ignore_list(startup_settings.ignore_list.clone());
                 let has_persisted_session =
                     session_store.as_ref().is_some_and(|path| path.exists());
 

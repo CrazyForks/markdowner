@@ -2779,6 +2779,18 @@ export default function App() {
         }),
       );
     }
+    // Re-scan the open workspace so an ignore-list edit updates the file tree
+    // live. The backend reads the ignore list from the persisted settings, so
+    // the re-scan must wait for the save to land first.
+    const rootDir = snapshot.rootDir;
+    if (changedKeys.includes('ignoreList') && rootDir) {
+      void saveSettingsPromise
+        .then(() => openWorkspace(rootDir))
+        .then((refreshed) => applySnapshot(refreshed, true))
+        .catch((error) =>
+          console.error('Failed to refresh workspace after ignore-list change:', error),
+        );
+    }
   };
 
   const markDefaultAppPromptSeen = () => {

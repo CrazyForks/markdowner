@@ -95,6 +95,11 @@ export interface Settings {
    * Commands without an entry keep their built-in default binding.
    */
   keybindingOverrides: Record<string, string>;
+  /**
+   * Folder names hidden from the workspace file tree (matched by exact
+   * basename, anywhere in the tree). `.git` is always hidden regardless.
+   */
+  ignoreList: string[];
 }
 
 export interface DiagnosticsLogStatus {
@@ -143,6 +148,40 @@ export const CLI_BINARY_INSTALL_PATH = '/usr/local/bin/mdner';
 export const CLI_ALIAS_COMMAND =
   'alias markdowner="/Applications/Markdowner.app/Contents/MacOS/markdowner-desktop"';
 
+/**
+ * Recommended default folder names hidden from the workspace tree. Mirrors the
+ * Rust `default_ignore_list()` in `markdowner-core`; keep the two in sync.
+ * `.git` is always hidden by the scanner and is intentionally not listed here.
+ */
+export const DEFAULT_IGNORE_LIST: readonly string[] = [
+  // Build output & dependencies
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'target',
+  'vendor',
+  'wheels',
+  // Python environments & caches
+  '.venv',
+  'venv',
+  '__pycache__',
+  '.mypy_cache',
+  '.pytest_cache',
+  '.ruff_cache',
+  // Tooling environments & caches
+  '.direnv',
+  '.cache',
+  // Editor metadata
+  '.idea',
+  '.vscode',
+  // Web framework build artifacts
+  '.next',
+  '.nuxt',
+  '.svelte-kit',
+  '.turbo',
+];
+
 export const DEFAULT_SETTINGS: Settings = {
   autoSave: false,
   editorFontSize: 14,
@@ -173,6 +212,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dismissedUpdateVersion: null,
   defaultAppPromptSeen: false,
   keybindingOverrides: {},
+  ignoreList: [...DEFAULT_IGNORE_LIST],
 };
 
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>;
@@ -382,7 +422,29 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
     merged.analyticsEnabled = DEFAULT_SETTINGS.analyticsEnabled;
   }
   merged.keybindingOverrides = normalizeKeybindingOverrides(merged.keybindingOverrides);
+  merged.ignoreList = normalizeIgnoreList(merged.ignoreList);
   return merged;
+}
+
+/**
+ * Trim entries, drop blanks, and dedupe while preserving order. A non-array
+ * value (corrupt settings) falls back to the recommended defaults; an explicit
+ * empty array is preserved (the user chose to ignore nothing).
+ */
+function normalizeIgnoreList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [...DEFAULT_IGNORE_LIST];
+  }
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    next.push(trimmed);
+  }
+  return next;
 }
 
 /** Keep only string→string entries; anything malformed falls back to {}. */

@@ -52,11 +52,51 @@ pub struct WorkspaceSession {
     pub cursor_positions: BTreeMap<PathBuf, CursorPosition>,
 }
 
-pub(crate) fn list_markdown_files(root: &Path) -> Result<Vec<PathBuf>, RuntimeError> {
+pub(crate) fn list_markdown_files(
+    root: &Path,
+    ignore_list: &[String],
+) -> Result<Vec<PathBuf>, RuntimeError> {
     let mut documents = Vec::new();
-    collect_markdown_files(root, &mut documents)?;
+    collect_markdown_files(root, &mut documents, ignore_list)?;
     documents.sort();
     Ok(documents)
+}
+
+/// Recommended default folder names hidden from the workspace tree. These are
+/// dependency/build/cache directories that rarely hold user markdown. `.git` is
+/// always ignored by [`is_ignored_directory`] regardless of this list.
+pub fn default_ignore_list() -> Vec<String> {
+    [
+        // Build output & dependencies
+        "node_modules",
+        "dist",
+        "build",
+        "out",
+        "target",
+        "vendor",
+        "wheels",
+        // Python environments & caches
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        // Tooling environments & caches
+        ".direnv",
+        ".cache",
+        // Editor metadata
+        ".idea",
+        ".vscode",
+        // Web framework build artifacts
+        ".next",
+        ".nuxt",
+        ".svelte-kit",
+        ".turbo",
+    ]
+    .iter()
+    .map(|name| (*name).to_string())
+    .collect()
 }
 
 pub fn load_workspace_session(path: &Path) -> Result<WorkspaceSession, RuntimeError> {
@@ -418,7 +458,11 @@ fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::rename(from, to)
 }
 
-fn collect_markdown_files(root: &Path, documents: &mut Vec<PathBuf>) -> Result<(), RuntimeError> {
+fn collect_markdown_files(
+    root: &Path,
+    documents: &mut Vec<PathBuf>,
+    ignore_list: &[String],
+) -> Result<(), RuntimeError> {
     let entries = fs::read_dir(root).map_err(|error| {
         RuntimeError::new(format!(
             "Could not read workspace folder '{}': {error}",
@@ -436,11 +480,11 @@ fn collect_markdown_files(root: &Path, documents: &mut Vec<PathBuf>) -> Result<(
         };
 
         if file_type.is_dir() {
-            if is_ignored_directory(&path) {
+            if is_ignored_directory(&path, ignore_list) {
                 continue;
             }
 
-            collect_markdown_files(&path, documents)?;
+            collect_markdown_files(&path, documents, ignore_list)?;
             continue;
         }
 
@@ -463,20 +507,75 @@ pub(crate) fn is_markdown_file(path: &Path) -> bool {
         })
 }
 
-fn is_ignored_directory(path: &Path) -> bool {
+/// `.git` is always ignored; every other folder name comes from the
+/// user-configurable `ignore_list` (matched by exact basename, anywhere).
+fn is_ignored_directory(path: &Path, ignore_list: &[String]) -> bool {
     path.file_name()
         .and_then(OsStr::to_str)
-        .is_some_and(|name| {
-            matches!(
-                name,
-                ".git"
-                    | "node_modules"
-                    | "target"
-                    | "dist"
-                    | "build"
-                    | ".idea"
-                    | ".vscode"
-                    | ".next"
-            )
-        })
+        .is_some_and(|name| name == ".git" || ignore_list.iter().any(|ignored| ignored == name))
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::{default_ignore_list, list_markdown_files};
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn names(root: &std::path::Path, ignore: &[String]) -> Vec<String> {
+        list_markdown_files(root, ignore)
+            .unwrap()
+            .into_iter()
+            .map(|path| {
+                path.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect()
+    }
+
+    fn make_workspace() -> tempfile::TempDir {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        for dir in ["keep", ".git", "node_modules", ".claude"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        fs::write(root.join("top.md"), "#").unwrap();
+        fs::write(root.join("keep/nested.md"), "#").unwrap();
+        fs::write(root.join(".git/config.md"), "#").unwrap();
+        fs::write(root.join("node_modules/dep.md"), "#").unwrap();
+        fs::write(root.join(".claude/notes.md"), "#").unwrap();
+        temp
+    }
+
+    #[test]
+    fn custom_list_hides_named_folders_and_git_is_always_hidden() {
+        let temp = make_workspace();
+        let ignore = vec!["node_modules".to_string(), ".claude".to_string()];
+        let found = names(temp.path(), &ignore);
+        assert_eq!(found, vec!["keep/nested.md", "top.md"]);
+    }
+
+    #[test]
+    fn empty_list_shows_everything_except_git() {
+        let temp = make_workspace();
+        let found = names(temp.path(), &[]);
+        // `.git` stays hidden; node_modules and .claude reappear without a list.
+        assert_eq!(
+            found,
+            vec![
+                ".claude/notes.md",
+                "keep/nested.md",
+                "node_modules/dep.md",
+                "top.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn default_list_hides_node_modules_but_not_dot_claude() {
+        let temp = make_workspace();
+        let found = names(temp.path(), &default_ignore_list());
+        assert_eq!(found, vec![".claude/notes.md", "keep/nested.md", "top.md"]);
+    }
 }

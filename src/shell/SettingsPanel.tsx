@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Copy, CopyCheck, FileCheck2, RefreshCw, Terminal, Trash2 } from 'lucide-react';
+import { Copy, CopyCheck, FileCheck2, Plus, RefreshCw, Terminal, Trash2, X } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,7 @@ import {
 import {
   CLI_BINARY_INSTALL_PATH,
   CODE_BLOCK_THEMES,
+  DEFAULT_IGNORE_LIST,
   DEFAULT_SETTINGS,
   EDITOR_FONT_SIZE_MAX,
   EDITOR_FONT_SIZE_MIN,
@@ -107,6 +108,9 @@ export function SettingsPanel({
   const [ctrlGLauncherBusy, setCtrlGLauncherBusy] = useState(false);
   const [ctrlGLauncherMessage, setCtrlGLauncherMessage] = useState('');
   const [ctrlGLauncherError, setCtrlGLauncherError] = useState(false);
+
+  // Draft text for the "add an ignored folder" input.
+  const [ignoreDraft, setIgnoreDraft] = useState('');
   const [ctrlGSnippetCopied, setCtrlGSnippetCopied] = useState(false);
   const [defaultAppBusy, setDefaultAppBusy] = useState(false);
   const [defaultAppMessage, setDefaultAppMessage] = useState('');
@@ -325,6 +329,27 @@ export function SettingsPanel({
       ? Math.min(max, Math.max(min, parsed))
       : fallback;
     handleSettingChange(key, nextValue as Settings[K]);
+  };
+
+  const addIgnoreEntry = () => {
+    const trimmed = ignoreDraft.trim();
+    if (trimmed.length === 0 || settings.ignoreList.includes(trimmed)) {
+      setIgnoreDraft('');
+      return;
+    }
+    handleSettingChange('ignoreList', [...settings.ignoreList, trimmed]);
+    setIgnoreDraft('');
+  };
+
+  const removeIgnoreEntry = (entry: string) => {
+    handleSettingChange(
+      'ignoreList',
+      settings.ignoreList.filter((name) => name !== entry),
+    );
+  };
+
+  const resetIgnoreList = () => {
+    handleSettingChange('ignoreList', [...DEFAULT_IGNORE_LIST]);
   };
 
   const fontSizeValue = settings.editorFontSize || DEFAULT_SETTINGS.editorFontSize;
@@ -669,6 +694,86 @@ export function SettingsPanel({
           >
             {ctrlGLauncherMessage}
           </p>
+        </div>
+
+        <Separator />
+        <div data-testid="settings-ignore-list" className={sectionGroupClass}>
+          <div className="flex flex-col gap-1">
+            <h4 className="text-sm font-medium leading-none">Ignored Folders</h4>
+            <p className="text-xs text-muted-foreground">
+              Folders with these names are hidden from the file tree everywhere,
+              including all their subfolders. Matched by exact name.{' '}
+              <code>.git</code> is always hidden.
+            </p>
+          </div>
+
+          {settings.ignoreList.length > 0 ? (
+            <ul
+              data-testid="settings-ignore-list-items"
+              className="flex flex-wrap gap-2"
+            >
+              {settings.ignoreList.map((entry) => (
+                <li
+                  key={entry}
+                  className="inline-flex items-center gap-1 rounded-md border bg-muted/40 py-1 pe-1 ps-2 text-xs"
+                >
+                  <span className="font-mono">{entry}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeIgnoreEntry(entry)}
+                    aria-label={`Remove ${entry} from the ignore list`}
+                    title={`Remove ${entry}`}
+                    className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No folders are ignored — only <code>.git</code> is hidden.
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              id="ignore-list-add"
+              data-testid="settings-ignore-list-input"
+              type="text"
+              placeholder="e.g. .claude"
+              aria-label="Folder name to ignore"
+              className="h-8 min-w-0 flex-1 sm:max-w-[14rem]"
+              value={ignoreDraft}
+              onChange={(event) => setIgnoreDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addIgnoreEntry();
+                }
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="settings-ignore-list-add"
+              onClick={addIgnoreEntry}
+              disabled={ignoreDraft.trim().length === 0}
+            >
+              <Plus />
+              Add
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={resetIgnoreList}
+              title="Restore the recommended default ignore list"
+            >
+              Restore defaults
+            </Button>
+          </div>
         </div>
 
         <Separator />

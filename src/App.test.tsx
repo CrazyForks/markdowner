@@ -12,6 +12,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppSnapshot, EditorMode } from './lib/desktop';
 
+// Mirror of DEFAULT_IGNORE_LIST in src/lib/settings.ts. Inlined (not imported)
+// so this file's `@tauri-apps/api/core` mock isn't evaluated before its
+// hoisted `invokeMock` is initialized. Keep in sync with the source list.
+const DEFAULT_IGNORE_LIST = [
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'target',
+  'vendor',
+  'wheels',
+  '.venv',
+  'venv',
+  '__pycache__',
+  '.mypy_cache',
+  '.pytest_cache',
+  '.ruff_cache',
+  '.direnv',
+  '.cache',
+  '.idea',
+  '.vscode',
+  '.next',
+  '.nuxt',
+  '.svelte-kit',
+  '.turbo',
+];
+
 const bootstrapMock = vi.fn();
 const activeDocumentDiskSourceMock = vi.fn();
 const importThemeMock = vi.fn();
@@ -6349,6 +6376,7 @@ describe('App recent documents', () => {
           dismissedUpdateVersion: null,
           defaultAppPromptSeen: false,
           keybindingOverrides: {},
+          ignoreList: [...DEFAULT_IGNORE_LIST],
         },
       });
     });
@@ -7689,6 +7717,7 @@ describe('App recent documents', () => {
           dismissedUpdateVersion: null,
           defaultAppPromptSeen: false,
           keybindingOverrides: {},
+          ignoreList: [...DEFAULT_IGNORE_LIST],
         },
       });
     });

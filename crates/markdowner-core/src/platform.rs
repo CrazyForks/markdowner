@@ -128,10 +128,24 @@ impl Display for RuntimeError {
 
 impl Error for RuntimeError {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorRuntime {
     workspace: WorkspaceState,
     session_store: Option<PathBuf>,
+    /// Folder names hidden from the workspace tree (besides the always-ignored
+    /// `.git`). Defaults to the recommended set; the desktop layer overrides it
+    /// from persisted settings before each scan.
+    ignore_list: Vec<String>,
+}
+
+impl Default for EditorRuntime {
+    fn default() -> Self {
+        Self {
+            workspace: WorkspaceState::default(),
+            session_store: None,
+            ignore_list: crate::storage::default_ignore_list(),
+        }
+    }
 }
 
 impl EditorRuntime {
@@ -139,7 +153,13 @@ impl EditorRuntime {
         Self {
             workspace,
             session_store: None,
+            ignore_list: crate::storage::default_ignore_list(),
         }
+    }
+
+    /// Replace the folder-ignore list used by subsequent workspace scans.
+    pub fn set_ignore_list(&mut self, ignore_list: Vec<String>) {
+        self.ignore_list = ignore_list;
     }
 
     pub fn workspace(&self) -> &WorkspaceState {
@@ -481,7 +501,7 @@ impl EditorRuntime {
     }
 
     pub fn open_workspace(&mut self, path: &Path) -> Result<PathBuf, RuntimeError> {
-        let documents = match list_markdown_files(path) {
+        let documents = match list_markdown_files(path, &self.ignore_list) {
             Ok(documents) => documents,
             Err(error) => return self.fail(error),
         };

@@ -41,6 +41,9 @@ pub struct Settings {
     /// Keymap overrides: command id → shortcut descriptor (e.g. "mod+shift+f").
     /// Commands without an entry keep their built-in default binding.
     pub keybinding_overrides: BTreeMap<String, String>,
+    /// Folder names hidden from the workspace file tree (matched by exact
+    /// basename, anywhere in the tree). `.git` is always hidden regardless.
+    pub ignore_list: Vec<String>,
 }
 
 impl Default for Settings {
@@ -75,6 +78,7 @@ impl Default for Settings {
             dismissed_update_version: None,
             default_app_prompt_seen: false,
             keybinding_overrides: BTreeMap::new(),
+            ignore_list: crate::storage::default_ignore_list(),
         }
     }
 }
@@ -308,6 +312,22 @@ mod tests {
         assert!(payload.contains("\"defaultAppPromptSeen\":true"));
         let parsed: Settings = serde_json::from_str(&payload).expect("parse");
         assert!(parsed.default_app_prompt_seen);
+    }
+
+    #[test]
+    fn ignore_list_defaults_when_absent_and_round_trips() {
+        // Legacy settings.json (pre-ignore-list) loads with the recommended defaults.
+        let legacy = r#"{"autoSave":true,"editorFontSize":16}"#;
+        let parsed: Settings = serde_json::from_str(legacy).expect("legacy settings parse");
+        assert_eq!(parsed.ignore_list, crate::storage::default_ignore_list());
+        assert!(parsed.ignore_list.iter().any(|name| name == "node_modules"));
+
+        // Explicit list survives round-trip via the camelCase key.
+        let json = serde_json::json!({ "ignoreList": [".diffs", ".claude"] });
+        let parsed: Settings = serde_json::from_value(json).expect("explicit settings parse");
+        assert_eq!(parsed.ignore_list, vec![".diffs", ".claude"]);
+        let value = serde_json::to_value(&parsed).expect("serialize settings");
+        assert_eq!(value["ignoreList"], serde_json::json!([".diffs", ".claude"]));
     }
 
     #[test]
