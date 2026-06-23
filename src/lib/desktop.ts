@@ -194,6 +194,10 @@ export async function openExternalUrl(href: string): Promise<void> {
   return invoke<void>('open_external_url', { href });
 }
 
+export async function openExternalUrlInNewWindow(href: string): Promise<void> {
+  return invoke<void>('open_external_url_in_new_window', { href });
+}
+
 export async function openPathInDefaultApp(path: string): Promise<void> {
   return invoke<void>('open_path_in_default_app', { path });
 }

@@ -1968,6 +1968,14 @@ fn diagnostics_status(
 }
 
 #[tauri::command]
+fn open_diagnostics_log(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let diagnostics_dir = app_data_dir(&app_handle)?;
+    let log_path =
+        diagnostics::ensure_diagnostics_log_file(&diagnostics_dir).map_err(|e| e.to_string())?;
+    link_actions::open_path_in_default_app(log_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn record_diagnostics_event(
     event_name: String,
     payload: Value,
@@ -2249,6 +2257,7 @@ pub fn run() {
             uninstall_cli_binary,
             search_workspace,
             diagnostics_status,
+            open_diagnostics_log,
             record_diagnostics_event,
             load_open_tabs,
             save_open_tabs,
@@ -2261,6 +2270,7 @@ pub fn run() {
             hide_app_or_window,
             link_actions::resolve_markdown_link,
             link_actions::open_external_url,
+            link_actions::open_external_url_in_new_window,
             link_actions::open_path_in_default_app,
             link_actions::reveal_path_in_finder,
             updater::check_for_update,

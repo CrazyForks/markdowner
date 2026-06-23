@@ -27,12 +27,24 @@ pub fn diagnostics_log_path(app_data_dir: &Path) -> PathBuf {
 pub fn diagnostics_status(app_data_dir: &Path, enabled: bool) -> DiagnosticsLogStatus {
     DiagnosticsLogStatus {
         enabled,
-        log_path: enabled.then(|| {
+        log_path: Some(
             diagnostics_log_path(app_data_dir)
                 .to_string_lossy()
-                .into_owned()
-        }),
+                .into_owned(),
+        ),
     }
+}
+
+pub fn ensure_diagnostics_log_file(app_data_dir: &Path) -> io::Result<PathBuf> {
+    let log_path = diagnostics_log_path(app_data_dir);
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    Ok(log_path)
 }
 
 pub fn write_diagnostics_event(
@@ -120,19 +132,38 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        diagnostics_log_path, diagnostics_status, write_diagnostics_event,
+        diagnostics_log_path, diagnostics_status, ensure_diagnostics_log_file,
+        write_diagnostics_event,
         write_diagnostics_event_with_limit,
     };
 
     #[test]
-    fn disabled_status_does_not_create_log_directory() {
+    fn disabled_status_reports_log_path_without_creating_log_directory() {
         let temp = tempdir().unwrap();
 
         let status = diagnostics_status(temp.path(), false);
 
         assert!(!status.enabled);
-        assert_eq!(status.log_path, None);
+        assert_eq!(
+            status.log_path.as_deref(),
+            Some(
+                diagnostics_log_path(temp.path())
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
         assert!(!temp.path().join("logs").exists());
+    }
+
+    #[test]
+    fn ensure_log_file_creates_empty_log_file_under_logs() {
+        let temp = tempdir().unwrap();
+
+        let log_path = ensure_diagnostics_log_file(temp.path()).unwrap();
+
+        assert_eq!(log_path, diagnostics_log_path(temp.path()));
+        assert!(log_path.exists());
+        assert_eq!(fs::read_to_string(&log_path).unwrap(), "");
     }
 
     #[test]

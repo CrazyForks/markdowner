@@ -1,5 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Copy, CopyCheck, FileCheck2, Plus, RefreshCw, Terminal, Trash2, X } from 'lucide-react';
+import {
+  Bug,
+  Copy,
+  CopyCheck,
+  ExternalLink,
+  FileCheck2,
+  FileText,
+  MessageSquare,
+  Plus,
+  RefreshCw,
+  Terminal,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -29,8 +42,10 @@ import {
   OUTLINE_ROW_SPACING_MIN,
   cliBinaryStatus,
   ctrlGLauncherStatus,
+  diagnosticsStatus,
   installCliBinary,
   installCtrlGLauncher,
+  openDiagnosticsLog,
   uninstallCliBinary,
   uninstallCtrlGLauncher,
   type CliBinaryStatus,
@@ -38,6 +53,7 @@ import {
   type CtrlGLauncherStatus,
   type Settings,
 } from '@/lib/settings';
+import { openExternalUrlInNewWindow } from '@/lib/desktop';
 import type { UpdateInfo } from '@/lib/updateCheck';
 
 export type { Settings } from '@/lib/settings';
@@ -72,6 +88,8 @@ const toggleGroupClass = 'h-auto w-full min-w-0 flex-wrap justify-start';
 const toggleItemClass = 'min-w-0 flex-1 basis-[5.75rem] sm:flex-none sm:basis-auto';
 const sectionBodyClass = 'flex flex-col gap-4';
 const sectionGroupClass = 'flex flex-col gap-3';
+const REPORT_URL = 'https://github.com/channprj/markdowner/issues';
+const FEEDBACK_URL = 'https://github.com/channprj/markdowner/discussions';
 
 export function SettingsPanel({
   settings,
@@ -115,6 +133,10 @@ export function SettingsPanel({
   const [defaultAppBusy, setDefaultAppBusy] = useState(false);
   const [defaultAppMessage, setDefaultAppMessage] = useState('');
   const [defaultAppError, setDefaultAppError] = useState(false);
+  const [diagnosticsLogPath, setDiagnosticsLogPath] = useState<string | null>(null);
+  const [diagnosticsLogBusy, setDiagnosticsLogBusy] = useState(false);
+  const [diagnosticsLogMessage, setDiagnosticsLogMessage] = useState('');
+  const [diagnosticsLogError, setDiagnosticsLogError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +155,21 @@ export function SettingsPanel({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    diagnosticsStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setDiagnosticsLogPath(status.logPath);
+      })
+      .catch((error) => {
+        console.error('Failed to read diagnostics status:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.diagnosticsEnabled]);
 
   const refreshCliBinaryStatus = async () => {
     try {
@@ -311,6 +348,33 @@ export function SettingsPanel({
     } finally {
       setDefaultAppBusy(false);
     }
+  };
+
+  const handleOpenDiagnosticsLog = async () => {
+    setDiagnosticsLogBusy(true);
+    setDiagnosticsLogError(false);
+    setDiagnosticsLogMessage('');
+    try {
+      await openDiagnosticsLog();
+      const status = await diagnosticsStatus();
+      setDiagnosticsLogPath(status.logPath);
+      setDiagnosticsLogMessage('Log file opened');
+    } catch (error) {
+      const text = typeof error === 'string' ? error : (error as Error)?.message ?? '';
+      console.error('Failed to open diagnostics log:', error);
+      setDiagnosticsLogError(true);
+      setDiagnosticsLogMessage(`Open failed: ${text || 'unknown error'}`);
+    } finally {
+      setDiagnosticsLogBusy(false);
+    }
+  };
+
+  const handleOpenReport = () => {
+    void openExternalUrlInNewWindow(REPORT_URL);
+  };
+
+  const handleOpenFeedback = () => {
+    void openExternalUrlInNewWindow(FEEDBACK_URL);
   };
 
   const handleSettingChange = <K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -1221,13 +1285,76 @@ export function SettingsPanel({
             </select>
           </div>
 
-          <div className={switchFieldClass}>
-            <Label htmlFor="diagnostics-enabled" className="text-sm">Diagnostics Logging</Label>
-            <Switch
-              id="diagnostics-enabled"
-              checked={settings.diagnosticsEnabled}
-              onCheckedChange={(checked) => handleSettingChange('diagnosticsEnabled', checked)}
-            />
+          <div data-testid="settings-diagnostics-section" className={sectionGroupClass}>
+            <div className={switchFieldClass}>
+              <Label htmlFor="diagnostics-enabled" className="text-sm">Diagnostics Logging</Label>
+              <Switch
+                id="diagnostics-enabled"
+                checked={settings.diagnosticsEnabled}
+                onCheckedChange={(checked) => handleSettingChange('diagnosticsEnabled', checked)}
+              />
+            </div>
+
+            <div className={inputFieldClass}>
+              <span className="text-sm font-medium">Log File</span>
+              <div className="flex min-w-0 flex-col gap-2">
+                <code
+                  id="diagnostics-log-path"
+                  data-testid="settings-diagnostics-log-path"
+                  className="min-h-8 min-w-0 break-all rounded-md border border-border bg-muted/40 px-2 py-1.5 font-mono text-xs text-muted-foreground"
+                >
+                  {diagnosticsLogPath ?? 'Resolving...'}
+                </code>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleOpenDiagnosticsLog()}
+                    disabled={diagnosticsLogBusy}
+                    title="Open diagnostics log file"
+                  >
+                    <FileText className="size-3.5" aria-hidden="true" />
+                    {diagnosticsLogBusy ? 'Opening...' : 'Open Log File'}
+                  </Button>
+                  {diagnosticsLogMessage ? (
+                    <span
+                      className={`text-xs ${diagnosticsLogError ? 'text-destructive' : 'text-muted-foreground'}`}
+                    >
+                      {diagnosticsLogMessage}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className={inputFieldClass}>
+              <span className="text-sm font-medium">Support</span>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenReport}
+                  title="Report a bug"
+                >
+                  <Bug className="size-3.5" aria-hidden="true" />
+                  Report
+                  <ExternalLink className="size-3.5" aria-hidden="true" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenFeedback}
+                  title="Open feedback discussions"
+                >
+                  <MessageSquare className="size-3.5" aria-hidden="true" />
+                  Feedback
+                  <ExternalLink className="size-3.5" aria-hidden="true" />
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
 

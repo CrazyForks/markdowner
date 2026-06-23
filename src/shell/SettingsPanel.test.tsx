@@ -1,10 +1,14 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_SETTINGS } from '@/lib/settings';
 import type { UpdateInfo } from '@/lib/updateCheck';
 
 import { SettingsPanel } from './SettingsPanel';
+
+const diagnosticsStatusMock = vi.hoisted(() => vi.fn());
+const openDiagnosticsLogMock = vi.hoisted(() => vi.fn());
+const openExternalUrlInNewWindowMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/settings', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/settings')>();
@@ -21,8 +25,14 @@ vi.mock('@/lib/settings', async (importOriginal) => {
       snippet: '',
       installed: false,
     }),
+    diagnosticsStatus: diagnosticsStatusMock,
+    openDiagnosticsLog: openDiagnosticsLogMock,
   };
 });
+
+vi.mock('@/lib/desktop', () => ({
+  openExternalUrlInNewWindow: openExternalUrlInNewWindowMock,
+}));
 
 const availableUpdate: UpdateInfo = {
   available: true,
@@ -46,6 +56,18 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof SettingsPane
 }
 
 describe('SettingsPanel update section', () => {
+  beforeEach(() => {
+    diagnosticsStatusMock.mockReset();
+    diagnosticsStatusMock.mockResolvedValue({
+      enabled: true,
+      logPath: '/Users/channprj/Library/Application Support/dev.chann.markdowner/logs/markdowner.log',
+    });
+    openDiagnosticsLogMock.mockReset();
+    openDiagnosticsLogMock.mockResolvedValue(undefined);
+    openExternalUrlInNewWindowMock.mockReset();
+    openExternalUrlInNewWindowMock.mockResolvedValue(undefined);
+  });
+
   afterEach(() => cleanup());
 
   it('shows the update action and fires onUpdateAction when available', () => {
@@ -70,6 +92,34 @@ describe('SettingsPanel update section', () => {
     fireEvent.click(screen.getByTestId('settings-update-toggle'));
     expect(onSettingsChange).toHaveBeenCalledWith(
       expect.objectContaining({ updateCheckEnabled: false }),
+    );
+  });
+
+  it('shows the diagnostics log path and opens the log file', async () => {
+    renderPanel();
+
+    expect(await screen.findByTestId('settings-diagnostics-log-path')).toHaveTextContent(
+      '/Users/channprj/Library/Application Support/dev.chann.markdowner/logs/markdowner.log',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /open log file/i }));
+
+    expect(openDiagnosticsLogMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens report and feedback destinations in a new browser window', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: /report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /feedback/i }));
+
+    expect(openExternalUrlInNewWindowMock).toHaveBeenNthCalledWith(
+      1,
+      'https://github.com/channprj/markdowner/issues',
+    );
+    expect(openExternalUrlInNewWindowMock).toHaveBeenNthCalledWith(
+      2,
+      'https://github.com/channprj/markdowner/discussions',
     );
   });
 });

@@ -572,6 +572,10 @@ export async function diagnosticsStatus(): Promise<DiagnosticsLogStatus> {
   }
 }
 
+export async function openDiagnosticsLog(): Promise<void> {
+  return invoke<void>('open_diagnostics_log');
+}
+
 export async function recordDiagnosticsEvent(
   eventName: string,
   payload: Record<string, unknown> = {},

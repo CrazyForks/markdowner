@@ -112,6 +112,15 @@ pub fn open_external_url(href: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn open_external_url_in_new_window(href: String) -> Result<(), String> {
+    let trimmed = href.trim();
+    if trimmed.is_empty() {
+        return Err("Cannot open an empty URL".to_string());
+    }
+    open_url_with_os_default_new_window(trimmed)
+}
+
+#[tauri::command]
 pub fn open_path_in_default_app(path: String) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -129,6 +138,33 @@ pub fn reveal_path_in_finder(path: String) -> Result<(), String> {
         return Err("Cannot reveal an empty path".to_string());
     }
     reveal_with_os_file_manager(trimmed)
+}
+
+fn open_url_with_os_default_new_window(target: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-n", target])
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| format!("Failed to launch `open -n`: {err}"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", target])
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| format!("Failed to launch `start`: {err}"))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| format!("Failed to launch `xdg-open`: {err}"))
+    }
 }
 
 fn open_with_os_default(target: &str) -> Result<(), String> {
