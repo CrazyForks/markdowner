@@ -20,8 +20,6 @@ use tauri::{
     menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
 };
 
-use tauri_plugin_cli::CliExt;
-
 mod diagnostics;
 mod default_handler;
 mod link_actions;
@@ -1425,17 +1423,33 @@ fn session_store_path(app_handle: &AppHandle) -> Option<PathBuf> {
         .map(|path| path.join("workspace-session.json"))
 }
 
-fn open_startup_path(backend: &mut DesktopBackend, path: &Path) -> Result<(), String> {
-    if path.is_file() {
-        backend.open_document(path)?;
-        let path_string = path.to_string_lossy().into_owned();
-        let open_tabs = vec![path_string.clone()];
-        backend.save_open_tabs(&open_tabs, Some(path_string), &HashMap::new())?;
-    } else if path.is_dir() {
-        backend.open_workspace(path)?;
+fn open_startup_paths(backend: &mut DesktopBackend, paths: &[PathBuf]) -> Result<(), String> {
+    open_startup_paths_with_snapshots(backend, paths).map(|_| ())
+}
+
+fn open_startup_paths_with_snapshots(
+    backend: &mut DesktopBackend,
+    paths: &[PathBuf],
+) -> Result<Vec<AppSnapshot>, String> {
+    let mut opened_file_tabs = Vec::new();
+    let mut snapshots = Vec::new();
+
+    for path in paths {
+        if path.is_file() {
+            backend.open_document(path)?;
+            opened_file_tabs.push(path.to_string_lossy().into_owned());
+            snapshots.push(backend.snapshot());
+        } else if path.is_dir() {
+            backend.open_workspace(path)?;
+            snapshots.push(backend.snapshot());
+        }
     }
 
-    Ok(())
+    if let Some(active_tab_path) = opened_file_tabs.last().cloned() {
+        backend.save_open_tabs(&opened_file_tabs, Some(active_tab_path), &HashMap::new())?;
+    }
+
+    Ok(snapshots)
 }
 
 // Resolve a CLI path argument against an optional working directory. Relative
@@ -1454,6 +1468,27 @@ fn resolve_cli_path(raw: &str, cwd: Option<&Path>) -> PathBuf {
         Some(base) => base.join(candidate),
         None => candidate.to_path_buf(),
     }
+}
+
+fn resolve_cli_open_paths<I, S>(args: I, cwd: Option<&Path>) -> Vec<PathBuf>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter()
+        .filter_map(|arg| {
+            let raw = arg.as_ref();
+            if raw.is_empty() || raw == "--" || raw == "--wait" || raw == "-w" {
+                return None;
+            }
+            let path = resolve_cli_path(raw, cwd);
+            if path.is_file() || path.is_dir() {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -2158,22 +2193,23 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             focus_main_window(app);
             if let Some(window) = app.get_webview_window("main") {
-                if argv.len() > 1 {
-                    let cwd_path = Path::new(&cwd);
-                    let cwd_arg = if cwd_path.as_os_str().is_empty() {
-                        None
-                    } else {
-                        Some(cwd_path)
-                    };
-                    let resolved = resolve_cli_path(&argv[1], cwd_arg);
-                    let ignore_list = load_desktop_settings(app)
-                        .unwrap_or_default()
-                        .ignore_list;
+                let cwd_path = Path::new(&cwd);
+                let cwd_arg = if cwd_path.as_os_str().is_empty() {
+                    None
+                } else {
+                    Some(cwd_path)
+                };
+                let paths = resolve_cli_open_paths(argv.iter().skip(1), cwd_arg);
+                if !paths.is_empty() {
+                    let ignore_list = load_desktop_settings(app).unwrap_or_default().ignore_list;
                     let state = app.state::<DesktopAppState>();
                     if let Ok(mut backend) = state.0.lock() {
                         backend.set_ignore_list(ignore_list);
-                        let _ = open_startup_path(&mut backend, &resolved);
-                        let _ = window.emit("markdowner://update-snapshot", backend.snapshot());
+                        let snapshots = open_startup_paths_with_snapshots(&mut backend, &paths)
+                            .unwrap_or_else(|_| vec![backend.snapshot()]);
+                        for snapshot in snapshots {
+                            let _ = window.emit("markdowner://update-snapshot", snapshot);
+                        }
                     }
                 }
             }
@@ -2202,15 +2238,13 @@ pub fn run() {
 
                 // Open CLI arguments if provided. Resolve relative paths
                 // against the shell's working directory (captured before any
-                // window setup), not the app bundle CWD.
-                if let Ok(matches) = app.cli().matches() {
-                    if let Some(arg_data) = matches.args.get("path") {
-                        if let Some(val) = arg_data.value.as_str() {
-                            let resolved = resolve_cli_path(val, startup_cwd.as_deref());
-                            let _ = open_startup_path(backend, &resolved);
-                        }
-                    }
-                }
+                // window setup), not the app bundle CWD. Read raw argv here
+                // instead of the single configured CLI `path` argument so a
+                // desktop launch with multiple files preserves all requested
+                // tabs and leaves the last requested file active.
+                let startup_paths =
+                    resolve_cli_open_paths(env::args().skip(1), startup_cwd.as_deref());
+                let _ = open_startup_paths(backend, &startup_paths);
             }
 
             let initial_recent_documents = state
@@ -2289,18 +2323,22 @@ pub fn run() {
                 focus_main_window(app_handle);
             }
             if let tauri::RunEvent::Opened { urls } = &event {
-                if let Some(url) = urls.first() {
-                    if let Ok(path) = url.to_file_path() {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let state = app_handle.state::<DesktopAppState>();
-                            if let Ok(mut backend) = state.0.lock() {
-                                let _ = open_startup_path(&mut backend, &path);
-                                let _ =
-                                    window.emit("markdowner://update-snapshot", backend.snapshot());
+                let paths = urls
+                    .iter()
+                    .filter_map(|url| url.to_file_path().ok())
+                    .collect::<Vec<_>>();
+                if !paths.is_empty() {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let state = app_handle.state::<DesktopAppState>();
+                        if let Ok(mut backend) = state.0.lock() {
+                            let snapshots = open_startup_paths_with_snapshots(&mut backend, &paths)
+                                .unwrap_or_else(|_| vec![backend.snapshot()]);
+                            for snapshot in snapshots {
+                                let _ = window.emit("markdowner://update-snapshot", snapshot);
                             }
-                            let _ = window.show();
-                            let _ = window.set_focus();
                         }
+                        let _ = window.show();
+                        let _ = window.set_focus();
                     }
                 }
             }
@@ -2342,8 +2380,8 @@ mod tests {
         cli_launcher_alias_command_for_path, copy_image_into_asset_folder,
         ctrl_g_launcher_managed_block, infer_image_mime, install_cli_binary_at,
         install_cli_launcher_alias, install_ctrl_g_launcher_block, login_shell_path_value,
-        menu_command_from_id, open_startup_path, path_value_contains_dir, read_image_data_uri,
-        resolve_cli_path,
+        menu_command_from_id, open_startup_paths, open_startup_paths_with_snapshots,
+        path_value_contains_dir, read_image_data_uri, resolve_cli_open_paths, resolve_cli_path,
         shell_config_path_for_shell, top_level_menu_sections, uninstall_cli_binary_at,
         uninstall_ctrl_g_launcher_block,
     };
@@ -3016,7 +3054,7 @@ mod tests {
         fs::write(&document_path, "# Launched\n\nOpened from the shell.").unwrap();
         let mut backend = DesktopBackend::new(Some(session_path));
 
-        open_startup_path(&mut backend, &document_path).unwrap();
+        open_startup_paths(&mut backend, &[document_path.clone()]).unwrap();
 
         let snapshot = backend.snapshot();
         assert_eq!(
@@ -3040,13 +3078,60 @@ mod tests {
     }
 
     #[test]
+    fn startup_multi_file_open_persists_each_requested_tab_and_activates_the_last() {
+        let temp = tempdir().unwrap();
+        let session_path = temp.path().join("workspace-session.json");
+        let first_path = temp.path().join("first.md");
+        let second_path = temp.path().join("second.md");
+        fs::write(&first_path, "# First").unwrap();
+        fs::write(&second_path, "# Second").unwrap();
+        let mut backend = DesktopBackend::new(Some(session_path));
+
+        let snapshots = open_startup_paths_with_snapshots(
+            &mut backend,
+            &[first_path.clone(), second_path.clone()],
+        )
+        .unwrap();
+
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(
+            snapshots[0].active_document_path.as_deref(),
+            Some(first_path.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            snapshots[1].active_document_path.as_deref(),
+            Some(second_path.to_string_lossy().as_ref())
+        );
+
+        let snapshot = backend.snapshot();
+        assert_eq!(
+            snapshot.active_document_path.as_deref(),
+            Some(second_path.to_string_lossy().as_ref())
+        );
+        assert_eq!(snapshot.active_document_source.as_deref(), Some("# Second"));
+
+        let payload = backend.load_open_tabs().unwrap();
+        assert_eq!(
+            payload.open_tabs,
+            vec![
+                first_path.to_string_lossy().into_owned(),
+                second_path.to_string_lossy().into_owned(),
+            ]
+        );
+        assert_eq!(
+            payload.active_tab_path,
+            Some(second_path.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
     fn empty_tab_save_does_not_clobber_startup_active_document() {
         let temp = tempdir().unwrap();
         let session_path = temp.path().join("workspace-session.json");
         let document_path = temp.path().join("startup-race.md");
         fs::write(&document_path, "# Startup race").unwrap();
         let mut backend = DesktopBackend::new(Some(session_path));
-        open_startup_path(&mut backend, &document_path).unwrap();
+        open_startup_paths(&mut backend, &[document_path.clone()]).unwrap();
 
         backend.save_open_tabs(&[], None, &HashMap::new()).unwrap();
 
@@ -3145,6 +3230,24 @@ mod tests {
             resolve_cli_path(absolute.to_str().unwrap(), Some(Path::new("/tmp/ignored")));
 
         assert_eq!(resolved, absolute);
+    }
+
+    #[test]
+    fn resolve_cli_open_paths_collects_existing_relative_file_arguments_in_order() {
+        let temp = tempdir().unwrap();
+        let first = temp.path().join("first.md");
+        let nested_dir = temp.path().join("nested");
+        let second = nested_dir.join("second.md");
+        fs::create_dir_all(&nested_dir).unwrap();
+        fs::write(&first, "# First").unwrap();
+        fs::write(&second, "# Second").unwrap();
+
+        let resolved = resolve_cli_open_paths(
+            ["first.md", "--wait", "missing.md", "nested/second.md", "--"],
+            Some(temp.path()),
+        );
+
+        assert_eq!(resolved, vec![first, second]);
     }
 
     #[test]
