@@ -19,12 +19,15 @@ use tauri::{
     AppHandle, Emitter, Manager, Runtime, State,
     menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
 };
+use shell_managed_block::ManagedShellBlock;
 
-mod diagnostics;
 mod default_handler;
+mod diagnostics;
 mod link_actions;
 mod pdf_export;
+mod shell_managed_block;
 mod updater;
+mod workspace_search;
 
 const MENU_COMMAND_EVENT: &str = "markdowner://menu-command";
 const MENU_FILE_ID: &str = "file";
@@ -56,6 +59,10 @@ const CLI_LAUNCHER_BEGIN_MARKER: &str = "# >>> markdowner CLI launcher >>>";
 const CLI_LAUNCHER_END_MARKER: &str = "# <<< markdowner CLI launcher <<<";
 const CTRL_G_LAUNCHER_BEGIN_MARKER: &str = "# >>> markdowner Ctrl+G launcher >>>";
 const CTRL_G_LAUNCHER_END_MARKER: &str = "# <<< markdowner Ctrl+G launcher <<<";
+const CLI_LAUNCHER_BLOCK: ManagedShellBlock =
+    ManagedShellBlock::new(CLI_LAUNCHER_BEGIN_MARKER, CLI_LAUNCHER_END_MARKER);
+const CTRL_G_LAUNCHER_BLOCK: ManagedShellBlock =
+    ManagedShellBlock::new(CTRL_G_LAUNCHER_BEGIN_MARKER, CTRL_G_LAUNCHER_END_MARKER);
 // Setting EDITOR / VISUAL to `mdner` lets CLI tools (Claude Code, Codex, git
 // commit, etc.) spawn Markdowner when the user presses Ctrl+G — those tools
 // shell out to `$EDITOR` (and fall back to `$VISUAL`) for in-place editing
@@ -570,38 +577,7 @@ fn cli_launcher_alias_command_for_path(executable_path: &Path) -> String {
 }
 
 fn cli_launcher_managed_block(alias_command: &str) -> String {
-    format!("{CLI_LAUNCHER_BEGIN_MARKER}\n{alias_command}\n{CLI_LAUNCHER_END_MARKER}\n")
-}
-
-fn remove_cli_launcher_managed_block(contents: &str) -> String {
-    let Some(start) = contents.find(CLI_LAUNCHER_BEGIN_MARKER) else {
-        return contents.to_string();
-    };
-    let Some(end_relative) = contents[start..].find(CLI_LAUNCHER_END_MARKER) else {
-        return contents.to_string();
-    };
-
-    let end = start + end_relative + CLI_LAUNCHER_END_MARKER.len();
-    let remove_end = if contents[end..].starts_with("\r\n") {
-        end + 2
-    } else if contents[end..].starts_with('\n') {
-        end + 1
-    } else {
-        end
-    };
-
-    format!("{}{}", &contents[..start], &contents[remove_end..])
-}
-
-fn append_cli_launcher_managed_block(mut contents: String, alias_command: &str) -> String {
-    if !contents.is_empty() && !contents.ends_with('\n') {
-        contents.push('\n');
-    }
-    if !contents.trim().is_empty() && !contents.ends_with("\n\n") {
-        contents.push('\n');
-    }
-    contents.push_str(&cli_launcher_managed_block(alias_command));
-    contents
+    CLI_LAUNCHER_BLOCK.render(alias_command)
 }
 
 fn install_cli_launcher_alias(
@@ -622,9 +598,9 @@ fn install_cli_launcher_alias(
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
 
-        let next_contents = append_cli_launcher_managed_block(
-            remove_cli_launcher_managed_block(&existing),
-            alias_command,
+        let next_contents = CLI_LAUNCHER_BLOCK.append_to(
+            CLI_LAUNCHER_BLOCK.remove_from(&existing),
+            &managed_block,
         );
         std::fs::write(shell_config_path, next_contents).map_err(|e| e.to_string())?;
     }
@@ -637,38 +613,7 @@ fn install_cli_launcher_alias(
 }
 
 fn ctrl_g_launcher_managed_block(snippet: &str) -> String {
-    format!("{CTRL_G_LAUNCHER_BEGIN_MARKER}\n{snippet}\n{CTRL_G_LAUNCHER_END_MARKER}\n")
-}
-
-fn remove_ctrl_g_launcher_managed_block(contents: &str) -> String {
-    let Some(start) = contents.find(CTRL_G_LAUNCHER_BEGIN_MARKER) else {
-        return contents.to_string();
-    };
-    let Some(end_relative) = contents[start..].find(CTRL_G_LAUNCHER_END_MARKER) else {
-        return contents.to_string();
-    };
-
-    let end = start + end_relative + CTRL_G_LAUNCHER_END_MARKER.len();
-    let remove_end = if contents[end..].starts_with("\r\n") {
-        end + 2
-    } else if contents[end..].starts_with('\n') {
-        end + 1
-    } else {
-        end
-    };
-
-    format!("{}{}", &contents[..start], &contents[remove_end..])
-}
-
-fn append_ctrl_g_launcher_managed_block(mut contents: String, managed_block: &str) -> String {
-    if !contents.is_empty() && !contents.ends_with('\n') {
-        contents.push('\n');
-    }
-    if !contents.trim().is_empty() && !contents.ends_with("\n\n") {
-        contents.push('\n');
-    }
-    contents.push_str(managed_block);
-    contents
+    CTRL_G_LAUNCHER_BLOCK.render(snippet)
 }
 
 fn install_ctrl_g_launcher_block(
@@ -690,8 +635,8 @@ fn install_ctrl_g_launcher_block(
 
         // Strip any stale block (e.g. left over from an older install path)
         // before appending so we never accumulate duplicates.
-        let next_contents = append_ctrl_g_launcher_managed_block(
-            remove_ctrl_g_launcher_managed_block(&existing),
+        let next_contents = CTRL_G_LAUNCHER_BLOCK.append_to(
+            CTRL_G_LAUNCHER_BLOCK.remove_from(&existing),
             managed_block,
         );
         std::fs::write(shell_config_path, next_contents).map_err(|e| e.to_string())?;
@@ -724,7 +669,7 @@ fn uninstall_ctrl_g_launcher_block(
         });
     }
 
-    let next_contents = remove_ctrl_g_launcher_managed_block(&existing);
+    let next_contents = CTRL_G_LAUNCHER_BLOCK.remove_from(&existing);
     std::fs::write(shell_config_path, next_contents).map_err(|e| e.to_string())?;
 
     Ok(CtrlGLauncherActionResult {
@@ -735,209 +680,8 @@ fn uninstall_ctrl_g_launcher_block(
 
 fn ctrl_g_launcher_is_installed(shell_config_path: &Path) -> bool {
     std::fs::read_to_string(shell_config_path)
-        .map(|contents| contents.contains(CTRL_G_LAUNCHER_BEGIN_MARKER))
+        .map(|contents| CTRL_G_LAUNCHER_BLOCK.marker_is_present(&contents))
         .unwrap_or(false)
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceSearchOptions {
-    #[serde(default)]
-    case_sensitive: bool,
-    #[serde(default)]
-    whole_word: bool,
-    #[serde(default)]
-    regex: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceSearchMatch {
-    line: u32,
-    column: u32,
-    preview: String,
-    match_start: u32,
-    match_end: u32,
-    absolute_offset: u32,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceSearchFile {
-    path: String,
-    matches: Vec<WorkspaceSearchMatch>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceSearchResult {
-    files: Vec<WorkspaceSearchFile>,
-}
-
-const WORKSPACE_SEARCH_PREVIEW_RADIUS: usize = 80;
-const WORKSPACE_SEARCH_MAX_MATCHES_PER_FILE: usize = 200;
-const WORKSPACE_SEARCH_MAX_TOTAL_MATCHES: usize = 2000;
-
-fn is_word_char(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
-}
-
-fn line_column_for_offset(source: &str, offset: usize) -> (u32, u32) {
-    let mut line: u32 = 1;
-    let mut last_newline: usize = 0;
-    for (idx, ch) in source.char_indices() {
-        if idx >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            last_newline = idx + 1;
-        }
-    }
-    let column_chars = source[last_newline..offset].chars().count();
-    (line, (column_chars as u32) + 1)
-}
-
-fn preview_window(
-    line_text: &str,
-    match_start_in_line: usize,
-    match_end_in_line: usize,
-) -> (String, usize, usize) {
-    let char_indices: Vec<(usize, char)> = line_text.char_indices().collect();
-    let start_char_idx = char_indices
-        .iter()
-        .position(|(byte_idx, _)| *byte_idx >= match_start_in_line)
-        .unwrap_or(char_indices.len());
-    let end_char_idx = char_indices
-        .iter()
-        .position(|(byte_idx, _)| *byte_idx >= match_end_in_line)
-        .unwrap_or(char_indices.len());
-    let preview_char_start = start_char_idx.saturating_sub(WORKSPACE_SEARCH_PREVIEW_RADIUS);
-    let preview_char_end = (end_char_idx + WORKSPACE_SEARCH_PREVIEW_RADIUS).min(char_indices.len());
-    let preview_byte_start = char_indices
-        .get(preview_char_start)
-        .map(|(byte_idx, _)| *byte_idx)
-        .unwrap_or(0);
-    let preview_byte_end = if preview_char_end == char_indices.len() {
-        line_text.len()
-    } else {
-        char_indices[preview_char_end].0
-    };
-    let preview = line_text[preview_byte_start..preview_byte_end].to_string();
-    let highlight_start = match_start_in_line.saturating_sub(preview_byte_start);
-    let highlight_end = (match_end_in_line.saturating_sub(preview_byte_start)).min(preview.len());
-    (preview, highlight_start, highlight_end)
-}
-
-fn search_file_contents(
-    source: &str,
-    pattern: &regex::Regex,
-    whole_word: bool,
-    remaining_budget: usize,
-) -> Vec<WorkspaceSearchMatch> {
-    let mut matches: Vec<WorkspaceSearchMatch> = Vec::new();
-    let limit = remaining_budget.min(WORKSPACE_SEARCH_MAX_MATCHES_PER_FILE);
-    if limit == 0 {
-        return matches;
-    }
-
-    let bytes = source.as_bytes();
-    for capture in pattern.find_iter(source) {
-        let start = capture.start();
-        let end = capture.end();
-        if start == end {
-            continue;
-        }
-
-        if whole_word {
-            let before_ok = start == 0 || !is_word_char(bytes[start - 1]);
-            let after_ok = end >= bytes.len() || !is_word_char(bytes[end]);
-            if !(before_ok && after_ok) {
-                continue;
-            }
-        }
-
-        // Find line bounds
-        let line_start = source[..start].rfind('\n').map(|p| p + 1).unwrap_or(0);
-        let line_end = source[end..]
-            .find('\n')
-            .map(|offset| end + offset)
-            .unwrap_or(source.len());
-        let line_text = &source[line_start..line_end];
-        let match_start_in_line = start - line_start;
-        let match_end_in_line = end - line_start;
-        let (preview, highlight_start, highlight_end) =
-            preview_window(line_text, match_start_in_line, match_end_in_line);
-        let (line, column) = line_column_for_offset(source, start);
-        matches.push(WorkspaceSearchMatch {
-            line,
-            column,
-            preview,
-            match_start: highlight_start as u32,
-            match_end: highlight_end as u32,
-            absolute_offset: start as u32,
-        });
-
-        if matches.len() >= limit {
-            break;
-        }
-    }
-
-    matches
-}
-
-fn compile_search_pattern(
-    query: &str,
-    options: &WorkspaceSearchOptions,
-) -> Result<regex::Regex, String> {
-    let escaped = if options.regex {
-        query.to_string()
-    } else {
-        regex::escape(query)
-    };
-    let mut builder = regex::RegexBuilder::new(&escaped);
-    builder.case_insensitive(!options.case_sensitive);
-    builder.multi_line(true);
-    builder
-        .build()
-        .map_err(|error| format!("Invalid pattern: {}", error))
-}
-
-#[tauri::command]
-fn search_workspace(
-    query: String,
-    options: WorkspaceSearchOptions,
-    paths: Vec<String>,
-) -> Result<WorkspaceSearchResult, String> {
-    if query.is_empty() {
-        return Ok(WorkspaceSearchResult { files: Vec::new() });
-    }
-
-    let pattern = compile_search_pattern(&query, &options)?;
-    let mut files: Vec<WorkspaceSearchFile> = Vec::new();
-    let mut total = 0usize;
-
-    for raw_path in paths {
-        if total >= WORKSPACE_SEARCH_MAX_TOTAL_MATCHES {
-            break;
-        }
-        let path = Path::new(&raw_path);
-        let Ok(source) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let remaining = WORKSPACE_SEARCH_MAX_TOTAL_MATCHES - total;
-        let matches = search_file_contents(&source, &pattern, options.whole_word, remaining);
-        if matches.is_empty() {
-            continue;
-        }
-        total += matches.len();
-        files.push(WorkspaceSearchFile {
-            path: raw_path,
-            matches,
-        });
-    }
-
-    Ok(WorkspaceSearchResult { files })
 }
 
 #[tauri::command]
@@ -2289,7 +2033,7 @@ pub fn run() {
             cli_binary_status,
             install_cli_binary,
             uninstall_cli_binary,
-            search_workspace,
+            workspace_search::search_workspace,
             diagnostics_status,
             open_diagnostics_log,
             record_diagnostics_event,
