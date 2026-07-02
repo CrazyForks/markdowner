@@ -163,6 +163,7 @@ test_build_uses_isolated_cargo_target_dir() {
 
   PATH="${temp_dir}/bin:${PATH}" \
     COMMAND_LOG="${log}" \
+    MARKDOWNER_DITTO_BIN="${temp_dir}/bin/ditto" \
     MARKDOWNER_INSTALL_PATH="${install_path}" \
     "${script}" >"${stdout}" 2>"${stderr}"
 
@@ -203,6 +204,7 @@ test_open_flag_launches_installed_bundle() {
 
   PATH="${temp_dir}/bin:${PATH}" \
     COMMAND_LOG="${log}" \
+    MARKDOWNER_DITTO_BIN="${temp_dir}/bin/ditto" \
     MARKDOWNER_INSTALL_PATH="${install_path}" \
     "${script}" --no-build --open >"${stdout}" 2>"${stderr}"
 
@@ -229,6 +231,7 @@ test_no_open_does_not_launch_installed_bundle() {
 
   PATH="${temp_dir}/bin:${PATH}" \
     COMMAND_LOG="${log}" \
+    MARKDOWNER_DITTO_BIN="${temp_dir}/bin/ditto" \
     MARKDOWNER_INSTALL_PATH="${install_path}" \
     "${script}" --no-build >"${stdout}" 2>"${stderr}"
 
@@ -341,6 +344,7 @@ test_pnpm_build_install_open_launches_installed_bundle() {
 
   PATH="${temp_dir}/bin:${PATH}" \
     COMMAND_LOG="${log}" \
+    MARKDOWNER_DITTO_BIN="${temp_dir}/bin/ditto" \
     MARKDOWNER_INSTALL_PATH="${install_path}" \
     run_pnpm --dir "${temp_dir}/project" build install open >"${stdout}" 2>"${stderr}"
 

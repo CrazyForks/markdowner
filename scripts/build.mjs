@@ -14,6 +14,7 @@ const defaultCargoTargetDir = path.join(projectRoot, 'target', 'tauri-build-and-
 const targetDirFingerprint = '.markdowner-source-root';
 const universalAppleDarwinTarget = 'universal-apple-darwin';
 const universalAppleDarwinRustTargets = ['aarch64-apple-darwin', 'x86_64-apple-darwin'];
+const defaultDittoCommand = '/usr/bin/ditto';
 
 function usage() {
   console.log(`Usage:
@@ -320,6 +321,10 @@ function runMaybeSudo(useSudo, command, args, options = {}) {
   return run(command, args, options);
 }
 
+function dittoCommand(env = process.env) {
+  return env.MARKDOWNER_DITTO_BIN ?? defaultDittoCommand;
+}
+
 function installBundle(options, env) {
   ensureMacOsInstallTarget();
 
@@ -349,10 +354,10 @@ function installBundle(options, env) {
   }
 
   console.log(`==> Installing to ${dest}`);
-  // Absolute path: a bare `ditto` can resolve to an unrelated user-installed
-  // tool earlier on PATH (e.g. ~/.local/bin/ditto), which fails the copy after
-  // the old bundle has already been removed.
-  runMaybeSudo(useSudo, '/usr/bin/ditto', [appBundle, dest]);
+  // Default to an absolute path: a bare `ditto` can resolve to an unrelated
+  // user-installed tool earlier on PATH (e.g. ~/.local/bin/ditto), which fails
+  // the copy after the old bundle has already been removed.
+  runMaybeSudo(useSudo, dittoCommand(env), [appBundle, dest]);
   runMaybeSudo(useSudo, 'xattr', ['-dr', 'com.apple.quarantine', dest], {
     allowFailure: true,
     stdio: 'ignore',
