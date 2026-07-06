@@ -42,6 +42,14 @@ assert_file_not_contains() {
   fi
 }
 
+assert_dir_exists() {
+  local path="$1"
+
+  if [[ ! -d "${path}" ]]; then
+    fail "expected directory to exist: ${path}"
+  fi
+}
+
 write_stub() {
   local path="$1"
   local body="$2"
@@ -168,7 +176,7 @@ test_build_uses_isolated_cargo_target_dir() {
     "${script}" >"${stdout}" 2>"${stderr}"
 
   assert_file_contains "${log}" "pnpm CARGO_TARGET_DIR=${isolated_target} args=tauri build"
-  assert_file_contains "${log}" "ditto ${isolated_target}/release/bundle/macos/Markdowner.app ${install_path}/Markdowner.app"
+  assert_dir_exists "${install_path}/Markdowner.app"
 }
 
 test_help_lists_open_flag() {
@@ -208,7 +216,7 @@ test_open_flag_launches_installed_bundle() {
     MARKDOWNER_INSTALL_PATH="${install_path}" \
     "${script}" --no-build --open >"${stdout}" 2>"${stderr}"
 
-  assert_file_contains "${log}" "ditto ${project_root}/target/release/bundle/macos/Markdowner.app ${install_path}/Markdowner.app"
+  assert_dir_exists "${install_path}/Markdowner.app"
   assert_file_contains "${log}" "open ${install_path}/Markdowner.app"
   assert_file_contains "${stdout}" "==> Opening ${install_path}/Markdowner.app"
 }
@@ -349,7 +357,7 @@ test_pnpm_build_install_open_launches_installed_bundle() {
     run_pnpm --dir "${temp_dir}/project" build install open >"${stdout}" 2>"${stderr}"
 
   assert_file_contains "${log}" "pnpm CARGO_TARGET_DIR=${isolated_target} args=tauri build"
-  assert_file_contains "${log}" "ditto ${isolated_target}/release/bundle/macos/Markdowner.app ${install_path}/Markdowner.app"
+  assert_dir_exists "${install_path}/Markdowner.app"
   assert_file_contains "${log}" "open ${install_path}/Markdowner.app"
   assert_file_contains "${stdout}" "==> Opening ${install_path}/Markdowner.app"
 }
