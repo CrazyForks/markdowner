@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_SETTINGS } from '@/lib/settings';
@@ -98,9 +98,12 @@ describe('SettingsPanel update section', () => {
   it('shows the diagnostics log path and opens the log file', async () => {
     renderPanel();
 
-    expect(await screen.findByTestId('settings-diagnostics-log-path')).toHaveTextContent(
-      '/Users/channprj/Library/Application Support/dev.chann.markdowner/logs/markdowner.log',
-    );
+    const logPath = await screen.findByTestId('settings-diagnostics-log-path');
+    await waitFor(() => {
+      expect(logPath).toHaveTextContent(
+        '/Users/channprj/Library/Application Support/dev.chann.markdowner/logs/markdowner.log',
+      );
+    });
 
     fireEvent.click(screen.getByRole('button', { name: /open log file/i }));
 

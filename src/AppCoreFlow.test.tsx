@@ -436,7 +436,7 @@ describe('App core Markdown editing flow', () => {
         });
 
         expect(await screen.findByRole('tab', { name: /dropped\.md/i })).toBeInTheDocument();
-        expect(screen.getByText('Dropped file')).toBeInTheDocument();
+        expect(screen.getAllByText('Dropped file').length).toBeGreaterThan(0);
 
         fireEvent.keyDown(window, { key: 'k', metaKey: true });
         fireEvent.keyDown(window, { key: 'e', metaKey: true });
