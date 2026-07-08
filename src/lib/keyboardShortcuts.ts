@@ -28,6 +28,9 @@ type ModeNumberShortcutEvent = CommandModifierEvent &
 type FocusToggleShortcutEvent = CommandModifierEvent &
   Pick<KeyboardEvent, 'altKey' | 'key' | 'shiftKey'>;
 
+type TerminalPanelShortcutEvent = CommandModifierEvent &
+  Pick<KeyboardEvent, 'altKey' | 'code' | 'defaultPrevented' | 'key' | 'shiftKey'>;
+
 type FocusToggleContext = {
   isSidebarOpen: boolean;
   sidebarPanel: 'files' | 'outline' | 'search';
@@ -110,6 +113,10 @@ export type FocusToggleShortcutResolution =
   | { kind: 'focusOutline' }
   | { kind: 'focusEditor' }
   | { kind: 'showExplorer' };
+
+export type TerminalPanelShortcutAction =
+  | { kind: 'closeTerminal' }
+  | { kind: 'toggleTerminal' };
 
 export function usesCommandModifier(event: CommandModifierEvent): boolean {
   return event.metaKey || event.ctrlKey;
@@ -296,6 +303,35 @@ export function resolveShellShortcutAction(
     return { kind: 'toggleTableViewMode' };
   }
   return { kind: 'none' };
+}
+
+export function resolveTerminalPanelShortcut(
+  event: TerminalPanelShortcutEvent,
+  context: { terminalOpen: boolean; focusInsideTerminal: boolean },
+): TerminalPanelShortcutAction | null {
+  if (event.defaultPrevented || event.altKey || event.shiftKey) {
+    return null;
+  }
+
+  if (
+    event.ctrlKey &&
+    !event.metaKey &&
+    (event.code === 'Backquote' || event.key === '`')
+  ) {
+    return { kind: 'toggleTerminal' };
+  }
+
+  if (
+    context.terminalOpen &&
+    context.focusInsideTerminal &&
+    event.metaKey &&
+    !event.ctrlKey &&
+    event.key.toLowerCase() === 'w'
+  ) {
+    return { kind: 'closeTerminal' };
+  }
+
+  return null;
 }
 
 type WordWrapShortcutEvent = CommandModifierEvent &

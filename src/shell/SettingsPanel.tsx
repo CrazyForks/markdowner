@@ -40,6 +40,8 @@ import {
   OUTLINE_FONT_SIZE_MIN,
   OUTLINE_ROW_SPACING_MAX,
   OUTLINE_ROW_SPACING_MIN,
+  TERMINAL_FONT_SIZE_MAX,
+  TERMINAL_FONT_SIZE_MIN,
   cliBinaryStatus,
   ctrlGLauncherStatus,
   diagnosticsStatus,
@@ -421,6 +423,7 @@ export function SettingsPanel({
   const outlineFontSizeValue = settings.outlineFontSize || DEFAULT_SETTINGS.outlineFontSize;
   const outlineRowSpacingValue =
     settings.outlineRowSpacing ?? DEFAULT_SETTINGS.outlineRowSpacing;
+  const terminalFontSizeValue = settings.terminalFontSize || DEFAULT_SETTINGS.terminalFontSize;
 
   return (
     <section
@@ -1355,6 +1358,66 @@ export function SettingsPanel({
                 </Button>
               </div>
             </div>
+          </div>
+        </div>
+
+        <Separator />
+        <div data-testid="settings-terminal-section" className={sectionGroupClass}>
+          <h4 className="text-sm font-medium leading-none">Terminal Preferences</h4>
+
+          <div className={inputFieldClass}>
+            <Label htmlFor="terminal-font-family" className="text-sm">Terminal Font Family</Label>
+            <Input
+              id="terminal-font-family"
+              type="text"
+              placeholder="System monospace"
+              className={inputControlClass}
+              value={settings.terminalFontFamily}
+              onChange={(event) =>
+                handleSettingChange('terminalFontFamily', event.target.value)
+              }
+            />
+          </div>
+
+          <div className={inputFieldClass}>
+            <Label htmlFor="terminal-font-size" className="text-sm">Terminal Font Size</Label>
+            <Input
+              id="terminal-font-size"
+              type="number"
+              min={TERMINAL_FONT_SIZE_MIN}
+              max={TERMINAL_FONT_SIZE_MAX}
+              className={inputControlClass}
+              value={terminalFontSizeValue}
+              onChange={(event) => {
+                handleBoundedNumberChange(
+                  'terminalFontSize',
+                  event.target.value,
+                  DEFAULT_SETTINGS.terminalFontSize,
+                  TERMINAL_FONT_SIZE_MIN,
+                  TERMINAL_FONT_SIZE_MAX,
+                );
+              }}
+            />
+          </div>
+
+          <div className={inputFieldClass}>
+            <Label htmlFor="terminal-default-path" className="flex flex-col items-start gap-0.5 text-left text-sm">
+              <span>Terminal Default Path</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                Empty = current document folder or workspace
+              </span>
+            </Label>
+            <Input
+              id="terminal-default-path"
+              aria-label="Terminal Default Path"
+              type="text"
+              placeholder="/path/to/project"
+              className={inputControlClass}
+              value={settings.terminalDefaultPath}
+              onChange={(event) =>
+                handleSettingChange('terminalDefaultPath', event.target.value)
+              }
+            />
           </div>
         </div>
 

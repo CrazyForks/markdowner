@@ -29,6 +29,7 @@ mod diagnostics;
 mod link_actions;
 mod pdf_export;
 mod shell_managed_block;
+mod terminal;
 mod updater;
 mod workspace_search;
 
@@ -2061,6 +2062,7 @@ pub fn run() {
             app.set_menu(menu)?;
             app.manage(state);
             app.manage(PendingCliWaits(Mutex::new(HashMap::new())));
+            app.manage(terminal::TerminalState::new());
             spawn_cli_wait_listener(app.handle().clone());
             Ok(())
         })
@@ -2108,6 +2110,10 @@ pub fn run() {
             complete_cli_wait,
             quit_app,
             hide_app_or_window,
+            terminal::terminal_start,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_close,
             link_actions::resolve_markdown_link,
             link_actions::open_external_url,
             link_actions::open_external_url_in_new_window,

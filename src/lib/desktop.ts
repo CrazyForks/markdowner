@@ -27,6 +27,22 @@ export interface AppSnapshot {
   lastError: string | null;
 }
 
+export const TERMINAL_OUTPUT_EVENT = 'markdowner://terminal-output';
+export const TERMINAL_EXIT_EVENT = 'markdowner://terminal-exit';
+
+export interface TerminalSession {
+  id: number;
+}
+
+export interface TerminalOutputEvent {
+  id: number;
+  data: string;
+}
+
+export interface TerminalExitEvent {
+  id: number;
+}
+
 export async function bootstrap() {
   return invoke<AppSnapshot>('bootstrap');
 }
@@ -309,4 +325,24 @@ export async function loadDraftBackups(): Promise<DraftBackupEntry[]> {
 
 export async function saveDraftBackups(entries: DraftBackupEntry[]): Promise<void> {
   await invoke('save_draft_backups', { entries });
+}
+
+export async function startTerminal(input: {
+  cwd: string | null;
+  cols: number;
+  rows: number;
+}): Promise<TerminalSession> {
+  return invoke<TerminalSession>('terminal_start', input);
+}
+
+export async function writeTerminal(id: number, data: string): Promise<void> {
+  await invoke<void>('terminal_write', { id, data });
+}
+
+export async function resizeTerminal(id: number, cols: number, rows: number): Promise<void> {
+  await invoke<void>('terminal_resize', { id, cols, rows });
+}
+
+export async function closeTerminal(id: number): Promise<void> {
+  await invoke<void>('terminal_close', { id });
 }

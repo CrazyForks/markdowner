@@ -67,6 +67,10 @@ vi.mock('./lib/desktop', () => ({
   saveDraftBackups: saveDraftBackupsMock,
 }));
 
+vi.mock('@/shell/TerminalPanel', () => ({
+  TerminalPanel: () => <section data-testid="terminal-panel">Terminal panel</section>,
+}));
+
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: openDialogMock,
   save: saveDialogMock,
@@ -504,7 +508,9 @@ describe('App core Markdown editing flow', () => {
     });
 
     expect(await screen.findByRole('tab', { name: /late-startup\.md/i })).toBeInTheDocument();
-    expect(screen.getByText('Late startup')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(openDocumentMock).toHaveBeenCalledWith(restoredPath);
+    });
     expect(saveOpenTabsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         openTabs: [restoredPath],

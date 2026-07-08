@@ -85,6 +85,9 @@ export interface Settings {
   codeBlockHighlight: boolean;
   codeBlockTheme: CodeBlockTheme;
   codeBlockThemeSync: boolean;
+  terminalFontFamily: string;
+  terminalFontSize: number;
+  terminalDefaultPath: string;
   updateCheckEnabled: boolean;
   lastUpdateCheckAt: number | null;
   dismissedUpdateVersion: string | null;
@@ -207,6 +210,9 @@ export const DEFAULT_SETTINGS: Settings = {
   codeBlockHighlight: true,
   codeBlockTheme: 'one-dark',
   codeBlockThemeSync: true,
+  terminalFontFamily: '',
+  terminalFontSize: 13,
+  terminalDefaultPath: '',
   updateCheckEnabled: true,
   lastUpdateCheckAt: null,
   dismissedUpdateVersion: null,
@@ -238,6 +244,8 @@ export const OUTLINE_ROW_SPACING_MIN = 0;
 export const OUTLINE_ROW_SPACING_MAX = 8;
 export const EDITOR_WRAP_COLUMN_MIN = 40;
 export const EDITOR_WRAP_COLUMN_MAX = 240;
+export const TERMINAL_FONT_SIZE_MIN = 8;
+export const TERMINAL_FONT_SIZE_MAX = 32;
 
 export type EditorFontSizeAdjustmentKind = 'increase' | 'decrease';
 
@@ -282,6 +290,17 @@ export function normalizeEditorFontSize(value: unknown): number {
   return Math.min(
     EDITOR_FONT_SIZE_MAX,
     Math.max(EDITOR_FONT_SIZE_MIN, Math.round(value)),
+  );
+}
+
+export function normalizeTerminalFontSize(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_SETTINGS.terminalFontSize;
+  }
+  return Math.min(
+    TERMINAL_FONT_SIZE_MAX,
+    Math.max(TERMINAL_FONT_SIZE_MIN, Math.round(parsed)),
   );
 }
 
@@ -399,6 +418,17 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   merged.codeBlockTheme = normalizeCodeBlockTheme(merged.codeBlockTheme);
   if (typeof merged.codeBlockThemeSync !== 'boolean') {
     merged.codeBlockThemeSync = DEFAULT_SETTINGS.codeBlockThemeSync;
+  }
+  if (typeof merged.terminalFontFamily !== 'string') {
+    merged.terminalFontFamily = DEFAULT_SETTINGS.terminalFontFamily;
+  } else {
+    merged.terminalFontFamily = merged.terminalFontFamily.trim();
+  }
+  merged.terminalFontSize = normalizeTerminalFontSize(merged.terminalFontSize);
+  if (typeof merged.terminalDefaultPath !== 'string') {
+    merged.terminalDefaultPath = DEFAULT_SETTINGS.terminalDefaultPath;
+  } else {
+    merged.terminalDefaultPath = merged.terminalDefaultPath.trim();
   }
   if (typeof merged.updateCheckEnabled !== 'boolean') {
     merged.updateCheckEnabled = DEFAULT_SETTINGS.updateCheckEnabled;

@@ -58,6 +58,7 @@ import { EditorArea } from '@/shell/EditorArea';
 import { FindReplaceBar } from '@/shell/FindReplaceBar';
 import { MarkdownPreviewPane } from '@/shell/MarkdownPreviewPane';
 import { Tabs } from '@/shell/Tabs';
+import { TerminalPanel } from '@/shell/TerminalPanel';
 import { TitleBar } from '@/shell/TitleBar';
 import {
   SideBar,
@@ -230,6 +231,7 @@ import {
 import { syncAnalytics } from './lib/analytics';
 import { resolveShellBindings } from './lib/keymap';
 import { moveTab, reorderTabByDrag } from './lib/tabs';
+import { resolveTerminalWorkingDirectory } from './lib/terminalModel';
 import { useUpdateCheck } from './lib/useUpdateCheck';
 import {
   MARKDOWN_CONTENT_SCOPE_CLASS,
@@ -258,6 +260,7 @@ import {
   resolveFocusToggleShortcut,
   resolveModeChord,
   resolveModeNumberShortcut,
+  resolveTerminalPanelShortcut,
   resolveHistoryNavShortcut,
   resolveShellShortcutAction,
   resolveTabShortcut,
@@ -477,6 +480,8 @@ export default function App() {
   const [manualUpdateCheckInfo, setManualUpdateCheckInfo] = useState<UpdateInfo | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [terminalHasFocus, setTerminalHasFocus] = useState(false);
   const [defaultMdHandler, setDefaultMdHandlerStatus] =
     useState<DefaultMdHandlerStatus | null>(null);
   const [defaultAppPromptOpen, setDefaultAppPromptOpen] = useState(false);
@@ -1097,6 +1102,16 @@ export default function App() {
     const active = document.activeElement as HTMLElement | null;
     return Boolean(active?.closest('[data-search-root]'));
   };
+
+  const isFocusInsideTerminal = () => {
+    const active = document.activeElement as HTMLElement | null;
+    return Boolean(active?.closest('[data-terminal-panel]'));
+  };
+
+  const closeTerminalPanel = useCallback(() => {
+    setIsTerminalOpen(false);
+    setTerminalHasFocus(false);
+  }, []);
 
   const handleOpenOutlinePanel = useEffectEvent(() => {
     applySidebarPanelState('outline', 'toggle');
@@ -2447,6 +2462,15 @@ export default function App() {
     [collapsedFolderKeys, filteredWorkspaceTree, filteringWorkspace],
   );
   const outlinePanelSizing = resolveOutlinePanelSizing(settings);
+  const terminalWorkingDirectory = useMemo(
+    () =>
+      resolveTerminalWorkingDirectory({
+        configuredPath: settings.terminalDefaultPath,
+        workspaceRoot: snapshot.rootDir,
+        activeDocumentPath: snapshot.activeDocumentPath,
+      }),
+    [settings.terminalDefaultPath, snapshot.rootDir, snapshot.activeDocumentPath],
+  );
   const searchResultRowCount = useMemo(
     () => searchResults.reduce((count, file) => count + 1 + file.matches.length, 0),
     [searchResults],
@@ -4458,6 +4482,24 @@ export default function App() {
         return;
       }
 
+      const terminalShortcutAction = resolveTerminalPanelShortcut(event, {
+        terminalOpen: isTerminalOpen,
+        focusInsideTerminal: terminalHasFocus || isFocusInsideTerminal(),
+      });
+      if (terminalShortcutAction) {
+        event.preventDefault();
+        if (terminalShortcutAction.kind === 'closeTerminal') {
+          closeTerminalPanel();
+        } else {
+          setIsTerminalOpen((value) => {
+            const next = !value;
+            if (!next) setTerminalHasFocus(false);
+            return next;
+          });
+        }
+        return;
+      }
+
       const closeFindShortcutAction = resolveFindShortcutAction(event, {
         activeDocumentOpen,
         findReplaceOpen: isFindReplaceOpenRef.current,
@@ -4721,7 +4763,19 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyboardShortcut);
       clearChordPrefix();
     };
-  }, [busy, isSidebarOpen, localDraft, sidebarPanel, snapshot, settings, tabs, activeTabId]);
+  }, [
+    activeTabId,
+    busy,
+    closeTerminalPanel,
+    isSidebarOpen,
+    isTerminalOpen,
+    localDraft,
+    settings,
+    sidebarPanel,
+    snapshot,
+    tabs,
+    terminalHasFocus,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5308,6 +5362,15 @@ export default function App() {
           />
         }
       />
+      {isTerminalOpen ? (
+        <TerminalPanel
+          fontFamily={settings.terminalFontFamily}
+          fontSize={settings.terminalFontSize || DEFAULT_SETTINGS.terminalFontSize}
+          onFocusChange={setTerminalHasFocus}
+          onRequestClose={closeTerminalPanel}
+          workingDirectory={terminalWorkingDirectory}
+        />
+      ) : null}
       </div>
       </div>
       </div>

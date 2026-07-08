@@ -12,6 +12,7 @@ import {
   resolveShellShortcutAction,
   resolveTabShortcut,
   resolveTabShortcutAction,
+  resolveTerminalPanelShortcut,
   resolveWordWrapShortcut,
   usesCommandModifier,
 } from './keyboardShortcuts';
@@ -298,6 +299,65 @@ describe('resolveShellShortcutAction', () => {
         context,
       ),
     ).toEqual({ kind: 'none' });
+  });
+});
+
+describe('resolveTerminalPanelShortcut', () => {
+  it('toggles the terminal panel with Ctrl+Backquote', () => {
+    expect(
+      resolveTerminalPanelShortcut(
+        shortcutEvent({ code: 'Backquote', key: '`', ctrlKey: true }),
+        { terminalOpen: false, focusInsideTerminal: false },
+      ),
+    ).toEqual({ kind: 'toggleTerminal' });
+    expect(
+      resolveTerminalPanelShortcut(
+        shortcutEvent({ code: 'Backquote', key: '`', ctrlKey: true }),
+        { terminalOpen: true, focusInsideTerminal: true },
+      ),
+    ).toEqual({ kind: 'toggleTerminal' });
+  });
+
+  it('closes the terminal panel with Cmd+W only while terminal focus is active', () => {
+    expect(
+      resolveTerminalPanelShortcut(
+        shortcutEvent({ key: 'w', metaKey: true }),
+        { terminalOpen: true, focusInsideTerminal: true },
+      ),
+    ).toEqual({ kind: 'closeTerminal' });
+    expect(
+      resolveTerminalPanelShortcut(
+        shortcutEvent({ key: 'w', metaKey: true }),
+        { terminalOpen: true, focusInsideTerminal: false },
+      ),
+    ).toBeNull();
+    expect(
+      resolveTerminalPanelShortcut(
+        shortcutEvent({ key: 'w', metaKey: true }),
+        { terminalOpen: false, focusInsideTerminal: true },
+      ),
+    ).toBeNull();
+  });
+
+  it('ignores shifted, option-modified, or already-prevented terminal shortcuts', () => {
+    expect(
+      resolveTerminalPanelShortcut(
+        shortcutEvent({ code: 'Backquote', ctrlKey: true, shiftKey: true }),
+        { terminalOpen: false, focusInsideTerminal: false },
+      ),
+    ).toBeNull();
+    expect(
+      resolveTerminalPanelShortcut(
+        shortcutEvent({ code: 'Backquote', ctrlKey: true, altKey: true }),
+        { terminalOpen: false, focusInsideTerminal: false },
+      ),
+    ).toBeNull();
+    expect(
+      resolveTerminalPanelShortcut(
+        shortcutEvent({ code: 'Backquote', ctrlKey: true, defaultPrevented: true }),
+        { terminalOpen: false, focusInsideTerminal: false },
+      ),
+    ).toBeNull();
   });
 });
 

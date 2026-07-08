@@ -122,4 +122,30 @@ describe('SettingsPanel update section', () => {
       'https://github.com/channprj/markdowner/discussions',
     );
   });
+
+  it('renders terminal preferences and persists edits', () => {
+    const onSettingsChange = vi.fn();
+    renderPanel({ onSettingsChange });
+
+    fireEvent.change(screen.getByLabelText(/^terminal font family$/i), {
+      target: { value: 'JetBrains Mono' },
+    });
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalFontFamily: 'JetBrains Mono' }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/^terminal font size$/i), {
+      target: { value: '16' },
+    });
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalFontSize: 16 }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/^terminal default path$/i), {
+      target: { value: '/tmp/project' },
+    });
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalDefaultPath: '/tmp/project' }),
+    );
+  });
 });

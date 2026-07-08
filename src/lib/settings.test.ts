@@ -6,10 +6,13 @@ import {
   DEFAULT_SETTINGS,
   EDITOR_WRAP_COLUMN_MAX,
   EDITOR_WRAP_COLUMN_MIN,
+  TERMINAL_FONT_SIZE_MAX,
+  TERMINAL_FONT_SIZE_MIN,
   codeBlockThemeForThemeKind,
   getChangedSettingsKeys,
   loadSettings,
   normalizeEditorFontSize,
+  normalizeTerminalFontSize,
   normalizeWrapColumn,
   resolveEditorFontSizeAdjustment,
   resolveOutlinePanelSizing,
@@ -107,6 +110,46 @@ describe('settings numeric display helpers', () => {
       outlineFontSize: DEFAULT_SETTINGS.outlineFontSize,
       outlineRowSpacing: 8,
     });
+  });
+});
+
+describe('terminal settings', () => {
+  it('defaults terminal appearance and cwd preferences', () => {
+    expect(DEFAULT_SETTINGS.terminalFontFamily).toBe('');
+    expect(DEFAULT_SETTINGS.terminalFontSize).toBe(13);
+    expect(DEFAULT_SETTINGS.terminalDefaultPath).toBe('');
+  });
+
+  it('normalizes terminal font size with persisted bounds', () => {
+    expect(normalizeTerminalFontSize(Number.NaN)).toBe(DEFAULT_SETTINGS.terminalFontSize);
+    expect(normalizeTerminalFontSize(4)).toBe(TERMINAL_FONT_SIZE_MIN);
+    expect(normalizeTerminalFontSize(72)).toBe(TERMINAL_FONT_SIZE_MAX);
+    expect(normalizeTerminalFontSize(14.6)).toBe(15);
+  });
+
+  it('trims persisted terminal fields and falls back on malformed values', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      terminalFontFamily: '  JetBrains Mono  ',
+      terminalFontSize: 'large',
+      terminalDefaultPath: '  /Volumes/990EVO+/workspace/chann  ',
+    });
+
+    const settings = await loadSettings();
+
+    expect(settings.terminalFontFamily).toBe('JetBrains Mono');
+    expect(settings.terminalFontSize).toBe(DEFAULT_SETTINGS.terminalFontSize);
+    expect(settings.terminalDefaultPath).toBe('/Volumes/990EVO+/workspace/chann');
+  });
+
+  it('tracks terminal preference edits as changed settings', () => {
+    expect(
+      getChangedSettingsKeys(DEFAULT_SETTINGS, {
+        ...DEFAULT_SETTINGS,
+        terminalFontSize: DEFAULT_SETTINGS.terminalFontSize + 1,
+        terminalDefaultPath: '/tmp/project',
+      }),
+    ).toEqual(['terminalFontSize', 'terminalDefaultPath']);
   });
 });
 

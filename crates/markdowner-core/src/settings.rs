@@ -33,6 +33,9 @@ pub struct Settings {
     pub code_block_highlight: bool,
     pub code_block_theme: String,
     pub code_block_theme_sync: bool,
+    pub terminal_font_family: String,
+    pub terminal_font_size: u32,
+    pub terminal_default_path: String,
     pub update_check_enabled: bool,
     pub last_update_check_at: Option<u64>,
     pub dismissed_update_version: Option<String>,
@@ -73,6 +76,9 @@ impl Default for Settings {
             code_block_highlight: true,
             code_block_theme: "one-dark".to_string(),
             code_block_theme_sync: true,
+            terminal_font_family: String::new(),
+            terminal_font_size: 13,
+            terminal_default_path: String::new(),
             update_check_enabled: true,
             last_update_check_at: None,
             dismissed_update_version: None,
@@ -328,6 +334,30 @@ mod tests {
         assert_eq!(parsed.ignore_list, vec![".diffs", ".claude"]);
         let value = serde_json::to_value(&parsed).expect("serialize settings");
         assert_eq!(value["ignoreList"], serde_json::json!([".diffs", ".claude"]));
+    }
+
+    #[test]
+    fn terminal_preferences_default_and_round_trip() {
+        let legacy = r#"{"autoSave":true,"editorFontSize":16}"#;
+        let parsed: Settings = serde_json::from_str(legacy).expect("legacy settings parse");
+        assert_eq!(parsed.terminal_font_family, "");
+        assert_eq!(parsed.terminal_font_size, 13);
+        assert_eq!(parsed.terminal_default_path, "");
+
+        let json = serde_json::json!({
+            "terminalFontFamily": "JetBrains Mono",
+            "terminalFontSize": 16_u32,
+            "terminalDefaultPath": "/tmp/project"
+        });
+        let parsed: Settings = serde_json::from_value(json).expect("terminal settings parse");
+        assert_eq!(parsed.terminal_font_family, "JetBrains Mono");
+        assert_eq!(parsed.terminal_font_size, 16);
+        assert_eq!(parsed.terminal_default_path, "/tmp/project");
+
+        let value = serde_json::to_value(&parsed).expect("serialize settings");
+        assert_eq!(value["terminalFontFamily"], "JetBrains Mono");
+        assert_eq!(value["terminalFontSize"], 16);
+        assert_eq!(value["terminalDefaultPath"], "/tmp/project");
     }
 
     #[test]

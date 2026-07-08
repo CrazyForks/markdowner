@@ -127,6 +127,26 @@ vi.mock('./lib/desktop', () => ({
   exportTextFile: exportTextFileMock,
 }));
 
+vi.mock('@/shell/TerminalPanel', () => ({
+  TerminalPanel: ({
+    onFocusChange,
+    workingDirectory,
+  }: {
+    onFocusChange?: (focused: boolean) => void;
+    workingDirectory?: string | null;
+  }) => (
+    <section
+      data-testid="terminal-panel"
+      data-working-directory={workingDirectory ?? ''}
+      tabIndex={0}
+      onFocus={() => onFocusChange?.(true)}
+      onBlur={() => onFocusChange?.(false)}
+    >
+      Terminal panel
+    </section>
+  ),
+}));
+
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: openDialogMock,
   save: saveDialogMock,
@@ -337,6 +357,7 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
     markdown,
     lastSelection: null,
   };
+  const mockSelectionAnchor = { parent: { type: { name: 'paragraph' } } };
 
   const rebuildDoc = () => ({
     content: { size: editor.markdown.length + 2 },
@@ -416,6 +437,7 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
       from: segments[0]?.from ?? 0,
       to: segments[0]?.from ?? 0,
       head: segments[0]?.from ?? 0,
+      $from: mockSelectionAnchor,
     },
     tr: transaction,
   };
@@ -453,6 +475,7 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
         to: next.to,
         anchor: next.from,
         head: next.to,
+        $from: mockSelectionAnchor,
       };
       return true;
     }),
@@ -3977,7 +4000,12 @@ describe('App recent documents', () => {
 
   it('keeps the keyboard cursor at the WYSIWYG selection head when switching to Editor with Option+2', async () => {
     const editor = createMockTiptapEditor('# Alpha', [{ text: 'Alpha', from: 2 }]);
-    editor.state.selection = { from: 2, to: 7, head: 7 };
+    editor.state.selection = {
+      from: 2,
+      to: 7,
+      head: 7,
+      $from: { parent: { type: { name: 'paragraph' } } },
+    };
     tiptapMockState.editor = editor;
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
@@ -4001,6 +4029,15 @@ describe('App recent documents', () => {
     render(<App />);
 
     await screen.findByRole('tab', { name: /meeting-notes\.md/i });
+    editor.state.selection = {
+      from: 2,
+      to: 7,
+      head: 7,
+      $from: { parent: { type: { name: 'paragraph' } } },
+    };
+    act(() => {
+      tiptapMockState.lastOptions?.onSelectionUpdate?.({ editor });
+    });
 
     fireEvent.keyDown(window, { key: '™', code: 'Digit2', altKey: true });
 
@@ -6437,6 +6474,9 @@ describe('App recent documents', () => {
           codeBlockHighlight: true,
           codeBlockTheme: 'one-dark',
           codeBlockThemeSync: true,
+          terminalFontFamily: '',
+          terminalFontSize: 13,
+          terminalDefaultPath: '',
           updateCheckEnabled: true,
           lastUpdateCheckAt: null,
           dismissedUpdateVersion: null,
@@ -6870,7 +6910,7 @@ describe('App recent documents', () => {
     const panel = await screen.findByTestId('settings-panel');
     const body = within(panel).getByTestId('settings-panel-body');
     const fontFamilyRow = within(panel).getByTestId('settings-field-font-family');
-    const fontFamilyInput = within(panel).getByLabelText(/font family/i);
+    const fontFamilyInput = within(panel).getByLabelText(/^font family$/i);
     const defaultModeToggle = within(panel).getByTestId('settings-default-mode-toggle');
     const pdfPaperSizeToggle = within(panel).getByTestId('settings-pdf-paper-size-toggle');
 
@@ -7049,7 +7089,7 @@ describe('App recent documents', () => {
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
     const dialog = await screen.findByTestId('settings-panel');
-    const fontFamilyInput = within(dialog).getByLabelText(/font family/i);
+    const fontFamilyInput = within(dialog).getByLabelText(/^font family$/i);
 
     fireEvent.change(fontFamilyInput, { target: { value: 'Fira Code' } });
 
@@ -7778,6 +7818,9 @@ describe('App recent documents', () => {
           codeBlockHighlight: true,
           codeBlockTheme: 'one-dark',
           codeBlockThemeSync: true,
+          terminalFontFamily: '',
+          terminalFontSize: 13,
+          terminalDefaultPath: '',
           updateCheckEnabled: true,
           lastUpdateCheckAt: null,
           dismissedUpdateVersion: null,
@@ -7789,7 +7832,7 @@ describe('App recent documents', () => {
     });
 
     expect(within(dialog).getByLabelText(/^font size$/i)).toHaveValue(14);
-    expect(within(dialog).getByLabelText(/font family/i)).toHaveValue('');
+    expect(within(dialog).getByLabelText(/^font family$/i)).toHaveValue('');
   });
 
   it('shows the update banner when a manual update check is already on the latest version', async () => {
@@ -8278,6 +8321,80 @@ describe('App recent documents', () => {
     expect(screen.getByRole('button', { name: /^new file$/i })).toBeInTheDocument();
     expect(destroyWindowMock).not.toHaveBeenCalled();
     expect(messageMock).not.toHaveBeenCalled();
+  });
+
+  it('toggles the bottom terminal panel with Ctrl+Backquote', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('button', { name: /^new file$/i });
+
+    fireEvent.keyDown(window, { code: 'Backquote', key: '`', ctrlKey: true });
+
+    expect(await screen.findByTestId('terminal-panel')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { code: 'Backquote', key: '`', ctrlKey: true });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('terminal-panel')).toBeNull();
+    });
+  });
+
+  it('starts the terminal from the active document folder before the workspace root', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        rootDir: '/tmp/project',
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/docs/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('textbox', { name: /source editor/i });
+
+    fireEvent.keyDown(window, { code: 'Backquote', key: '`', ctrlKey: true });
+
+    expect(await screen.findByTestId('terminal-panel')).toHaveAttribute(
+      'data-working-directory',
+      '/tmp/project/docs',
+    );
+  });
+
+  it('closes the terminal panel with Cmd+W while terminal focus is active', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('textbox', { name: /source editor/i });
+
+    fireEvent.keyDown(window, { code: 'Backquote', key: '`', ctrlKey: true });
+    const terminalPanel = await screen.findByTestId('terminal-panel');
+    fireEvent.focus(terminalPanel);
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('terminal-panel')).toBeNull();
+    });
+    expect(screen.getByRole('tab', { name: /meeting-notes\.md/i })).toBeInTheDocument();
+    expect(destroyWindowMock).not.toHaveBeenCalled();
   });
 
   it('reopens the most recently closed tab with Cmd+Shift+T', async () => {
