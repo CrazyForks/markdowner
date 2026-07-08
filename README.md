@@ -1,23 +1,16 @@
 # Markdowner
 
-<p align="center">
-  <img src="./assets/images/og.png" alt="Markdowner - The Markdown editor built for you and your coding agent." width="100%">
-</p>
+![Markdowner - The Markdown editor built for you and your coding agent.](./assets/images/og.png)
 
-<p align="center">
-  <a href="https://github.com/channprj/markdowner/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/channprj/markdowner?label=release"></a>
-  <a href="https://github.com/channprj/markdowner/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/channprj/markdowner/total?label=downloads"></a>
-  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-2ea44f"></a>
-  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS-111111">
-</p>
+![Release](https://img.shields.io/github/v/release/channprj/markdowner?label=release)
 
-<p align="center">
-  <a href="https://markdowner.chann.dev">Website</a>
-  ·
-  <a href="https://github.com/channprj/markdowner/releases/latest">Download</a>
-  ·
-  <a href="./README.ko.md">Korean README</a>
-</p>
+![Downloads](https://img.shields.io/github/downloads/channprj/markdowner/total?label=downloads)
+
+![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f)
+
+![Platform](https://img.shields.io/badge/platform-macOS-111111)
+
+[Website](https://markdowner.chann.dev) · [Download](https://github.com/channprj/markdowner/releases/latest) · [Korean README](./README.ko.md)
 
 Markdowner is a local-first Markdown editor for macOS, built for people who want a polished writing surface without giving up plain `.md` files. It combines WYSIWYG editing, source editing, workspace navigation, and a Rust document core that keeps Markdown as the source of truth.
 
@@ -70,17 +63,17 @@ The installer downloads the latest matching `.dmg` asset, mounts it, copies `Mar
 
 Useful shortcuts:
 
-| Action | Shortcut |
-| --- | --- |
-| Quick Open | `Cmd+P` |
-| Command Palette | `Cmd+Shift+P` |
-| Find in Current File | `Cmd+F` |
-| Search in Workspace | `Cmd+Shift+F` |
-| Toggle Sidebar | `Cmd+Shift+B` |
-| Toggle Outline | `Cmd+Shift+D` |
-| Toggle Focus Mode | `Cmd+Shift+J` |
+| Action                 | Shortcut      |
+| ---------------------- | ------------- |
+| Quick Open             | `Cmd+P`       |
+| Command Palette        | `Cmd+Shift+P` |
+| Find in Current File   | `Cmd+F`       |
+| Search in Workspace    | `Cmd+Shift+F` |
+| Toggle Sidebar         | `Cmd+Shift+B` |
+| Toggle Outline         | `Cmd+Shift+D` |
+| Toggle Focus Mode      | `Cmd+Shift+J` |
 | Toggle Typewriter Mode | `Cmd+Shift+Y` |
-| Toggle Word Wrap | `Option+Z` |
+| Toggle Word Wrap       | `Option+Z`    |
 
 ## CLI Integration
 
