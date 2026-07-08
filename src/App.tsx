@@ -5142,6 +5142,10 @@ export default function App() {
     hasActiveDocumentPath: snapshot.activeDocumentPath != null,
     hasWorkspaceRoot: snapshot.rootDir != null,
     terminalOpen: isTerminalOpen,
+    updateAvailable: updateCheck.info?.available ?? false,
+    updateChecking: updateCheck.checking,
+    updateInstalling: updateCheck.installing,
+    latestUpdateVersion: updateCheck.info?.available ? updateCheck.info.latestVersion : null,
     canGoBack: visitHistory.canGoBack(navHistory),
     canGoForward: visitHistory.canGoForward(navHistory),
     settings,
@@ -5213,6 +5217,8 @@ export default function App() {
           }
         })();
       },
+      checkForUpdates: () => void updateCheck.checkNow(),
+      installLatestUpdate: () => void updateCheck.install(),
       openDocumentStats: () => setIsDocumentStatsOpen(true),
       setTheme: (themeKind) => void handleSetTheme(themeKind),
       followSystemTheme: () => void handleFollowSystemTheme(),

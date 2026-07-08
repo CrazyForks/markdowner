@@ -37,6 +37,8 @@ export type CommandPaletteActions = {
   openSettings: () => void;
   openKeymap: () => void;
   installCliLauncher: () => void;
+  checkForUpdates: () => void;
+  installLatestUpdate: () => void;
   openDocumentStats: () => void;
   setTheme: (themeKind: ThemeKind) => void;
   followSystemTheme: () => void;
@@ -54,6 +56,10 @@ type BuildCommandPaletteCommandsInput = {
   /** A workspace/project root folder is open. */
   hasWorkspaceRoot?: boolean;
   terminalOpen?: boolean;
+  updateAvailable?: boolean;
+  updateChecking?: boolean;
+  updateInstalling?: boolean;
+  latestUpdateVersion?: string | null;
   canGoBack: boolean;
   canGoForward: boolean;
   settings: Settings;
@@ -69,10 +75,20 @@ export function buildCommandPaletteCommands(
     hasActiveDocumentPath = false,
     hasWorkspaceRoot = false,
     terminalOpen = false,
+    updateAvailable = false,
+    updateChecking = false,
+    updateInstalling = false,
+    latestUpdateVersion = null,
     canGoBack,
     canGoForward,
     settings,
   } = input;
+  const latestUpdateLabel =
+    updateInstalling
+      ? 'Installing Latest Version…'
+      : updateAvailable && latestUpdateVersion
+        ? `Update to Latest Version (v${latestUpdateVersion})`
+        : 'Update to Latest Version';
 
   return [
     {
@@ -328,6 +344,20 @@ export function buildCommandPaletteCommands(
       category: 'Preferences',
       label: 'Install Markdowner in PATH',
       run: actions.installCliLauncher,
+    },
+    {
+      id: 'app.checkForUpdates',
+      category: 'Preferences',
+      label: updateChecking ? 'Checking for Updates…' : 'Check for Updates',
+      disabled: updateChecking,
+      run: actions.checkForUpdates,
+    },
+    {
+      id: 'app.installLatestUpdate',
+      category: 'Preferences',
+      label: latestUpdateLabel,
+      disabled: !updateAvailable || updateInstalling,
+      run: actions.installLatestUpdate,
     },
     {
       id: 'app.documentStats',

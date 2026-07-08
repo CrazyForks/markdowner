@@ -37,6 +37,8 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     openSettings: vi.fn(),
     openKeymap: vi.fn(),
     installCliLauncher: vi.fn(),
+    checkForUpdates: vi.fn(),
+    installLatestUpdate: vi.fn(),
     openDocumentStats: vi.fn(),
     setTheme: vi.fn(),
     followSystemTheme: vi.fn(),
@@ -101,6 +103,8 @@ describe('buildCommandPaletteCommands', () => {
       'app.settings',
       'app.openKeymap',
       'app.installCliLauncher',
+      'app.checkForUpdates',
+      'app.installLatestUpdate',
       'app.documentStats',
       'preferences.resetDefaults',
       'theme.light',
@@ -322,6 +326,68 @@ describe('buildCommandPaletteCommands', () => {
     });
     expect(commands.find((c) => c.id === 'preferences.toggleFocusMode')?.shortcut).toBe('⌘⇧J');
     expect(commands.find((c) => c.id === 'preferences.toggleWordWrap')?.shortcut).toBe('⌥Z');
+  });
+
+  it('wires update check and latest-version install commands', () => {
+    const checkForUpdates = vi.fn();
+    const installLatestUpdate = vi.fn();
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      updateAvailable: true,
+      latestUpdateVersion: '0.260709.0',
+      settings: settings(),
+      actions: actions({ checkForUpdates, installLatestUpdate }),
+    });
+
+    const check = commands.find((command) => command.id === 'app.checkForUpdates');
+    expect(check?.category).toBe('Preferences');
+    expect(check?.label).toBe('Check for Updates');
+    expect(check?.disabled).toBe(false);
+    check?.run?.();
+    expect(checkForUpdates).toHaveBeenCalledTimes(1);
+
+    const install = commands.find((command) => command.id === 'app.installLatestUpdate');
+    expect(install?.category).toBe('Preferences');
+    expect(install?.label).toBe('Update to Latest Version (v0.260709.0)');
+    expect(install?.disabled).toBe(false);
+    install?.run?.();
+    expect(installLatestUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables update commands while unavailable or busy', () => {
+    const unavailable = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      updateAvailable: false,
+      settings: settings(),
+      actions: actions(),
+    });
+    expect(unavailable.find((command) => command.id === 'app.installLatestUpdate')?.label)
+      .toBe('Update to Latest Version');
+    expect(unavailable.find((command) => command.id === 'app.installLatestUpdate')?.disabled)
+      .toBe(true);
+
+    const busy = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      updateAvailable: true,
+      updateChecking: true,
+      updateInstalling: true,
+      settings: settings(),
+      actions: actions(),
+    });
+    expect(busy.find((command) => command.id === 'app.checkForUpdates')?.label)
+      .toBe('Checking for Updates…');
+    expect(busy.find((command) => command.id === 'app.checkForUpdates')?.disabled)
+      .toBe(true);
+    expect(busy.find((command) => command.id === 'app.installLatestUpdate')?.label)
+      .toBe('Installing Latest Version…');
+    expect(busy.find((command) => command.id === 'app.installLatestUpdate')?.disabled)
+      .toBe(true);
   });
 
   it('wires editor and terminal commands for the command palette', () => {

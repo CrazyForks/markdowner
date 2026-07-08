@@ -7908,6 +7908,107 @@ describe('App recent documents', () => {
     expect(within(banner).getByText(/already on the latest version/i)).toBeInTheDocument();
   });
 
+  it('runs a manual update check from the Command Palette', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          updateCheckEnabled: true,
+          lastUpdateCheckAt: null,
+          dismissedUpdateVersion: null,
+        };
+      }
+      if (command === 'check_for_update') {
+        return {
+          available: false,
+          currentVersion: '0.260708.2',
+          latestVersion: '0.260708.2',
+          dmgUrl: null,
+          releaseUrl: 'https://example.com/release',
+          notes: '',
+        };
+      }
+      return undefined;
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(dialog).getByRole('textbox', { name: /command palette search/i });
+    fireEvent.change(input, { target: { value: 'check updates' } });
+    fireEvent.click(within(dialog).getByRole('option', { name: /check for updates/i }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('check_for_update');
+    });
+    const banner = await screen.findByTestId('update-banner');
+    expect(within(banner).getByText(/already on the latest version/i)).toBeInTheDocument();
+  });
+
+  it('downloads and installs the latest update from the Command Palette', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          autoSave: false,
+          editorFontSize: 14,
+          editorFontFamily: '',
+          editorLineWrap: true,
+          updateCheckEnabled: true,
+          lastUpdateCheckAt: null,
+          dismissedUpdateVersion: null,
+        };
+      }
+      if (command === 'check_for_update') {
+        return {
+          available: true,
+          currentVersion: '0.260708.2',
+          latestVersion: '0.260709.0',
+          dmgUrl: 'https://example.com/Markdowner_0.260709.0_universal.dmg',
+          releaseUrl: 'https://example.com/release',
+          notes: '',
+        };
+      }
+      return undefined;
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+
+    const checkDialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const checkInput = within(checkDialog).getByRole('textbox', { name: /command palette search/i });
+    fireEvent.change(checkInput, { target: { value: 'check updates' } });
+    fireEvent.click(within(checkDialog).getByRole('option', { name: /check for updates/i }));
+
+    await screen.findByTestId('update-banner');
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+
+    const installDialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const installInput = within(installDialog).getByRole('textbox', { name: /command palette search/i });
+    fireEvent.change(installInput, { target: { value: 'latest version' } });
+    fireEvent.click(
+      within(installDialog).getByRole('option', {
+        name: /update to latest version \(v0\.260709\.0\)/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('download_and_install_update', {
+        dmgUrl: 'https://example.com/Markdowner_0.260709.0_universal.dmg',
+      });
+    });
+  });
+
   it('exposes a descriptive tooltip on the Settings dialog Reset to Defaults button', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
