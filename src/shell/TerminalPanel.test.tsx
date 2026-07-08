@@ -221,6 +221,52 @@ describe('TerminalPanel', () => {
     expect(onRequestFocusEditor).toHaveBeenCalledTimes(1);
   });
 
+  it('translates macOS text editing shortcuts into terminal input', async () => {
+    render(
+      <TerminalPanel
+        fontFamily=""
+        fontSize={13}
+        workingDirectory={null}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(startTerminalMock).toHaveBeenCalled();
+    });
+    const terminal = terminalInstances[0];
+    writeTerminalMock.mockClear();
+
+    const cases: Array<{
+      label: string;
+      event: KeyboardEventInit;
+      sequence: string;
+    }> = [
+      { label: 'Option+Left', event: { key: 'ArrowLeft', altKey: true }, sequence: '\x1bb' },
+      { label: 'Option+Right', event: { key: 'ArrowRight', altKey: true }, sequence: '\x1bf' },
+      { label: 'Option+Up', event: { key: 'ArrowUp', altKey: true }, sequence: '\x1b[1;3A' },
+      { label: 'Option+Down', event: { key: 'ArrowDown', altKey: true }, sequence: '\x1b[1;3B' },
+      { label: 'Option+Backspace', event: { key: 'Backspace', altKey: true }, sequence: '\x17' },
+      { label: 'Option+Delete', event: { key: 'Delete', altKey: true }, sequence: '\x1bd' },
+      { label: 'Command+Left', event: { key: 'ArrowLeft', metaKey: true }, sequence: '\x01' },
+      { label: 'Command+Right', event: { key: 'ArrowRight', metaKey: true }, sequence: '\x05' },
+      { label: 'Command+Up', event: { key: 'ArrowUp', metaKey: true }, sequence: '\x01' },
+      { label: 'Command+Down', event: { key: 'ArrowDown', metaKey: true }, sequence: '\x05' },
+      { label: 'Command+Backspace', event: { key: 'Backspace', metaKey: true }, sequence: '\x15' },
+      { label: 'Command+Delete', event: { key: 'Delete', metaKey: true }, sequence: '\x0b' },
+    ];
+
+    cases.forEach(({ label, event: eventInit, sequence }, index) => {
+      const event = new KeyboardEvent('keydown', eventInit);
+      const preventDefault = vi.spyOn(event, 'preventDefault');
+      const stopPropagation = vi.spyOn(event, 'stopPropagation');
+
+      expect(terminal.keyHandler?.(event), label).toBe(false);
+      expect(preventDefault, label).toHaveBeenCalled();
+      expect(stopPropagation, label).toHaveBeenCalled();
+      expect(writeTerminalMock, label).toHaveBeenNthCalledWith(index + 1, 7, sequence);
+    });
+  });
+
   it('renders a draggable terminal resize separator', async () => {
     const onResizePointerDown = vi.fn();
     render(
@@ -238,12 +284,15 @@ describe('TerminalPanel', () => {
     });
 
     const separator = screen.getByRole('separator', { name: /resize terminal/i });
+    const panel = screen.getByTestId('terminal-panel');
     expect(separator).toHaveAttribute('aria-orientation', 'horizontal');
     expect(separator).toHaveAttribute('aria-valuenow', '320');
     expect(separator).toHaveAttribute('aria-valuemin', '160');
     expect(separator).toHaveAttribute('aria-valuemax', '720');
     expect(separator).toHaveClass('cursor-row-resize');
     expect(separator).toHaveStyle({ touchAction: 'none' });
+    expect(panel).not.toHaveClass('border-t');
+    expect(separator.firstElementChild).toHaveClass('h-px');
 
     fireEvent.pointerDown(separator, { clientY: 420 });
     expect(onResizePointerDown).toHaveBeenCalled();

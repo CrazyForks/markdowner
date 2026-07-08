@@ -35,6 +35,48 @@ import { cn } from '@/lib/utils';
 const DEFAULT_TERMINAL_FONT =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 
+function resolveTerminalTextEditingSequence(event: KeyboardEvent): string | null {
+  if (event.type !== 'keydown' || event.ctrlKey || event.shiftKey) return null;
+
+  if (event.altKey && !event.metaKey) {
+    switch (event.key) {
+      case 'ArrowLeft':
+        return '\x1bb';
+      case 'ArrowRight':
+        return '\x1bf';
+      case 'ArrowUp':
+        return '\x1b[1;3A';
+      case 'ArrowDown':
+        return '\x1b[1;3B';
+      case 'Backspace':
+        return '\x17';
+      case 'Delete':
+        return '\x1bd';
+      default:
+        return null;
+    }
+  }
+
+  if (event.metaKey && !event.altKey) {
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        return '\x01';
+      case 'ArrowRight':
+      case 'ArrowDown':
+        return '\x05';
+      case 'Backspace':
+        return '\x15';
+      case 'Delete':
+        return '\x0b';
+      default:
+        return null;
+    }
+  }
+
+  return null;
+}
+
 export interface TerminalPanelHandle {
   focus: () => void;
 }
@@ -146,6 +188,16 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
         }
         return false;
       }
+      const textEditingSequence = resolveTerminalTextEditingSequence(event);
+      if (textEditingSequence !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = sessionIdRef.current;
+        if (id !== null) {
+          void writeTerminal(id, textEditingSequence);
+        }
+        return false;
+      }
       if (event.altKey || event.shiftKey) {
         return true;
       }
@@ -233,7 +285,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
       onBlurCapture={() => onFocusChange?.(false)}
       onFocusCapture={() => onFocusChange?.(true)}
       style={{ height }}
-      className="flex min-h-40 shrink-0 flex-col border-t border-border bg-[#0b0d10]"
+      className="flex min-h-40 shrink-0 flex-col bg-[#0b0d10]"
     >
       <div
         role="separator"
@@ -243,7 +295,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
         aria-valuemin={TERMINAL_MIN_HEIGHT}
         aria-valuemax={TERMINAL_MAX_HEIGHT}
         className={cn(
-          'group relative h-2 shrink-0 cursor-row-resize select-none',
+          'group relative h-1 shrink-0 cursor-row-resize select-none',
           isResizing && 'bg-primary/5',
         )}
         onKeyDown={handleResizeKeyDown}
