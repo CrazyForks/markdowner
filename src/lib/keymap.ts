@@ -101,6 +101,8 @@ export const KEYMAP_ROWS: KeymapRow[] = [
   { id: 'fixed.jumpToTab', label: 'Jump to tab 1–9', section: 'Navigation', fixedKeys: '⌘1 – ⌘9' },
   { id: 'fixed.navigateBack', label: 'Back (previous document)', section: 'Navigation', fixedKeys: '⌘[', fixedBinding: { key: '[' } },
   { id: 'fixed.navigateForward', label: 'Forward (next document)', section: 'Navigation', fixedKeys: '⌘]', fixedBinding: { key: ']' } },
+  { id: 'fixed.focusEditor', label: 'Focus editor', section: 'Navigation', fixedKeys: '⌥⌘E', fixedBinding: { key: 'e', alt: true } },
+  { id: 'fixed.focusTerminal', label: 'Focus terminal', section: 'Navigation', fixedKeys: '⌥⌘T', fixedBinding: { key: 't', alt: true } },
   { id: 'fixed.nextTab', label: 'Next tab', section: 'Navigation', fixedKeys: '⌘⇧]', fixedBinding: { key: ']', shift: true } },
   { id: 'fixed.previousTab', label: 'Previous tab', section: 'Navigation', fixedKeys: '⌘⇧[', fixedBinding: { key: '[', shift: true } },
   { id: 'fixed.moveTabRight', label: 'Move tab right', section: 'Navigation', fixedKeys: '⌃⇧PgDn' },

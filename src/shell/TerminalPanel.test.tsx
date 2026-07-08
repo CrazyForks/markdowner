@@ -1,9 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TERMINAL_OUTPUT_EVENT, type TerminalOutputEvent } from '@/lib/desktop';
 
 import { TerminalPanel } from './TerminalPanel';
+import type { TerminalPanelHandle } from './TerminalPanel';
 
 const listenMock = vi.hoisted(() => vi.fn());
 const startTerminalMock = vi.hoisted(() => vi.fn());
@@ -182,5 +184,68 @@ describe('TerminalPanel', () => {
     expect(terminal.keyHandler?.(ctrlBackquote)).toBe(false);
     expect(ctrlBackquoteStopPropagation).toHaveBeenCalled();
     expect(onRequestClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('exposes an imperative focus handle and editor focus shortcut for xterm focus', async () => {
+    const ref = createRef<TerminalPanelHandle>();
+    const onRequestFocusEditor = vi.fn();
+    render(
+      <TerminalPanel
+        ref={ref}
+        fontFamily=""
+        fontSize={13}
+        onRequestFocusEditor={onRequestFocusEditor}
+        workingDirectory={null}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(startTerminalMock).toHaveBeenCalled();
+    });
+    const terminal = terminalInstances[0];
+    terminal.focus.mockClear();
+
+    act(() => {
+      ref.current?.focus();
+    });
+    expect(terminal.focus).toHaveBeenCalledTimes(1);
+
+    const focusEditor = new KeyboardEvent('keydown', {
+      key: 'e',
+      metaKey: true,
+      altKey: true,
+    });
+    const stopPropagation = vi.spyOn(focusEditor, 'stopPropagation');
+    expect(terminal.keyHandler?.(focusEditor)).toBe(false);
+    expect(stopPropagation).toHaveBeenCalled();
+    expect(onRequestFocusEditor).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a draggable terminal resize separator', async () => {
+    const onResizePointerDown = vi.fn();
+    render(
+      <TerminalPanel
+        fontFamily=""
+        fontSize={13}
+        height={320}
+        onResizePointerDown={onResizePointerDown}
+        workingDirectory={null}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(startTerminalMock).toHaveBeenCalled();
+    });
+
+    const separator = screen.getByRole('separator', { name: /resize terminal/i });
+    expect(separator).toHaveAttribute('aria-orientation', 'horizontal');
+    expect(separator).toHaveAttribute('aria-valuenow', '320');
+    expect(separator).toHaveAttribute('aria-valuemin', '160');
+    expect(separator).toHaveAttribute('aria-valuemax', '720');
+    expect(separator).toHaveClass('cursor-row-resize');
+    expect(separator).toHaveStyle({ touchAction: 'none' });
+
+    fireEvent.pointerDown(separator, { clientY: 420 });
+    expect(onResizePointerDown).toHaveBeenCalled();
   });
 });

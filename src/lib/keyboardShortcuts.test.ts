@@ -10,6 +10,7 @@ import {
   resolveModeChord,
   resolveModeNumberShortcut,
   resolveShellShortcutAction,
+  resolveSurfaceFocusShortcut,
   resolveTabShortcut,
   resolveTabShortcutAction,
   resolveTerminalPanelShortcut,
@@ -356,6 +357,34 @@ describe('resolveTerminalPanelShortcut', () => {
       resolveTerminalPanelShortcut(
         shortcutEvent({ code: 'Backquote', ctrlKey: true, defaultPrevented: true }),
         { terminalOpen: false, focusInsideTerminal: false },
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('resolveSurfaceFocusShortcut', () => {
+  it.each([
+    [{ key: 'e', metaKey: true, altKey: true }, { kind: 'focusEditor' }],
+    [{ key: 'T', metaKey: true, altKey: true }, { kind: 'focusTerminal' }],
+  ] as const)('resolves surface focus shortcut %o', (event, expected) => {
+    expect(resolveSurfaceFocusShortcut(shortcutEvent(event))).toEqual(expected);
+  });
+
+  it('ignores shifted, ctrl-modified, plain, or already-prevented focus shortcuts', () => {
+    expect(
+      resolveSurfaceFocusShortcut(
+        shortcutEvent({ key: 'e', metaKey: true, altKey: true, shiftKey: true }),
+      ),
+    ).toBeNull();
+    expect(
+      resolveSurfaceFocusShortcut(
+        shortcutEvent({ key: 't', metaKey: true, altKey: true, ctrlKey: true }),
+      ),
+    ).toBeNull();
+    expect(resolveSurfaceFocusShortcut(shortcutEvent({ key: 'e', metaKey: true }))).toBeNull();
+    expect(
+      resolveSurfaceFocusShortcut(
+        shortcutEvent({ key: 't', metaKey: true, altKey: true, defaultPrevented: true }),
       ),
     ).toBeNull();
   });

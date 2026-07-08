@@ -22,11 +22,15 @@ export type CommandPaletteActions = {
   toggleSidebar: () => void;
   showExplorerPanel: () => void;
   focusExplorerTree: () => void;
+  focusEditor: () => void;
   toggleOutline: () => void;
   openQuickOpen: () => void;
   navigateBack: () => void;
   navigateForward: () => void;
   focusSearchPanel: () => void;
+  toggleTerminal: () => void;
+  focusTerminal: () => void;
+  closeTerminal: () => void;
   openFindReplace: (replaceMode: boolean) => void;
   setMode: (mode: EditorMode) => void;
   updateSettings: (settings: Settings) => void;
@@ -49,6 +53,7 @@ type BuildCommandPaletteCommandsInput = {
   hasActiveDocumentPath?: boolean;
   /** A workspace/project root folder is open. */
   hasWorkspaceRoot?: boolean;
+  terminalOpen?: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   settings: Settings;
@@ -63,6 +68,7 @@ export function buildCommandPaletteCommands(
     activeDocumentOpen,
     hasActiveDocumentPath = false,
     hasWorkspaceRoot = false,
+    terminalOpen = false,
     canGoBack,
     canGoForward,
     settings,
@@ -187,6 +193,13 @@ export function buildCommandPaletteCommands(
       disabled: !activeDocumentOpen,
       run: () => actions.openFindReplace(false),
     },
+    {
+      id: 'view.focusEditor',
+      category: 'View',
+      label: 'Focus Editor',
+      shortcut: '⌥⌘E',
+      run: actions.focusEditor,
+    },
     ...EDITOR_MODE_OPTIONS.map((option) => ({
       id: `view.mode.${option.mode}`,
       category: 'View',
@@ -209,6 +222,27 @@ export function buildCommandPaletteCommands(
       shortcut: '⌘]',
       disabled: !canGoForward,
       run: actions.navigateForward,
+    },
+    {
+      id: 'terminal.toggle',
+      category: 'Terminal',
+      label: terminalOpen ? 'Hide Terminal' : 'Show Terminal',
+      shortcut: '⌃`',
+      run: actions.toggleTerminal,
+    },
+    {
+      id: 'terminal.focus',
+      category: 'Terminal',
+      label: 'Focus Terminal',
+      shortcut: '⌥⌘T',
+      run: actions.focusTerminal,
+    },
+    {
+      id: 'terminal.close',
+      category: 'Terminal',
+      label: 'Close Terminal',
+      disabled: !terminalOpen,
+      run: actions.closeTerminal,
     },
     {
       id: 'preferences.toggleFocusMode',

@@ -2,7 +2,14 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { X, Terminal as TerminalIcon } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { listen } from '@tauri-apps/api/event';
 
 import { Button } from '@/components/ui/button';
@@ -16,29 +23,53 @@ import {
   type TerminalOutputEvent,
   writeTerminal,
 } from '@/lib/desktop';
+import { resolveSurfaceFocusShortcut } from '@/lib/keyboardShortcuts';
+import {
+  TERMINAL_DEFAULT_HEIGHT,
+  TERMINAL_MAX_HEIGHT,
+  TERMINAL_MIN_HEIGHT,
+  nextTerminalHeightFromKey,
+} from '@/lib/terminalPanelState';
+import { cn } from '@/lib/utils';
 
 const DEFAULT_TERMINAL_FONT =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 
+export interface TerminalPanelHandle {
+  focus: () => void;
+}
+
 interface TerminalPanelProps {
   fontFamily: string;
   fontSize: number;
+  height?: number;
+  isResizing?: boolean;
   workingDirectory: string | null;
+  onHeightChange?: (height: number) => void;
   onFocusChange?: (focused: boolean) => void;
   onRequestClose?: () => void;
+  onRequestFocusEditor?: () => void;
+  onResizePointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }
 
-export function TerminalPanel({
+export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(function TerminalPanel({
   fontFamily,
   fontSize,
+  height = TERMINAL_DEFAULT_HEIGHT,
+  isResizing = false,
   workingDirectory,
+  onHeightChange,
   onFocusChange,
   onRequestClose,
-}: TerminalPanelProps) {
+  onRequestFocusEditor,
+  onResizePointerDown,
+}: TerminalPanelProps, ref) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
   const sessionIdRef = useRef<number | null>(null);
   const onFocusChangeRef = useRef(onFocusChange);
   const onRequestCloseRef = useRef(onRequestClose);
+  const onRequestFocusEditorRef = useRef(onRequestFocusEditor);
 
   useEffect(() => {
     onFocusChangeRef.current = onFocusChange;
@@ -47,6 +78,23 @@ export function TerminalPanel({
   useEffect(() => {
     onRequestCloseRef.current = onRequestClose;
   }, [onRequestClose]);
+
+  useEffect(() => {
+    onRequestFocusEditorRef.current = onRequestFocusEditor;
+  }, [onRequestFocusEditor]);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      terminalRef.current?.focus();
+    },
+  }), []);
+
+  const handleResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const nextHeight = nextTerminalHeightFromKey(height, event.key);
+    if (nextHeight === null) return;
+    event.preventDefault();
+    onHeightChange?.(nextHeight);
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -71,6 +119,7 @@ export function TerminalPanel({
         selectionBackground: '#64748b66',
       },
     });
+    terminalRef.current = terminal;
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
@@ -82,7 +131,22 @@ export function TerminalPanel({
       void writeTerminal(id, data);
     });
     terminal.attachCustomKeyEventHandler((event) => {
-      if (event.type !== 'keydown' || event.altKey || event.shiftKey) {
+      if (event.type !== 'keydown') {
+        return true;
+      }
+      const focusShortcut = resolveSurfaceFocusShortcut(event);
+      if (focusShortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (focusShortcut.kind === 'focusEditor') {
+          onRequestFocusEditorRef.current?.();
+        } else {
+          terminal.focus();
+          onFocusChangeRef.current?.(true);
+        }
+        return false;
+      }
+      if (event.altKey || event.shiftKey) {
         return true;
       }
       const closesPanel =
@@ -152,6 +216,9 @@ export function TerminalPanel({
       disposeExit?.();
       dataDisposable.dispose();
       terminal.dispose();
+      if (terminalRef.current === terminal) {
+        terminalRef.current = null;
+      }
       if (id !== null) {
         void closeTerminal(id);
       }
@@ -161,12 +228,37 @@ export function TerminalPanel({
   return (
     <section
       aria-label="Terminal"
-      className="flex h-64 min-h-40 max-h-[40vh] shrink-0 flex-col border-t border-border bg-[#0b0d10]"
       data-terminal-panel
       data-testid="terminal-panel"
       onBlurCapture={() => onFocusChange?.(false)}
       onFocusCapture={() => onFocusChange?.(true)}
+      style={{ height }}
+      className="flex min-h-40 shrink-0 flex-col border-t border-border bg-[#0b0d10]"
     >
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize terminal"
+        aria-valuenow={height}
+        aria-valuemin={TERMINAL_MIN_HEIGHT}
+        aria-valuemax={TERMINAL_MAX_HEIGHT}
+        className={cn(
+          'group relative h-2 shrink-0 cursor-row-resize select-none',
+          isResizing && 'bg-primary/5',
+        )}
+        onKeyDown={handleResizeKeyDown}
+        onPointerDown={onResizePointerDown}
+        tabIndex={0}
+        title="Drag to resize terminal"
+        style={{ touchAction: 'none' }}
+      >
+        <div
+          className={cn(
+            'absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-white/10 transition-colors',
+            isResizing ? 'bg-primary' : 'group-hover:bg-primary/60',
+          )}
+        />
+      </div>
       <header className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-background px-3">
         <div className="flex min-w-0 items-center gap-2 text-xs">
           <TerminalIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
@@ -190,4 +282,4 @@ export function TerminalPanel({
       <div ref={containerRef} className="min-h-0 flex-1 px-2 py-1" />
     </section>
   );
-}
+});

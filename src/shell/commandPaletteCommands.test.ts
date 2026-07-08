@@ -22,11 +22,15 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     toggleSidebar: vi.fn(),
     showExplorerPanel: vi.fn(),
     focusExplorerTree: vi.fn(),
+    focusEditor: vi.fn(),
     toggleOutline: vi.fn(),
     openQuickOpen: vi.fn(),
     navigateBack: vi.fn(),
     navigateForward: vi.fn(),
     focusSearchPanel: vi.fn(),
+    toggleTerminal: vi.fn(),
+    focusTerminal: vi.fn(),
+    closeTerminal: vi.fn(),
     openFindReplace: vi.fn(),
     setMode: vi.fn(),
     updateSettings: vi.fn(),
@@ -79,11 +83,15 @@ describe('buildCommandPaletteCommands', () => {
       'view.quickOpen',
       'view.searchInFiles',
       'view.findInFile',
+      'view.focusEditor',
       'view.mode.Wysiwyg',
       'view.mode.Editor',
       'view.mode.SplitView',
       'navigation.back',
       'navigation.forward',
+      'terminal.toggle',
+      'terminal.focus',
+      'terminal.close',
       'preferences.toggleFocusMode',
       'preferences.toggleTypewriterMode',
       'preferences.toggleWordWrap',
@@ -314,6 +322,51 @@ describe('buildCommandPaletteCommands', () => {
     });
     expect(commands.find((c) => c.id === 'preferences.toggleFocusMode')?.shortcut).toBe('⌘⇧J');
     expect(commands.find((c) => c.id === 'preferences.toggleWordWrap')?.shortcut).toBe('⌥Z');
+  });
+
+  it('wires editor and terminal commands for the command palette', () => {
+    const commandActions = actions();
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      terminalOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: commandActions,
+    });
+
+    const focusEditor = commands.find((command) => command.id === 'view.focusEditor');
+    const toggleTerminal = commands.find((command) => command.id === 'terminal.toggle');
+    const focusTerminal = commands.find((command) => command.id === 'terminal.focus');
+    const closeTerminal = commands.find((command) => command.id === 'terminal.close');
+
+    expect(focusEditor?.shortcut).toBe('⌥⌘E');
+    expect(focusTerminal?.shortcut).toBe('⌥⌘T');
+    expect(toggleTerminal?.shortcut).toBe('⌃`');
+    expect(closeTerminal?.disabled).toBe(false);
+
+    focusEditor?.run?.();
+    toggleTerminal?.run?.();
+    focusTerminal?.run?.();
+    closeTerminal?.run?.();
+
+    expect(commandActions.focusEditor).toHaveBeenCalledTimes(1);
+    expect(commandActions.toggleTerminal).toHaveBeenCalledTimes(1);
+    expect(commandActions.focusTerminal).toHaveBeenCalledTimes(1);
+    expect(commandActions.closeTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables terminal close when the terminal panel is already closed', () => {
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      terminalOpen: false,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: actions(),
+    });
+
+    expect(commands.find((command) => command.id === 'terminal.close')?.disabled).toBe(true);
   });
 
   it('wires composite and parameterized actions', () => {

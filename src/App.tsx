@@ -58,7 +58,7 @@ import { EditorArea } from '@/shell/EditorArea';
 import { FindReplaceBar } from '@/shell/FindReplaceBar';
 import { MarkdownPreviewPane } from '@/shell/MarkdownPreviewPane';
 import { Tabs } from '@/shell/Tabs';
-import { TerminalPanel } from '@/shell/TerminalPanel';
+import { TerminalPanel, type TerminalPanelHandle } from '@/shell/TerminalPanel';
 import { TitleBar } from '@/shell/TitleBar';
 import {
   SideBar,
@@ -232,6 +232,12 @@ import { syncAnalytics } from './lib/analytics';
 import { resolveShellBindings } from './lib/keymap';
 import { moveTab, reorderTabByDrag } from './lib/tabs';
 import { resolveTerminalWorkingDirectory } from './lib/terminalModel';
+import {
+  clampTerminalHeight,
+  readTerminalHeight,
+  terminalHeightFromPointerY,
+  writeTerminalHeight,
+} from './lib/terminalPanelState';
 import { useUpdateCheck } from './lib/useUpdateCheck';
 import {
   MARKDOWN_CONTENT_SCOPE_CLASS,
@@ -263,6 +269,7 @@ import {
   resolveTerminalPanelShortcut,
   resolveHistoryNavShortcut,
   resolveShellShortcutAction,
+  resolveSurfaceFocusShortcut,
   resolveTabShortcut,
   resolveTabShortcutAction,
   resolveWordWrapShortcut,
@@ -481,6 +488,8 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState<number>(readTerminalHeight());
+  const [isResizingTerminal, setIsResizingTerminal] = useState(false);
   const [terminalHasFocus, setTerminalHasFocus] = useState(false);
   const [defaultMdHandler, setDefaultMdHandlerStatus] =
     useState<DefaultMdHandlerStatus | null>(null);
@@ -493,6 +502,7 @@ export default function App() {
   });
   const sourceEditorViewRef = useRef<EditorView | null>(null);
   const sourceEditorContainerRef = useRef<HTMLDivElement | null>(null);
+  const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
   const splitSourceScrollRef = useRef<HTMLDivElement | null>(null);
   const splitPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const modeRequests = useLatestRequestTracker();
@@ -1110,8 +1120,78 @@ export default function App() {
 
   const closeTerminalPanel = useCallback(() => {
     setIsTerminalOpen(false);
+    setIsResizingTerminal(false);
     setTerminalHasFocus(false);
   }, []);
+
+  const toggleTerminalPanel = useCallback(() => {
+    setIsTerminalOpen((value) => {
+      const next = !value;
+      if (!next) {
+        setIsResizingTerminal(false);
+        setTerminalHasFocus(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const focusEditorSurface = useEffectEvent(() => {
+    setTerminalHasFocus(false);
+    focusActiveEditor();
+  });
+
+  const focusTerminalPanel = useEffectEvent(() => {
+    setIsTerminalOpen(true);
+    window.requestAnimationFrame(() => {
+      terminalPanelRef.current?.focus();
+    });
+  });
+
+  const applyTerminalHeight = useCallback((height: number) => {
+    const nextHeight = clampTerminalHeight(height);
+    setTerminalHeight(nextHeight);
+    writeTerminalHeight(nextHeight);
+  }, []);
+
+  const handleTerminalResizePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      applyTerminalHeight(terminalHeightFromPointerY(event.clientY, window.innerHeight));
+      setIsResizingTerminal(true);
+    },
+    [applyTerminalHeight],
+  );
+
+  useEffect(() => {
+    if (!isResizingTerminal || !isTerminalOpen) return;
+
+    const handleMove = (event: PointerEvent) => {
+      applyTerminalHeight(terminalHeightFromPointerY(event.clientY, window.innerHeight));
+    };
+
+    const stopResize = () => {
+      setIsResizingTerminal(false);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+    window.addEventListener('blur', stopResize);
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+      window.removeEventListener('blur', stopResize);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [applyTerminalHeight, isResizingTerminal, isTerminalOpen]);
 
   const handleOpenOutlinePanel = useEffectEvent(() => {
     applySidebarPanelState('outline', 'toggle');
@@ -4482,6 +4562,17 @@ export default function App() {
         return;
       }
 
+      const surfaceFocusShortcut = resolveSurfaceFocusShortcut(event);
+      if (surfaceFocusShortcut) {
+        event.preventDefault();
+        if (surfaceFocusShortcut.kind === 'focusEditor') {
+          focusEditorSurface();
+        } else {
+          focusTerminalPanel();
+        }
+        return;
+      }
+
       const terminalShortcutAction = resolveTerminalPanelShortcut(event, {
         terminalOpen: isTerminalOpen,
         focusInsideTerminal: terminalHasFocus || isFocusInsideTerminal(),
@@ -4491,11 +4582,7 @@ export default function App() {
         if (terminalShortcutAction.kind === 'closeTerminal') {
           closeTerminalPanel();
         } else {
-          setIsTerminalOpen((value) => {
-            const next = !value;
-            if (!next) setTerminalHasFocus(false);
-            return next;
-          });
+          toggleTerminalPanel();
         }
         return;
       }
@@ -4767,6 +4854,8 @@ export default function App() {
     activeTabId,
     busy,
     closeTerminalPanel,
+    focusEditorSurface,
+    focusTerminalPanel,
     isSidebarOpen,
     isTerminalOpen,
     localDraft,
@@ -4775,6 +4864,7 @@ export default function App() {
     snapshot,
     tabs,
     terminalHasFocus,
+    toggleTerminalPanel,
   ]);
 
   useEffect(() => {
@@ -5051,6 +5141,7 @@ export default function App() {
     activeDocumentOpen,
     hasActiveDocumentPath: snapshot.activeDocumentPath != null,
     hasWorkspaceRoot: snapshot.rootDir != null,
+    terminalOpen: isTerminalOpen,
     canGoBack: visitHistory.canGoBack(navHistory),
     canGoForward: visitHistory.canGoForward(navHistory),
     settings,
@@ -5094,11 +5185,15 @@ export default function App() {
       toggleSidebar: () => handleToggleSidebar(),
       showExplorerPanel: () => handleShowExplorerPanel(),
       focusExplorerTree,
+      focusEditor: focusEditorSurface,
       toggleOutline: () => handleOpenOutlinePanel(),
       openQuickOpen: () => setIsQuickOpenOpen(true),
       navigateBack: () => navigateHistory('back'),
       navigateForward: () => navigateHistory('forward'),
       focusSearchPanel: () => handleFocusSearchPanel(),
+      toggleTerminal: toggleTerminalPanel,
+      focusTerminal: focusTerminalPanel,
+      closeTerminal: closeTerminalPanel,
       openFindReplace,
       setMode: (mode) => void handleSetMode(mode),
       updateSettings: handleSettingsChange,
@@ -5364,10 +5459,16 @@ export default function App() {
       />
       {isTerminalOpen ? (
         <TerminalPanel
+          ref={terminalPanelRef}
           fontFamily={settings.terminalFontFamily}
           fontSize={settings.terminalFontSize || DEFAULT_SETTINGS.terminalFontSize}
+          height={terminalHeight}
+          isResizing={isResizingTerminal}
+          onHeightChange={applyTerminalHeight}
           onFocusChange={setTerminalHasFocus}
           onRequestClose={closeTerminalPanel}
+          onRequestFocusEditor={focusEditorSurface}
+          onResizePointerDown={handleTerminalResizePointerDown}
           workingDirectory={terminalWorkingDirectory}
         />
       ) : null}

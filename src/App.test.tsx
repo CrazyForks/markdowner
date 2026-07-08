@@ -127,25 +127,63 @@ vi.mock('./lib/desktop', () => ({
   exportTextFile: exportTextFileMock,
 }));
 
-vi.mock('@/shell/TerminalPanel', () => ({
-  TerminalPanel: ({
-    onFocusChange,
-    workingDirectory,
-  }: {
-    onFocusChange?: (focused: boolean) => void;
-    workingDirectory?: string | null;
-  }) => (
-    <section
-      data-testid="terminal-panel"
-      data-working-directory={workingDirectory ?? ''}
-      tabIndex={0}
-      onFocus={() => onFocusChange?.(true)}
-      onBlur={() => onFocusChange?.(false)}
-    >
-      Terminal panel
-    </section>
-  ),
-}));
+vi.mock('@/shell/TerminalPanel', async () => {
+  const React = await import('react');
+  return {
+    TerminalPanel: React.forwardRef(
+      (
+        {
+          height,
+          onFocusChange,
+          onHeightChange,
+          onRequestFocusEditor,
+          onResizePointerDown,
+          workingDirectory,
+        }: {
+          height?: number;
+          onFocusChange?: (focused: boolean) => void;
+          onHeightChange?: (height: number) => void;
+          onRequestFocusEditor?: () => void;
+          onResizePointerDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
+          workingDirectory?: string | null;
+        },
+        ref: React.ForwardedRef<{ focus: () => void }>,
+      ) => {
+        React.useImperativeHandle(ref, () => ({
+          focus: () => {
+            onFocusChange?.(true);
+          },
+        }));
+        return (
+          <section
+            data-testid="terminal-panel"
+            data-working-directory={workingDirectory ?? ''}
+            tabIndex={0}
+            onFocus={() => onFocusChange?.(true)}
+            onBlur={() => onFocusChange?.(false)}
+          >
+            <div
+              role="separator"
+              aria-label="Resize terminal"
+              aria-orientation="horizontal"
+              aria-valuenow={height}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowUp') {
+                  onHeightChange?.((height ?? 256) + 8);
+                }
+              }}
+              onPointerDown={onResizePointerDown}
+            />
+            <button type="button" onClick={onRequestFocusEditor}>
+              Focus editor
+            </button>
+            Terminal panel
+          </section>
+        );
+      },
+    ),
+  };
+});
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: openDialogMock,
@@ -6488,7 +6526,7 @@ describe('App recent documents', () => {
     });
   });
 
-  it('groups Command Palette entries contiguously in File → View → Preferences → Theme order', async () => {
+  it('groups Command Palette entries contiguously in File → View → Terminal → Preferences → Theme order', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
         return {
@@ -6515,7 +6553,7 @@ describe('App recent documents', () => {
     );
 
     let lastIndex = -1;
-    for (const expected of ['File', 'View', 'Preferences', 'Theme']) {
+    for (const expected of ['File', 'View', 'Terminal', 'Preferences', 'Theme']) {
       const firstIndex = categories.indexOf(expected);
       const lastSeen = categories.lastIndexOf(expected);
       expect(firstIndex).toBeGreaterThan(lastIndex);
@@ -6524,11 +6562,11 @@ describe('App recent documents', () => {
       lastIndex = lastSeen;
     }
 
-    const headers = within(dialog).getAllByText(/^File$|^View$|^Preferences$|^Theme$/);
+    const headers = within(dialog).getAllByText(/^File$|^View$|^Terminal$|^Preferences$|^Theme$/);
     const headerCategories = headers
       .filter((node) => node.hasAttribute('data-category-header'))
       .map((node) => node.getAttribute('data-category-header'));
-    expect(headerCategories).toEqual(['File', 'View', 'Preferences', 'Theme']);
+    expect(headerCategories).toEqual(['File', 'View', 'Terminal', 'Preferences', 'Theme']);
   });
 
   it('renders the Command Palette empty-state placeholder with role="presentation" when no commands match', async () => {
@@ -8395,6 +8433,59 @@ describe('App recent documents', () => {
     });
     expect(screen.getByRole('tab', { name: /meeting-notes\.md/i })).toBeInTheDocument();
     expect(destroyWindowMock).not.toHaveBeenCalled();
+  });
+
+  it('restores and persists terminal height through the terminal resize handle', async () => {
+    window.localStorage.setItem('markdowner.terminalHeight', '360');
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    try {
+      const { default: App } = await import('./App');
+
+      render(<App />);
+
+      await screen.findByRole('button', { name: /^new file$/i });
+      fireEvent.keyDown(window, { code: 'Backquote', key: '`', ctrlKey: true });
+
+      const separator = await screen.findByRole('separator', { name: /resize terminal/i });
+      expect(separator).toHaveAttribute('aria-valuenow', '360');
+
+      fireEvent.keyDown(separator, { key: 'ArrowUp' });
+
+      await waitFor(() => {
+        expect(separator).toHaveAttribute('aria-valuenow', '368');
+      });
+      expect(window.localStorage.getItem('markdowner.terminalHeight')).toBe('368');
+    } finally {
+      window.localStorage.removeItem('markdowner.terminalHeight');
+    }
+  });
+
+  it('stops terminal drag resizing when the panel closes before pointerup', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    try {
+      const { default: App } = await import('./App');
+
+      render(<App />);
+
+      await screen.findByRole('button', { name: /^new file$/i });
+      fireEvent.keyDown(window, { code: 'Backquote', key: '`', ctrlKey: true });
+
+      const separator = await screen.findByRole('separator', { name: /resize terminal/i });
+      fireEvent.pointerDown(separator, { clientY: window.innerHeight - 300 });
+      expect(window.localStorage.getItem('markdowner.terminalHeight')).toBe('300');
+
+      fireEvent.keyDown(window, { code: 'Backquote', key: '`', ctrlKey: true });
+      await waitFor(() => {
+        expect(screen.queryByTestId('terminal-panel')).toBeNull();
+      });
+
+      fireEvent.pointerMove(window, { clientY: window.innerHeight - 600 });
+      expect(window.localStorage.getItem('markdowner.terminalHeight')).toBe('300');
+    } finally {
+      window.localStorage.removeItem('markdowner.terminalHeight');
+    }
   });
 
   it('reopens the most recently closed tab with Cmd+Shift+T', async () => {

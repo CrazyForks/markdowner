@@ -118,6 +118,10 @@ export type TerminalPanelShortcutAction =
   | { kind: 'closeTerminal' }
   | { kind: 'toggleTerminal' };
 
+export type SurfaceFocusShortcutAction =
+  | { kind: 'focusEditor' }
+  | { kind: 'focusTerminal' };
+
 export function usesCommandModifier(event: CommandModifierEvent): boolean {
   return event.metaKey || event.ctrlKey;
 }
@@ -332,6 +336,29 @@ export function resolveTerminalPanelShortcut(
   }
 
   return null;
+}
+
+export function resolveSurfaceFocusShortcut(
+  event: ShortcutEvent,
+): SurfaceFocusShortcutAction | null {
+  if (
+    event.defaultPrevented ||
+    !event.metaKey ||
+    event.ctrlKey ||
+    !event.altKey ||
+    event.shiftKey
+  ) {
+    return null;
+  }
+
+  switch (event.key.toLowerCase()) {
+    case 'e':
+      return { kind: 'focusEditor' };
+    case 't':
+      return { kind: 'focusTerminal' };
+    default:
+      return null;
+  }
 }
 
 type WordWrapShortcutEvent = CommandModifierEvent &
