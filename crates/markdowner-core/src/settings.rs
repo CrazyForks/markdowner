@@ -36,6 +36,7 @@ pub struct Settings {
     pub terminal_font_family: String,
     pub terminal_font_size: u32,
     pub terminal_default_path: String,
+    pub terminal_start_location: String,
     pub update_check_enabled: bool,
     pub last_update_check_at: Option<u64>,
     pub dismissed_update_version: Option<String>,
@@ -79,6 +80,7 @@ impl Default for Settings {
             terminal_font_family: String::new(),
             terminal_font_size: 13,
             terminal_default_path: String::new(),
+            terminal_start_location: "document".to_string(),
             update_check_enabled: true,
             last_update_check_at: None,
             dismissed_update_version: None,
@@ -343,21 +345,25 @@ mod tests {
         assert_eq!(parsed.terminal_font_family, "");
         assert_eq!(parsed.terminal_font_size, 13);
         assert_eq!(parsed.terminal_default_path, "");
+        assert_eq!(parsed.terminal_start_location, "document");
 
         let json = serde_json::json!({
             "terminalFontFamily": "JetBrains Mono",
             "terminalFontSize": 16_u32,
-            "terminalDefaultPath": "/tmp/project"
+            "terminalDefaultPath": "/tmp/project",
+            "terminalStartLocation": "workspace"
         });
         let parsed: Settings = serde_json::from_value(json).expect("terminal settings parse");
         assert_eq!(parsed.terminal_font_family, "JetBrains Mono");
         assert_eq!(parsed.terminal_font_size, 16);
         assert_eq!(parsed.terminal_default_path, "/tmp/project");
+        assert_eq!(parsed.terminal_start_location, "workspace");
 
         let value = serde_json::to_value(&parsed).expect("serialize settings");
         assert_eq!(value["terminalFontFamily"], "JetBrains Mono");
         assert_eq!(value["terminalFontSize"], 16);
         assert_eq!(value["terminalDefaultPath"], "/tmp/project");
+        assert_eq!(value["terminalStartLocation"], "workspace");
     }
 
     #[test]

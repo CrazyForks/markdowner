@@ -118,6 +118,7 @@ describe('terminal settings', () => {
     expect(DEFAULT_SETTINGS.terminalFontFamily).toBe('');
     expect(DEFAULT_SETTINGS.terminalFontSize).toBe(13);
     expect(DEFAULT_SETTINGS.terminalDefaultPath).toBe('');
+    expect(DEFAULT_SETTINGS.terminalStartLocation).toBe('document');
   });
 
   it('normalizes terminal font size with persisted bounds', () => {
@@ -133,6 +134,7 @@ describe('terminal settings', () => {
       terminalFontFamily: '  JetBrains Mono  ',
       terminalFontSize: 'large',
       terminalDefaultPath: '  /Volumes/990EVO+/workspace/chann  ',
+      terminalStartLocation: 'workspace',
     });
 
     const settings = await loadSettings();
@@ -140,6 +142,18 @@ describe('terminal settings', () => {
     expect(settings.terminalFontFamily).toBe('JetBrains Mono');
     expect(settings.terminalFontSize).toBe(DEFAULT_SETTINGS.terminalFontSize);
     expect(settings.terminalDefaultPath).toBe('/Volumes/990EVO+/workspace/chann');
+    expect(settings.terminalStartLocation).toBe('workspace');
+  });
+
+  it('falls back to document-first terminal start location for malformed persisted values', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      terminalStartLocation: 'recent-folder',
+    });
+
+    const settings = await loadSettings();
+
+    expect(settings.terminalStartLocation).toBe('document');
   });
 
   it('tracks terminal preference edits as changed settings', () => {
@@ -148,8 +162,9 @@ describe('terminal settings', () => {
         ...DEFAULT_SETTINGS,
         terminalFontSize: DEFAULT_SETTINGS.terminalFontSize + 1,
         terminalDefaultPath: '/tmp/project',
+        terminalStartLocation: 'workspace',
       }),
-    ).toEqual(['terminalFontSize', 'terminalDefaultPath']);
+    ).toEqual(['terminalFontSize', 'terminalDefaultPath', 'terminalStartLocation']);
   });
 });
 

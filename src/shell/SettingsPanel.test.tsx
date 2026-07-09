@@ -150,5 +150,10 @@ describe('SettingsPanel update section', () => {
     expect(onSettingsChange).toHaveBeenCalledWith(
       expect.objectContaining({ terminalDefaultPath: '/tmp/project' }),
     );
+
+    fireEvent.click(screen.getByRole('radio', { name: /^workspace directory$/i }));
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalStartLocation: 'workspace' }),
+    );
   });
 });

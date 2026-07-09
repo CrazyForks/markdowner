@@ -1,11 +1,15 @@
+export type TerminalStartLocation = 'document' | 'workspace';
+
 type TerminalWorkingDirectoryInput = {
   configuredPath: string;
+  startLocation: TerminalStartLocation;
   workspaceRoot: string | null;
   activeDocumentPath: string | null;
 };
 
 export function resolveTerminalWorkingDirectory({
   configuredPath,
+  startLocation,
   workspaceRoot,
   activeDocumentPath,
 }: TerminalWorkingDirectoryInput): string | null {
@@ -16,6 +20,9 @@ export function resolveTerminalWorkingDirectory({
   const activeDocumentDirectory = activeDocumentPath
     ? directoryName(activeDocumentPath)
     : null;
+  if (startLocation === 'workspace') {
+    return workspaceRoot ?? activeDocumentDirectory ?? null;
+  }
   return activeDocumentDirectory ?? workspaceRoot ?? null;
 }
 

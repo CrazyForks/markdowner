@@ -2546,10 +2546,16 @@ export default function App() {
     () =>
       resolveTerminalWorkingDirectory({
         configuredPath: settings.terminalDefaultPath,
+        startLocation: settings.terminalStartLocation,
         workspaceRoot: snapshot.rootDir,
         activeDocumentPath: snapshot.activeDocumentPath,
       }),
-    [settings.terminalDefaultPath, snapshot.rootDir, snapshot.activeDocumentPath],
+    [
+      settings.terminalDefaultPath,
+      settings.terminalStartLocation,
+      snapshot.rootDir,
+      snapshot.activeDocumentPath,
+    ],
   );
   const searchResultRowCount = useMemo(
     () => searchResults.reduce((count, file) => count + 1 + file.matches.length, 0),

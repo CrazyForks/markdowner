@@ -1400,11 +1400,53 @@ export function SettingsPanel({
             />
           </div>
 
+          <div className={toggleFieldClass}>
+            <Label htmlFor="terminal-start-location" className="flex flex-col items-start gap-0.5 text-left text-sm">
+              <span>Terminal Start Location</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                Used when Terminal Default Path is empty
+              </span>
+            </Label>
+            <ToggleGroup
+              id="terminal-start-location"
+              data-testid="settings-terminal-start-location-toggle"
+              type="single"
+              value={settings.terminalStartLocation}
+              onValueChange={(value) => {
+                if (!value) return;
+                handleSettingChange(
+                  'terminalStartLocation',
+                  value as Settings['terminalStartLocation'],
+                );
+              }}
+              variant="outline"
+              size="sm"
+              className={toggleGroupClass}
+            >
+              <ToggleGroupItem
+                value="document"
+                aria-label="Document Folder"
+                title="Start in the current document folder, then fall back to the workspace"
+                className={toggleItemClass}
+              >
+                Document Folder
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="workspace"
+                aria-label="Workspace Directory"
+                title="Start in the workspace directory when one is open"
+                className={toggleItemClass}
+              >
+                Workspace Directory
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
           <div className={inputFieldClass}>
             <Label htmlFor="terminal-default-path" className="flex flex-col items-start gap-0.5 text-left text-sm">
               <span>Terminal Default Path</span>
               <span className="text-xs font-normal text-muted-foreground">
-                Empty = current document folder or workspace
+                Optional manual override for every new terminal
               </span>
             </Label>
             <Input

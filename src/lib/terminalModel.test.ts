@@ -7,6 +7,7 @@ describe('resolveTerminalWorkingDirectory', () => {
     expect(
       resolveTerminalWorkingDirectory({
         configuredPath: '  /tmp/configured  ',
+        startLocation: 'workspace',
         workspaceRoot: '/tmp/workspace',
         activeDocumentPath: '/tmp/workspace/notes.md',
       }),
@@ -17,16 +18,29 @@ describe('resolveTerminalWorkingDirectory', () => {
     expect(
       resolveTerminalWorkingDirectory({
         configuredPath: '',
+        startLocation: 'document',
         workspaceRoot: '/tmp/workspace',
         activeDocumentPath: '/tmp/workspace/docs/notes.md',
       }),
     ).toBe('/tmp/workspace/docs');
   });
 
+  it('uses the workspace root before the active document folder when configured', () => {
+    expect(
+      resolveTerminalWorkingDirectory({
+        configuredPath: '',
+        startLocation: 'workspace',
+        workspaceRoot: '/tmp/workspace',
+        activeDocumentPath: '/tmp/workspace/docs/notes.md',
+      }),
+    ).toBe('/tmp/workspace');
+  });
+
   it('falls back to the workspace root when no terminal path or active document path exists', () => {
     expect(
       resolveTerminalWorkingDirectory({
         configuredPath: '',
+        startLocation: 'document',
         workspaceRoot: '/tmp/workspace',
         activeDocumentPath: null,
       }),
@@ -37,6 +51,7 @@ describe('resolveTerminalWorkingDirectory', () => {
     expect(
       resolveTerminalWorkingDirectory({
         configuredPath: '',
+        startLocation: 'workspace',
         workspaceRoot: null,
         activeDocumentPath: '/tmp/workspace/docs/notes.md',
       }),
@@ -47,6 +62,7 @@ describe('resolveTerminalWorkingDirectory', () => {
     expect(
       resolveTerminalWorkingDirectory({
         configuredPath: '',
+        startLocation: 'document',
         workspaceRoot: null,
         activeDocumentPath: null,
       }),

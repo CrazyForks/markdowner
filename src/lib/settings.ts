@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ThemeKind } from './desktop';
+import type { TerminalStartLocation } from './terminalModel';
 
 export type CodeBlockTheme =
   | 'github-light'
@@ -88,6 +89,7 @@ export interface Settings {
   terminalFontFamily: string;
   terminalFontSize: number;
   terminalDefaultPath: string;
+  terminalStartLocation: TerminalStartLocation;
   updateCheckEnabled: boolean;
   lastUpdateCheckAt: number | null;
   dismissedUpdateVersion: string | null;
@@ -213,6 +215,7 @@ export const DEFAULT_SETTINGS: Settings = {
   terminalFontFamily: '',
   terminalFontSize: 13,
   terminalDefaultPath: '',
+  terminalStartLocation: 'document',
   updateCheckEnabled: true,
   lastUpdateCheckAt: null,
   dismissedUpdateVersion: null,
@@ -345,6 +348,12 @@ function normalizeCodeBlockTheme(value: unknown): CodeBlockTheme {
     : DEFAULT_SETTINGS.codeBlockTheme;
 }
 
+function normalizeTerminalStartLocation(value: unknown): TerminalStartLocation {
+  return value === 'workspace' || value === 'document'
+    ? value
+    : DEFAULT_SETTINGS.terminalStartLocation;
+}
+
 export function codeBlockThemeForThemeKind(
   theme: CodeBlockTheme,
   themeKind: ThemeKind,
@@ -430,6 +439,9 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   } else {
     merged.terminalDefaultPath = merged.terminalDefaultPath.trim();
   }
+  merged.terminalStartLocation = normalizeTerminalStartLocation(
+    merged.terminalStartLocation,
+  );
   if (typeof merged.updateCheckEnabled !== 'boolean') {
     merged.updateCheckEnabled = DEFAULT_SETTINGS.updateCheckEnabled;
   }
