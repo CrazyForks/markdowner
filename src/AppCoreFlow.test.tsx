@@ -15,6 +15,7 @@ const bootstrapMock = vi.fn();
 const activeDocumentDiskSourceMock = vi.fn();
 const importThemeMock = vi.fn();
 const hasActiveDocumentExternalChangesMock = vi.fn();
+const reloadActiveDocumentFromDiskMock = vi.fn();
 const newDocumentMock = vi.fn();
 const openDocumentMock = vi.fn();
 const openWorkspaceMock = vi.fn();
@@ -48,6 +49,7 @@ vi.mock('./lib/desktop', () => ({
   activeDocumentDiskSource: activeDocumentDiskSourceMock,
   importTheme: importThemeMock,
   hasActiveDocumentExternalChanges: hasActiveDocumentExternalChangesMock,
+  reloadActiveDocumentFromDisk: reloadActiveDocumentFromDiskMock,
   newDocument: newDocumentMock,
   openDocument: openDocumentMock,
   openWorkspace: openWorkspaceMock,
@@ -198,6 +200,7 @@ describe('App core Markdown editing flow', () => {
     activeDocumentDiskSourceMock.mockReset();
     importThemeMock.mockReset();
     hasActiveDocumentExternalChangesMock.mockReset();
+    reloadActiveDocumentFromDiskMock.mockReset();
     newDocumentMock.mockReset();
     openDocumentMock.mockReset();
     openWorkspaceMock.mockReset();
@@ -257,6 +260,18 @@ describe('App core Markdown editing flow', () => {
     });
     bootstrapMock.mockResolvedValue(baseSnapshot());
     hasActiveDocumentExternalChangesMock.mockResolvedValue(false);
+    // A clean open re-reads the document from disk; with no external change the
+    // fresh read matches the just-opened source.
+    reloadActiveDocumentFromDiskMock.mockImplementation(
+      ({ path, expectedSource }: { path: string; expectedSource: string }) =>
+        Promise.resolve(
+          baseSnapshot({
+            activeDocumentName: path.split('/').pop() ?? path,
+            activeDocumentPath: path,
+            activeDocumentSource: expectedSource,
+          }),
+        ),
+    );
     activeDocumentDiskSourceMock.mockRejectedValue(new Error('No active document'));
     replaceActiveDocumentSourceMock.mockImplementation(async (source: string) =>
       baseSnapshot({
@@ -478,7 +493,9 @@ describe('App core Markdown editing flow', () => {
     render(<App />);
 
     expect(await screen.findByRole('tab', { name: /restored\.md/i })).toBeInTheDocument();
-    expect(screen.getByText('Restored file')).toBeInTheDocument();
+    // The WYSIWYG surface renders the restored content asynchronously after the
+    // tab appears, so wait for it rather than asserting synchronously.
+    expect((await screen.findAllByText('Restored file')).length).toBeGreaterThan(0);
 
     expect(saveOpenTabsMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ openTabs: [], activeTabPath: null }),

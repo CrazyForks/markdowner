@@ -720,7 +720,7 @@ impl WysiwygBlockView {
     }
 }
 
-fn normalize_source(source: String) -> String {
+pub(crate) fn normalize_source(source: String) -> String {
     source.replace("\r\n", "\n")
 }
 

@@ -427,6 +427,106 @@ fn runtime_detects_external_modifications_before_save() {
 }
 
 #[test]
+fn runtime_reloads_an_already_open_document_from_disk() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("shared.md");
+    let session_path = temp.path().join("session.json");
+    fs::write(&document_path, "# Original").unwrap();
+
+    let mut runtime = EditorRuntime::default().with_session_store(session_path);
+    runtime.open_document(&document_path).unwrap();
+    fs::write(&document_path, "# Updated externally").unwrap();
+
+    runtime.reload_active_document_from_disk().unwrap();
+
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Updated externally"
+    );
+    assert!(!runtime.workspace().active_document().unwrap().is_dirty());
+    assert!(
+        !runtime
+            .active_document_has_external_modifications()
+            .unwrap()
+    );
+}
+
+#[test]
+fn runtime_does_not_report_crlf_documents_as_externally_modified_after_reload() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("windows-line-endings.md");
+    fs::write(&document_path, "# Original\r\n").unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime.open_document(&document_path).unwrap();
+    assert!(
+        !runtime
+            .active_document_has_external_modifications()
+            .unwrap()
+    );
+
+    fs::write(&document_path, "# Updated\r\n").unwrap();
+    runtime.reload_active_document_from_disk().unwrap();
+
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Updated\n"
+    );
+    assert!(
+        !runtime
+            .active_document_has_external_modifications()
+            .unwrap()
+    );
+}
+
+#[test]
+fn runtime_reload_succeeds_when_session_persistence_is_unavailable() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("shared.md");
+    let session_directory = temp.path().join("session-directory");
+    fs::write(&document_path, "# Original").unwrap();
+    fs::create_dir(&session_directory).unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime.open_document(&document_path).unwrap();
+    runtime.set_session_store(session_directory);
+    fs::write(&document_path, "# Updated externally").unwrap();
+
+    runtime.reload_active_document_from_disk().unwrap();
+
+    assert_eq!(
+        runtime.workspace().active_document().unwrap().source(),
+        "# Updated externally"
+    );
+    assert!(!runtime.workspace().active_document().unwrap().is_dirty());
+}
+
+#[test]
+fn runtime_refuses_reload_when_the_active_buffer_changed_after_the_request_started() {
+    let temp = tempdir().unwrap();
+    let document_path = temp.path().join("shared.md");
+    fs::write(&document_path, "# Original").unwrap();
+
+    let mut runtime = EditorRuntime::default();
+    runtime.open_document(&document_path).unwrap();
+    runtime
+        .replace_active_document_source("# Local edits")
+        .unwrap();
+    fs::write(&document_path, "# External update").unwrap();
+
+    let error = runtime
+        .reload_active_document_from_disk_if_current(&document_path, "# Original", false)
+        .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("changed before the reload completed"));
+    let active = runtime.workspace().active_document().unwrap();
+    assert_eq!(active.source(), "# Local edits");
+    assert!(active.is_dirty());
+}
+
+#[test]
 fn runtime_treats_externally_deleted_file_as_unmodified_and_recreates_it_on_save() {
     let temp = tempdir().unwrap();
     let document_path = temp.path().join("ephemeral.md");

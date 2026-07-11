@@ -255,6 +255,7 @@ pub struct AppSnapshot {
     pub active_document_name: Option<String>,
     pub active_document_path: Option<String>,
     pub active_document_source: Option<String>,
+    pub active_document_synced_source: Option<String>,
     pub active_document_dirty: bool,
     pub mode: EditorMode,
     pub theme: ThemeSelection,
@@ -316,6 +317,8 @@ impl DesktopBackend {
                     .map(|path| path.to_string_lossy().into_owned())
             }),
             active_document_source: active_document.map(|document| document.source().to_string()),
+            active_document_synced_source: active_document
+                .and_then(|document| document.synced_source().map(ToOwned::to_owned)),
             active_document_dirty: active_document.is_some_and(|document| document.is_dirty()),
             mode: workspace.mode(),
             theme: workspace.theme().clone(),
@@ -384,6 +387,22 @@ impl DesktopBackend {
         self.runtime
             .active_document_has_external_modifications()
             .map_err(|error| error.to_string())
+    }
+
+    pub fn reload_active_document_from_disk(
+        &mut self,
+        expected_path: &Path,
+        expected_source: &str,
+        expected_dirty: bool,
+    ) -> Result<AppSnapshot, String> {
+        self.runtime
+            .reload_active_document_from_disk_if_current(
+                expected_path,
+                expected_source,
+                expected_dirty,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(self.snapshot())
     }
 
     pub fn active_document_disk_source(&mut self) -> Result<String, String> {
@@ -1688,6 +1707,22 @@ fn has_active_document_external_changes(state: State<'_, DesktopAppState>) -> Re
 }
 
 #[tauri::command]
+fn reload_active_document_from_disk(
+    path: String,
+    expected_source: String,
+    expected_dirty: bool,
+    state: State<'_, DesktopAppState>,
+) -> Result<AppSnapshot, String> {
+    with_backend(state, |backend| {
+        backend.reload_active_document_from_disk(
+            Path::new(&path),
+            &expected_source,
+            expected_dirty,
+        )
+    })
+}
+
+#[tauri::command]
 fn active_document_disk_source(state: State<'_, DesktopAppState>) -> Result<String, String> {
     with_backend(state, DesktopBackend::active_document_disk_source)
 }
@@ -2082,6 +2117,7 @@ pub fn run() {
             write_pdf_file,
             write_pdf_files,
             has_active_document_external_changes,
+            reload_active_document_from_disk,
             active_document_disk_source,
             set_mode,
             set_theme,
@@ -2778,6 +2814,72 @@ mod tests {
 
         let disk_source = backend.active_document_disk_source().unwrap();
         assert_eq!(disk_source, "# External update\n");
+    }
+
+    #[test]
+    fn backend_reloads_the_active_document_from_disk() {
+        let temp = tempdir().unwrap();
+        let document_path = temp.path().join("notes.md");
+        fs::write(&document_path, "# Initial\n").unwrap();
+
+        let mut backend = DesktopBackend::new(None);
+        backend.open_document(&document_path).unwrap();
+        fs::write(&document_path, "# External update\n").unwrap();
+
+        let snapshot = backend
+            .reload_active_document_from_disk(&document_path, "# Initial\n", false)
+            .unwrap();
+
+        assert_eq!(
+            snapshot.active_document_path.as_deref(),
+            Some(document_path.to_string_lossy().as_ref())
+        );
+        assert_eq!(snapshot.active_document_source.as_deref(), Some("# External update\n"));
+        assert!(!snapshot.active_document_dirty);
+    }
+
+    #[test]
+    fn backend_refuses_a_reload_for_a_document_that_is_no_longer_active() {
+        let temp = tempdir().unwrap();
+        let alpha_path = temp.path().join("alpha.md");
+        let beta_path = temp.path().join("beta.md");
+        fs::write(&alpha_path, "# Alpha\n").unwrap();
+        fs::write(&beta_path, "# Beta\n").unwrap();
+
+        let mut backend = DesktopBackend::new(None);
+        backend.open_document(&alpha_path).unwrap();
+        backend.open_document(&beta_path).unwrap();
+
+        let error = backend
+            .reload_active_document_from_disk(&alpha_path, "# Alpha\n", false)
+            .unwrap_err();
+
+        assert!(error.contains("changed before the reload completed"));
+        assert_eq!(
+            backend.snapshot().active_document_path.as_deref(),
+            Some(beta_path.to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn backend_refuses_a_reload_after_the_same_document_buffer_changes() {
+        let temp = tempdir().unwrap();
+        let document_path = temp.path().join("notes.md");
+        fs::write(&document_path, "# Initial\n").unwrap();
+
+        let mut backend = DesktopBackend::new(None);
+        backend.open_document(&document_path).unwrap();
+        backend.replace_active_document_source("# Local edits\n").unwrap();
+        fs::write(&document_path, "# External update\n").unwrap();
+
+        let error = backend
+            .reload_active_document_from_disk(&document_path, "# Initial\n", false)
+            .unwrap_err();
+
+        assert!(error.contains("changed before the reload completed"));
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.active_document_source.as_deref(), Some("# Local edits\n"));
+        assert!(snapshot.active_document_dirty);
     }
 
     #[test]
