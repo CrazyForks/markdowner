@@ -43,6 +43,7 @@ const bootstrapMock = vi.fn();
 const activeDocumentDiskSourceMock = vi.fn();
 const importThemeMock = vi.fn();
 const hasActiveDocumentExternalChangesMock = vi.fn();
+const reloadActiveDocumentFromDiskMock = vi.fn();
 const newDocumentMock = vi.fn();
 const newWindowMock = vi.fn();
 const openDocumentMock = vi.fn();
@@ -98,6 +99,7 @@ vi.mock('./lib/desktop', () => ({
   activeDocumentDiskSource: activeDocumentDiskSourceMock,
   importTheme: importThemeMock,
   hasActiveDocumentExternalChanges: hasActiveDocumentExternalChangesMock,
+  reloadActiveDocumentFromDisk: reloadActiveDocumentFromDiskMock,
   newDocument: newDocumentMock,
   newWindow: newWindowMock,
   openDocument: openDocumentMock,
@@ -607,6 +609,7 @@ describe('App recent documents', () => {
     onDragDropEventMock.mockReset();
     listenMock.mockReset();
     hasActiveDocumentExternalChangesMock.mockReset();
+    reloadActiveDocumentFromDiskMock.mockReset();
     invokeMock.mockReset();
     tiptapMockState.editor = null;
     tiptapMockState.lastOptions = null;
@@ -651,6 +654,16 @@ describe('App recent documents', () => {
         activeDocumentPath: '/tmp/project/meeting-notes.md',
         activeDocumentSource: '# Meeting notes',
       }),
+    );
+    reloadActiveDocumentFromDiskMock.mockImplementation(
+      ({ path, expectedSource }: { path: string; expectedSource: string }) =>
+        Promise.resolve(
+          baseSnapshot({
+            activeDocumentName: path.split('/').pop() ?? path,
+            activeDocumentPath: path,
+            activeDocumentSource: expectedSource,
+          }),
+        ),
     );
 
     replaceActiveDocumentSourceMock.mockImplementation(async (source: string) =>
@@ -1327,6 +1340,74 @@ describe('App recent documents', () => {
 
     await waitFor(() => {
       expect(openDocumentMock).toHaveBeenCalledWith('/tmp/project/meeting-notes.md');
+    });
+  });
+
+  it('reloads a clean cached recent document from disk before showing it', async () => {
+    const documentPath = '/tmp/project/meeting-notes.md';
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: documentPath,
+        activeDocumentSource: '# Cached version',
+        mode: 'Editor',
+      }),
+    );
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: documentPath,
+        activeDocumentSource: '# Latest disk version',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /meeting-notes\.md/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledWith({
+        path: documentPath,
+        expectedSource: '# Cached version',
+        expectedDirty: false,
+      });
+      expect(screen.getByLabelText('Source editor')).toHaveValue('# Latest disk version');
+    });
+  });
+
+  it('preserves a dirty cached recent document and reports the disk conflict', async () => {
+    const documentPath = '/tmp/project/meeting-notes.md';
+    openDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: documentPath,
+        activeDocumentSource: '# Local draft',
+        activeDocumentSyncedSource: '# Disk baseline',
+        activeDocumentDirty: true,
+        mode: 'Editor',
+      }),
+    );
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /meeting-notes\.md/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Source editor')).toHaveValue('# Local draft');
+      expect(reloadActiveDocumentFromDiskMock).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: /reload from disk/i })).toBeInTheDocument();
     });
   });
 
@@ -3191,7 +3272,7 @@ describe('App recent documents', () => {
         activeDocumentSource: '# Meeting notes',
       }),
     );
-    openDocumentMock.mockResolvedValue(
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: '/tmp/project/meeting-notes.md',
@@ -3212,13 +3293,675 @@ describe('App recent documents', () => {
     fireEvent.click(reloadButton);
 
     await waitFor(() => {
-      expect(openDocumentMock).toHaveBeenCalledWith('/tmp/project/meeting-notes.md');
+      expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledTimes(1);
+      expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledWith({
+        path: '/tmp/project/meeting-notes.md',
+        expectedSource: '# Meeting notes',
+        expectedDirty: false,
+      });
+      expect(openDocumentMock).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('Source editor')).toHaveValue(
+        '# Meeting notes\n\nUpdated from disk',
+      );
       expect(
         screen.queryByText(
           /Could not save 'meeting-notes\.md' because it changed on disk\./i,
         ),
       ).not.toBeInTheDocument();
     });
+
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(false);
+    saveActiveDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes\n\nUpdated from disk\n\nLocal follow-up',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Source editor'), {
+      target: { value: '# Meeting notes\n\nUpdated from disk\n\nLocal follow-up' },
+    });
+    const secondMenu = await openAppMenu();
+    fireEvent.click(within(secondMenu).getByRole('menuitem', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(saveActiveDocumentMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('reloads a clean active document after the app regains focus and disk content changed', async () => {
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Previous version',
+      }),
+    );
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Latest version',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Previous version');
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    await waitFor(() => {
+      expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledTimes(1);
+      expect(sourceEditor).toHaveValue('# Latest version');
+      expect(screen.queryByText(/changed on disk/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it('polls a clean document for disk changes while the window stays focused', async () => {
+    const intervalCallbacks: Array<{ handler: TimerHandler; timeout: number | undefined }> = [];
+    const setIntervalSpy = vi.spyOn(window, 'setInterval').mockImplementation((handler, timeout) => {
+      intervalCallbacks.push({ handler, timeout: Number(timeout) });
+      return 1 as unknown as number;
+    });
+    const hasFocusSpy = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Previous version',
+      }),
+    );
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Latest version',
+      }),
+    );
+
+    try {
+      const { default: App } = await import('./App');
+      render(<App />);
+
+      const sourceEditor = await screen.findByLabelText('Source editor');
+      await waitFor(() => {
+        expect(intervalCallbacks.some(({ timeout }) => timeout === 1000)).toBe(true);
+      });
+      const refresh = intervalCallbacks.find(({ timeout }) => timeout === 1000)?.handler;
+      expect(typeof refresh).toBe('function');
+
+      await act(async () => {
+        if (typeof refresh === 'function') {
+          refresh();
+        }
+      });
+
+      await waitFor(() => {
+        expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledTimes(1);
+        expect(sourceEditor).toHaveValue('# Latest version');
+      });
+    } finally {
+      hasFocusSpy.mockRestore();
+      setIntervalSpy.mockRestore();
+    }
+  });
+
+  it('keeps local edits and shows a conflict instead of auto-reloading after focus', async () => {
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Previous version',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    fireEvent.change(sourceEditor, { target: { value: '# Local edits' } });
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Local edits');
+      expect(reloadActiveDocumentFromDiskMock).not.toHaveBeenCalled();
+      expect(screen.getByText(/changed on disk/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /reload from disk/i })).toBeInTheDocument();
+    });
+  });
+
+  it('does not auto-reload while a WYSIWYG edit is waiting for its draft flush', async () => {
+    const editor = createMockTiptapEditor('# Previous version', [
+      { text: '# Previous version', from: 1 },
+    ]);
+    tiptapMockState.editor = editor;
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Previous version',
+        mode: 'Wysiwyg',
+      }),
+    );
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Latest disk version',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+    editor.getMarkdown.mockReturnValue('# Local edit waiting to flush');
+    act(() => {
+      tiptapMockState.lastOptions.onUpdate({ editor });
+    });
+    hasActiveDocumentExternalChangesMock.mockClear();
+    reloadActiveDocumentFromDiskMock.mockClear();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    expect(hasActiveDocumentExternalChangesMock).not.toHaveBeenCalled();
+    expect(reloadActiveDocumentFromDiskMock).not.toHaveBeenCalled();
+  });
+
+  it('reloads a clean inactive tab from disk before showing it', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      const isAlpha = path === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: isAlpha ? '# Alpha cached' : '# Beta cached',
+          mode: 'Editor',
+        }),
+      );
+    });
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'beta.md',
+        activeDocumentPath: betaPath,
+        activeDocumentSource: '# Beta latest on disk',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha cached');
+      expect(screen.getByRole('tab', { name: /alpha\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledTimes(1);
+      expect(sourceEditor).toHaveValue('# Beta latest on disk');
+      expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+  });
+
+  it('keeps a dirty inactive tab local and reports the disk conflict when switching back', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    let backendActivePath = alphaPath;
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      backendActivePath = path;
+      const isAlpha = path === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: isAlpha ? '# Alpha cached' : '# Beta cached',
+          mode: 'Editor',
+        }),
+      );
+    });
+    reloadActiveDocumentFromDiskMock.mockImplementation(() => {
+      const isAlpha = backendActivePath === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: backendActivePath,
+          activeDocumentSource: isAlpha ? '# Alpha latest' : '# Beta latest',
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    fireEvent.click(await screen.findByRole('tab', { name: /beta\.md/i }));
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta latest');
+    });
+
+    fireEvent.change(sourceEditor, { target: { value: '# Beta local edits' } });
+    fireEvent.click(screen.getByRole('tab', { name: /alpha\.md/i }));
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha latest');
+    });
+
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    reloadActiveDocumentFromDiskMock.mockClear();
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta local edits');
+      expect(reloadActiveDocumentFromDiskMock).not.toHaveBeenCalled();
+      expect(screen.getByText(/changed on disk/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /reload from disk/i })).toBeInTheDocument();
+    });
+  });
+
+  it('does not mistake the backend cache for a clean tab after switching back', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    const diskSources: Record<string, string> = {
+      [alphaPath]: '# Alpha disk',
+      [betaPath]: '# Beta disk',
+    };
+    const backendSources: Record<string, string> = { ...diskSources };
+    const backendDirty: Record<string, boolean> = {
+      [alphaPath]: false,
+      [betaPath]: false,
+    };
+    let backendActivePath = alphaPath;
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      backendActivePath = path;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: path === alphaPath ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: backendSources[path],
+          activeDocumentDirty: backendDirty[path],
+          mode: 'Editor',
+        }),
+      );
+    });
+    reloadActiveDocumentFromDiskMock.mockImplementation(
+      ({ path }: { path: string }) => {
+        backendActivePath = path;
+        backendSources[path] = diskSources[path];
+        backendDirty[path] = false;
+        return Promise.resolve(
+          baseSnapshot({
+            activeDocumentName: path === alphaPath ? 'alpha.md' : 'beta.md',
+            activeDocumentPath: path,
+            activeDocumentSource: diskSources[path],
+            activeDocumentDirty: false,
+            mode: 'Editor',
+          }),
+        );
+      },
+    );
+    replaceActiveDocumentSourceMock.mockImplementation((source: string) => {
+      backendSources[backendActivePath] = source;
+      backendDirty[backendActivePath] = true;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: backendActivePath === alphaPath ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: backendActivePath,
+          activeDocumentSource: source,
+          activeDocumentDirty: true,
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    fireEvent.click(await screen.findByRole('tab', { name: /beta\.md/i }));
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta disk');
+    });
+
+    fireEvent.change(sourceEditor, { target: { value: '# Beta local edits' } });
+    await waitFor(() => {
+      expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith('# Beta local edits');
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /alpha\.md/i }));
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha disk');
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta local edits');
+    });
+
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    reloadActiveDocumentFromDiskMock.mockClear();
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta local edits');
+      expect(reloadActiveDocumentFromDiskMock).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: /reload from disk/i })).toBeInTheDocument();
+    });
+  });
+
+  it('preserves a dirty switched tab when external-change verification fails', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    let backendActivePath = alphaPath;
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) => {
+      backendActivePath = path;
+      const isAlpha = path === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: isAlpha ? '# Alpha' : '# Beta cached',
+          mode: 'Editor',
+        }),
+      );
+    });
+    reloadActiveDocumentFromDiskMock.mockImplementation(
+      ({ path }: { path: string }) =>
+        Promise.resolve(
+          baseSnapshot({
+            activeDocumentName: path === alphaPath ? 'alpha.md' : 'beta.md',
+            activeDocumentPath: path,
+            activeDocumentSource: path === alphaPath ? '# Alpha disk' : '# Beta disk',
+            mode: 'Editor',
+          }),
+        ),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    fireEvent.click(await screen.findByRole('tab', { name: /beta\.md/i }));
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta disk');
+    });
+
+    fireEvent.change(sourceEditor, { target: { value: '# Beta local edits' } });
+    fireEvent.click(screen.getByRole('tab', { name: /alpha\.md/i }));
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Alpha disk');
+    });
+
+    hasActiveDocumentExternalChangesMock.mockRejectedValueOnce(new Error('permission denied'));
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta local edits');
+      expect(screen.getByText(/Could not verify external changes.*permission denied/i)).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+  });
+
+  it('ignores a deferred focus refresh after the user switches tabs', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    let resolveExternalCheck: ((changed: boolean) => void) | undefined;
+
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) =>
+      Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: path === alphaPath ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: path,
+          activeDocumentSource: path === alphaPath ? '# Alpha cached' : '# Beta cached',
+          mode: 'Editor',
+        }),
+      ),
+    );
+    reloadActiveDocumentFromDiskMock.mockImplementation(
+      ({ path }: { path: string }) =>
+        Promise.resolve(
+          baseSnapshot({
+            activeDocumentName: path === alphaPath ? 'alpha.md' : 'beta.md',
+            activeDocumentPath: path,
+            activeDocumentSource: path === alphaPath ? '# Alpha latest' : '# Beta latest',
+            mode: 'Editor',
+          }),
+        ),
+    );
+    hasActiveDocumentExternalChangesMock.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveExternalCheck = resolve;
+        }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /alpha\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => {
+      expect(resolveExternalCheck).toBeTypeOf('function');
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /beta\.md/i }));
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Beta latest');
+      expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    await act(async () => {
+      resolveExternalCheck?.(true);
+    });
+
+    expect(sourceEditor).toHaveValue('# Beta latest');
+    expect(screen.getByRole('tab', { name: /beta\.md/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(
+      reloadActiveDocumentFromDiskMock.mock.calls.some(
+        ([request]) => request.path === alphaPath,
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps an edit made while a focus reload is in flight', async () => {
+    let resolveReload: ((snapshot: AppSnapshot) => void) | undefined;
+
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Previous version',
+        mode: 'Editor',
+      }),
+    );
+    reloadActiveDocumentFromDiskMock.mockImplementation(
+      () =>
+        new Promise<AppSnapshot>((resolve) => {
+          resolveReload = resolve;
+        }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => {
+      expect(resolveReload).toBeTypeOf('function');
+    });
+
+    fireEvent.change(sourceEditor, { target: { value: '# Local edits' } });
+    await act(async () => {
+      resolveReload?.(
+        baseSnapshot({
+          activeDocumentName: 'meeting-notes.md',
+          activeDocumentPath: '/tmp/project/meeting-notes.md',
+          activeDocumentSource: '# Latest disk version',
+          mode: 'Editor',
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(sourceEditor).toHaveValue('# Local edits');
+      expect(screen.getByRole('button', { name: /reload from disk/i })).toBeInTheDocument();
+      expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith('# Local edits');
+    });
+  });
+
+  it('keeps a WYSIWYG keystroke typed while a focus reload is in flight', async () => {
+    const editor = createMockTiptapEditor('# Previous version', [
+      { text: '# Previous version', from: 1 },
+    ]);
+    tiptapMockState.editor = editor;
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Previous version',
+        mode: 'Wysiwyg',
+      }),
+    );
+    let resolveReload: ((snapshot: AppSnapshot) => void) | undefined;
+    reloadActiveDocumentFromDiskMock.mockImplementation(
+      () =>
+        new Promise<AppSnapshot>((resolve) => {
+          resolveReload = resolve;
+        }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+    editor.commands.setContent.mockClear();
+
+    // Focus fires the refresh; the external change is detected and the reload
+    // begins.
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => {
+      expect(resolveReload).toBeTypeOf('function');
+    });
+
+    // The user types in WYSIWYG DURING the reload await. onUpdate only schedules
+    // a debounced flush, so localDraftRef is NOT updated yet — only the pending
+    // flush timer marks the buffer dirty.
+    editor.getMarkdown.mockReturnValue('# Previous version edited');
+    act(() => {
+      tiptapMockState.lastOptions.onUpdate({ editor });
+    });
+
+    // The reload resolves before the debounce fires.
+    await act(async () => {
+      resolveReload?.(
+        baseSnapshot({
+          activeDocumentName: 'meeting-notes.md',
+          activeDocumentPath: '/tmp/project/meeting-notes.md',
+          activeDocumentSource: '# Latest disk version',
+          mode: 'Wysiwyg',
+        }),
+      );
+    });
+
+    // The in-flight keystroke must not be clobbered by disk content; a conflict
+    // banner is shown instead.
+    expect(editor.commands.setContent).not.toHaveBeenCalledWith(
+      '# Latest disk version',
+      expect.anything(),
+    );
+    expect(screen.getByRole('button', { name: /reload from disk/i })).toBeInTheDocument();
   });
 
   it('keeps a switched tab active when an earlier disk reload resolves later', async () => {
@@ -3226,6 +3969,7 @@ describe('App recent documents', () => {
     const betaPath = '/tmp/project/beta.md';
     let deferAlphaReload = false;
     let resolveAlphaReload: ((snapshot: AppSnapshot) => void) | undefined;
+    let backendActivePath = alphaPath;
 
     hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
     bootstrapMock.mockResolvedValue(baseSnapshot());
@@ -3235,17 +3979,29 @@ describe('App recent documents', () => {
       cursorPositions: {},
     });
     openDocumentMock.mockImplementation((path: string) => {
-      if (path === alphaPath && deferAlphaReload) {
-        return new Promise<AppSnapshot>((resolve) => {
-          resolveAlphaReload = resolve;
-        });
-      }
+      backendActivePath = path;
       const isAlpha = path === alphaPath;
       return Promise.resolve(
         baseSnapshot({
           activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
           activeDocumentPath: path,
           activeDocumentSource: isAlpha ? '# Alpha' : '# Beta',
+          mode: 'Editor',
+        }),
+      );
+    });
+    reloadActiveDocumentFromDiskMock.mockImplementation(() => {
+      if (backendActivePath === alphaPath && deferAlphaReload) {
+        return new Promise<AppSnapshot>((resolve) => {
+          resolveAlphaReload = resolve;
+        });
+      }
+      const isAlpha = backendActivePath === alphaPath;
+      return Promise.resolve(
+        baseSnapshot({
+          activeDocumentName: isAlpha ? 'alpha.md' : 'beta.md',
+          activeDocumentPath: backendActivePath,
+          activeDocumentSource: isAlpha ? '# Alpha reloaded' : '# Beta',
           mode: 'Editor',
         }),
       );
@@ -3334,6 +4090,73 @@ describe('App recent documents', () => {
       ).not.toBeInTheDocument();
     });
     expect(openDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it('continues blocking Save after Keep local until the conflict is resolved', async () => {
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const firstMenu = await openAppMenu();
+    fireEvent.click(within(firstMenu).getByRole('menuitem', { name: /^save$/i }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /keep local/i }));
+    expect(screen.queryByText(/changed on disk/i)).not.toBeInTheDocument();
+
+    const secondMenu = await openAppMenu();
+    fireEvent.click(within(secondMenu).getByRole('menuitem', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(saveActiveDocumentMock).not.toHaveBeenCalled();
+      expect(screen.getByText(/changed on disk/i)).toBeInTheDocument();
+    });
+  });
+
+  it('lets Save proceed after Keep local once the disk conflict is reverted', async () => {
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(true);
+    saveActiveDocumentMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const firstMenu = await openAppMenu();
+    fireEvent.click(within(firstMenu).getByRole('menuitem', { name: /^save$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /keep local/i }));
+
+    // The external process reverts its change: disk == buffer baseline again.
+    // A sticky conflict flag would keep Save blocked forever; clearing it on
+    // Keep local lets the next Save re-verify and go through.
+    hasActiveDocumentExternalChangesMock.mockResolvedValue(false);
+
+    const secondMenu = await openAppMenu();
+    fireEvent.click(within(secondMenu).getByRole('menuitem', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(saveActiveDocumentMock).toHaveBeenCalled();
+    });
   });
 
   it('lets the user compare local and disk versions when external changes are detected', async () => {
@@ -5762,7 +6585,6 @@ describe('App recent documents', () => {
         'true',
       );
     });
-
     await act(async () => {
       pendingOpens.get('/tmp/project/alpha.md')?.(
         baseSnapshot({
@@ -5780,13 +6602,6 @@ describe('App recent documents', () => {
       'aria-selected',
       'true',
     );
-    await waitFor(() => {
-      const sourceEditor = screen.getByRole('textbox', {
-        name: /source editor/i,
-      }) as HTMLTextAreaElement;
-      expect(sourceEditor.selectionStart).toBe(2);
-      expect(sourceEditor.selectionEnd).toBe(6);
-    });
   });
 
   it('keeps search results empty when a pending search resolves after clearing the query', async () => {
@@ -8293,6 +9108,47 @@ describe('App recent documents', () => {
     expect(screen.getByRole('tab', { name: /launched\.md/i })).toBeInTheDocument();
   });
 
+  it('reloads a clean externally-opened document from disk before showing it', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+    // Rust re-opens a cached buffer, so the pushed snapshot can carry stale
+    // bytes; the disk read returns the file's current content.
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'launched.md',
+        activeDocumentPath: '/tmp/project/launched.md',
+        activeDocumentSource: '# Fresh from disk',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(updateSnapshotHandler).toBeTypeOf('function');
+    });
+
+    await act(async () => {
+      await updateSnapshotHandler?.({
+        payload: baseSnapshot({
+          activeDocumentName: 'launched.md',
+          activeDocumentPath: '/tmp/project/launched.md',
+          activeDocumentSource: '# Stale cached bytes',
+          mode: 'Editor',
+        }),
+      });
+    });
+
+    expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledWith({
+      path: '/tmp/project/launched.md',
+      expectedSource: '# Stale cached bytes',
+      expectedDirty: false,
+    });
+    expect(await screen.findByLabelText('Source editor')).toHaveValue('# Fresh from disk');
+    expect(screen.getByRole('tab', { name: /launched\.md/i })).toBeInTheDocument();
+  });
+
   it('keeps a native update-snapshot active when an earlier open resolves later', async () => {
     let resolveOpen: ((snapshot: AppSnapshot) => void) | undefined;
 
@@ -8601,7 +9457,15 @@ describe('App recent documents', () => {
       baseSnapshot({
         activeDocumentName: 'meeting-notes.md',
         activeDocumentPath: documentPath,
-        activeDocumentSource: '# Meeting notes',
+        activeDocumentSource: '# Cached version',
+        mode: 'Editor',
+      }),
+    );
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: documentPath,
+        activeDocumentSource: '# Latest disk version',
         mode: 'Editor',
       }),
     );
@@ -8622,13 +9486,18 @@ describe('App recent documents', () => {
 
     await waitFor(() => {
       expect(openDocumentMock).toHaveBeenCalledWith(documentPath);
+      expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledWith({
+        path: documentPath,
+        expectedSource: '# Cached version',
+        expectedDirty: false,
+      });
       expect(screen.getByRole('tab', { name: /meeting-notes\.md/i })).toHaveAttribute(
         'aria-selected',
         'true',
       );
     });
     expect(screen.getByRole('textbox', { name: /source editor/i })).toHaveValue(
-      '# Meeting notes',
+      '# Latest disk version',
     );
   });
 

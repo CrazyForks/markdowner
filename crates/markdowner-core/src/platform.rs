@@ -12,9 +12,12 @@ use crate::{
         write_document_source,
     },
     theme::validate_stylesheet,
+    workspace::normalize_source,
 };
 
 const MARKDOWN_FILE_EXTENSIONS: [&str; 4] = ["md", "markdown", "mdown", "mkd"];
+pub const RELOAD_DOCUMENT_PRECONDITION_ERROR: &str =
+    "Could not reload document because it changed before the reload completed";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDialogOptions {
@@ -593,7 +596,7 @@ impl EditorRuntime {
                 return Err(error);
             }
         };
-        let stale = current_source != synced_source;
+        let stale = normalize_source(current_source) != synced_source;
         if !stale {
             self.workspace.clear_error();
         } else {
@@ -601,6 +604,65 @@ impl EditorRuntime {
                 .set_last_error("Active document changed on disk".to_string());
         }
         Ok(stale)
+    }
+
+    /// Replace the active document's in-memory buffer with the current bytes
+    /// on disk. This deliberately bypasses `open_document`, whose normal
+    /// behavior reactivates an existing buffer to preserve unsaved edits.
+    pub fn reload_active_document_from_disk(&mut self) -> Result<PathBuf, RuntimeError> {
+        let Some(active_document) = self.workspace.active_document() else {
+            return self.fail(RuntimeError::new(
+                "Could not reload document because no document is open",
+            ));
+        };
+        let Some(path) = active_document.backing_path().map(Path::to_path_buf) else {
+            return self.fail(RuntimeError::new(
+                "Could not reload document because it has no file path yet",
+            ));
+        };
+
+        let source = match read_document_source(&path) {
+            Ok(source) => source,
+            Err(error) => {
+                return self.fail(RuntimeError::new(format!(
+                    "Could not reload document '{}': {error}",
+                    path.display()
+                )));
+            }
+        };
+
+        self.workspace
+            .open_document_from_source(path.clone(), source);
+
+        self.workspace.clear_error();
+        Ok(path)
+    }
+
+    /// Reload only when the active document still matches the state the
+    /// caller inspected before requesting a disk read. This prevents a late
+    /// refresh from replacing local edits made on the same path meanwhile.
+    pub fn reload_active_document_from_disk_if_current(
+        &mut self,
+        expected_path: &Path,
+        expected_source: &str,
+        expected_dirty: bool,
+    ) -> Result<PathBuf, RuntimeError> {
+        let Some(active_document) = self.workspace.active_document() else {
+            return self.fail(RuntimeError::new(
+                "Could not reload document because no document is open",
+            ));
+        };
+        let active_path = active_document.backing_path().map(Path::to_path_buf);
+        let active_source = active_document.source().to_string();
+        let active_dirty = active_document.is_dirty();
+        if active_path.as_deref() != Some(expected_path)
+            || active_source != normalize_source(expected_source.to_string())
+            || active_dirty != expected_dirty
+        {
+            return self.fail(RuntimeError::new(RELOAD_DOCUMENT_PRECONDITION_ERROR));
+        }
+
+        self.reload_active_document_from_disk()
     }
 
     pub fn active_document_disk_source(&mut self) -> Result<String, RuntimeError> {

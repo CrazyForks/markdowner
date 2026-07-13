@@ -81,6 +81,7 @@ import {
   type ThemeKind,
   bootstrap,
   hasActiveDocumentExternalChanges,
+  reloadActiveDocumentFromDisk,
   activeDocumentDiskSource,
   importTheme,
   newDocument,
@@ -179,6 +180,7 @@ import {
   findDocumentTabByPath,
   generateDocumentTabId,
   hydrateRestoredActiveDocumentTab,
+  isDocumentTabDirty,
   markDocumentTabMissing,
   mergeRestoredDocumentTabs,
   popClosedDocumentTab,
@@ -403,6 +405,23 @@ const CHORD_PREFIX_TIMEOUT_MS = 1500;
 // at this cadence and force-flush at synchronization points (save, mode
 // switch, tab stash, close prompts) to keep correctness without the cost.
 const WYSIWYG_FLUSH_DEBOUNCE_MS = 120;
+// A focused desktop window can remain foreground while another program writes
+// the file. Poll the one active document so that case does not depend on a
+// focus or tab-switch event.
+const EXTERNAL_REFRESH_INTERVAL_MS = 1000;
+const RELOAD_DOCUMENT_PRECONDITION_ERROR =
+  'Could not reload document because it changed before the reload completed';
+
+type PreservedDocumentState = {
+  source: string;
+  draft: string;
+};
+
+type OpenedDocumentResolution = {
+  snapshot: AppSnapshot;
+  preservedDocumentState: PreservedDocumentState | null;
+  externalChangeState: ExternalChangeViewState | null;
+};
 // Debounce window for the hot-exit draft backup file while the user types.
 // Tab-list changes and close/quit flush immediately; this only bounds the
 // data-loss window for hard crashes.
@@ -436,12 +455,18 @@ function useLatestRequestTracker(): LatestRequestTracker {
   return trackerRef.current;
 }
 
+function isReloadDocumentPreconditionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(RELOAD_DOCUMENT_PRECONDITION_ERROR);
+}
+
 export default function App() {
   const shouldCreateInitialDocument = useMemo(
     () => new URLSearchParams(window.location.search).get(NEW_WINDOW_QUERY_PARAM) === '1',
     [],
   );
   const [snapshot, setSnapshot] = useState<AppSnapshot>(EMPTY_SNAPSHOT);
+  const snapshotRef = useRef<AppSnapshot>(snapshot);
   const [localDraft, setLocalDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [externalChangeMessage, setExternalChangeMessage] = useState<string | null>(null);
@@ -508,6 +533,9 @@ export default function App() {
   const modeRequests = useLatestRequestTracker();
   const themeRequests = useLatestRequestTracker();
   const externalCompareRequests = useLatestRequestTracker();
+  const externalRefreshRequests = useLatestRequestTracker();
+  const externalConflictPathsRef = useRef(new Set<string>());
+  const externalRefreshInFlightRef = useRef(false);
   const busyDepthRef = useRef(0);
   const liveRegionTimerRef = useRef<number | null>(null);
   const lastAnnouncedModeRef = useRef<EditorMode | null>(null);
@@ -708,6 +736,9 @@ export default function App() {
   const closedDocumentTabsRef = useRef<DocumentTab[]>(closedDocumentTabs);
   const startupTabsReadyRef = useRef<boolean>(startupTabsReady);
   useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
+  useEffect(() => {
     tabsRef.current = tabs;
   }, [tabs]);
   useEffect(() => {
@@ -732,7 +763,12 @@ export default function App() {
   // switch is mid-await) commit state in arrival order rather than user
   // intent order, leaving the editor on the previous file's contents.
   const editorOpRequests = useLatestRequestTracker();
-  const nextEditorOpRequest = () => editorOpRequests.begin();
+  const nextEditorOpRequest = () => {
+    // A tab/document operation immediately invalidates any focus/poll refresh
+    // that was inspecting the previously active buffer.
+    externalRefreshRequests.begin();
+    return editorOpRequests.begin();
+  };
   const isEditorOpStale = (token: number) => editorOpRequests.isStale(token);
   const editorOpAbortOptions = (token: number) => editorOpRequests.abortOptions(token);
   // Tracks the document tab that was active immediately before the settings
@@ -809,6 +845,7 @@ export default function App() {
       reuseTabId?: string | null;
       markStartupTabsReady?: boolean;
       preserveSettingsActive?: boolean;
+      preservedDocumentState?: PreservedDocumentState | null;
     } = {},
   ) => {
     const reuseId = options.reuseTabId ?? null;
@@ -820,12 +857,25 @@ export default function App() {
       preserveSettingsActive: options.preserveSettingsActive,
     });
 
-    tabsRef.current = result.tabs;
+    const preservedDocumentState = options.preservedDocumentState;
+    const nextTabs = preservedDocumentState
+      ? result.tabs.map((tab) =>
+          tab.id === result.activeTabId && tab.kind === 'document'
+            ? {
+                ...tab,
+                source: preservedDocumentState.source,
+                draft: preservedDocumentState.draft,
+              }
+            : tab,
+        )
+      : result.tabs;
+
+    tabsRef.current = nextTabs;
     // Startup can finish after the user has already opened Settings. In that
     // narrow path, keep Settings active while still adding the document tab.
     activeTabIdRef.current = result.activeTabId;
     startTransition(() => {
-      setTabs(result.tabs);
+      setTabs(nextTabs);
       setActiveTabId(result.activeTabId);
       if (options.markStartupTabsReady) {
         setStartupTabsReady(true);
@@ -1408,6 +1458,7 @@ export default function App() {
   // memoised source editor host and forcing CodeMirror to
   // reconcile on every cursor tick (the visible "text style flicker").
   const handleSourceEditorChange = useEffectEvent((value: string) => {
+    localDraftRef.current = value;
     setLocalDraft(value);
   });
   const handleSourceEditorStatistics = useEffectEvent((stats: unknown) => {
@@ -1597,6 +1648,7 @@ export default function App() {
     // can reach the mirror/save paths so the bytes never go back to disk.
     const sanitized = sanitizeMarkdownControlChars(markdown);
     lastEditorMarkdownRef.current = sanitized;
+    localDraftRef.current = sanitized;
     setLocalDraft(sanitized);
   });
 
@@ -2464,7 +2516,11 @@ export default function App() {
       return;
     }
 
-    setLocalDraft((current) => replaceSingleMatch(current, activeFindMatch, findReplacement));
+    setLocalDraft((current) => {
+      const next = replaceSingleMatch(current, activeFindMatch, findReplacement);
+      localDraftRef.current = next;
+      return next;
+    });
     setActiveFindMatchIndex((current) =>
       nextFindMatchIndexAfterReplace(current, findMatchCount),
     );
@@ -2488,7 +2544,11 @@ export default function App() {
       return;
     }
 
-    setLocalDraft((current) => replaceAllMatches(current, findMatches, findReplacement));
+    setLocalDraft((current) => {
+      const next = replaceAllMatches(current, findMatches, findReplacement);
+      localDraftRef.current = next;
+      return next;
+    });
     setActiveFindMatchIndex(0);
   };
 
@@ -2573,6 +2633,10 @@ export default function App() {
   };
 
   const applySnapshot = (next: AppSnapshot, preserveDraft = false) => {
+    snapshotRef.current = next;
+    if (!preserveDraft) {
+      localDraftRef.current = next.activeDocumentSource ?? '';
+    }
     startTransition(() => {
       setSnapshot(next);
       clearExternalChangeState();
@@ -2586,6 +2650,9 @@ export default function App() {
     tabsRef.current = [];
     activeTabIdRef.current = null;
     preSettingsDocTabIdRef.current = null;
+    externalConflictPathsRef.current.clear();
+    snapshotRef.current = clearActiveDocumentSnapshot(snapshotRef.current);
+    localDraftRef.current = '';
     startTransition(() => {
       setTabs([]);
       setActiveTabId(null);
@@ -2609,12 +2676,50 @@ export default function App() {
     return message;
   };
 
-  const handleExternalSnapshot = useEffectEvent((next: AppSnapshot) => {
-    nextEditorOpRequest();
+  const handleExternalSnapshot = useEffectEvent(async (next: AppSnapshot) => {
+    const token = nextEditorOpRequest();
     stashActiveTabDraft();
-    applySnapshot(next);
-    if (next.activeDocumentSource !== null) {
-      upsertActiveTabFromSnapshot(next);
+
+    // Rust reactivates a cached in-memory buffer when it opens a path, so an
+    // external re-open (Finder "Open With", `markdowner file.md`, a second
+    // instance) can push the stale cached bytes for a file that changed on
+    // disk. Re-read a CLEAN document from disk before it reaches the editor —
+    // the same guard every in-app open flow uses. A document with unsaved
+    // edits (in the backend buffer or the frontend tab) keeps its draft and is
+    // applied verbatim so nothing is clobbered.
+    let resolved = next;
+    const path = next.activeDocumentPath;
+    const existingTab = path ? findDocumentTabByPath(tabsRef.current, path) : undefined;
+    const frontendHasLocalEdits =
+      existingTab != null &&
+      isDocumentTabDirty(existingTab, {
+        activeTabId: activeTabIdRef.current,
+        localDraft: localDraftRef.current,
+      });
+    if (
+      path &&
+      next.activeDocumentSource !== null &&
+      !next.activeDocumentDirty &&
+      !frontendHasLocalEdits
+    ) {
+      try {
+        const reloaded = await reloadActiveDocumentFromDisk({
+          path,
+          expectedSource: next.activeDocumentSource,
+          expectedDirty: next.activeDocumentDirty,
+        });
+        if (isEditorOpStale(token)) return;
+        resolved = { ...next, ...reloaded, mode: next.mode };
+      } catch {
+        // Fall back to the pushed snapshot rather than dropping the open; the
+        // focus/poll refresh recovers any remaining external change.
+        if (isEditorOpStale(token)) return;
+      }
+    }
+
+    applySnapshot(resolved);
+    if (resolved.activeDocumentSource !== null) {
+      upsertActiveTabFromSnapshot(resolved);
       // `markdowner file.md` on a running instance is an explicit "open this
       // and let me type" — land the keyboard focus in the editor, matching
       // every other open path.
@@ -3127,10 +3232,21 @@ export default function App() {
       replaceActiveDocumentSource(plan.draft)
         .then((next) => {
           startTransition(() => {
-            setSnapshot((current) =>
-              resolveSyncedDraftSnapshot(current, next, plan.activeDocumentPath),
-            );
-            clearExternalChangeState();
+            setSnapshot((current) => {
+              const resolved = resolveSyncedDraftSnapshot(
+                current,
+                next,
+                plan.activeDocumentPath,
+              );
+              snapshotRef.current = resolved;
+              return resolved;
+            });
+            if (
+              !plan.activeDocumentPath ||
+              !externalConflictPathsRef.current.has(plan.activeDocumentPath)
+            ) {
+              clearExternalChangeState();
+            }
           });
         })
         .catch(() => undefined);
@@ -3424,6 +3540,14 @@ export default function App() {
       return false;
     }
 
+    const path = snapshot.activeDocumentPath;
+    if (externalConflictPathsRef.current.has(path)) {
+      if (!options.shouldAbort?.()) {
+        applyExternalChangeState(externalChangeDetectedState(snapshot.activeDocumentName));
+      }
+      return true;
+    }
+
     try {
       const changed = await hasActiveDocumentExternalChanges();
       if (options.shouldAbort?.()) return false;
@@ -3432,6 +3556,7 @@ export default function App() {
         return false;
       }
 
+      externalConflictPathsRef.current.add(path);
       applyExternalChangeState(externalChangeDetectedState(snapshot.activeDocumentName));
       return true;
     } catch (error) {
@@ -3509,6 +3634,115 @@ export default function App() {
     }
   };
 
+  // Rust deliberately reactivates an existing in-memory buffer when callers
+  // use open_document. That cache is correct for an open dirty tab, but a
+  // path can also be absent from the visible tabs while retaining a closed
+  // draft. Clean cache entries are refreshed from disk; dirty ones keep their
+  // baseline/draft and surface a conflict instead of being overwritten.
+  const resolveOpenedDocumentFromDisk = async (
+    path: string,
+    opened: AppSnapshot,
+    preservedTab: DocumentTab | null = null,
+  ): Promise<OpenedDocumentResolution> => {
+    const activePath = opened.activeDocumentPath ?? path;
+    const closedTab =
+      preservedTab ??
+      closedDocumentTabsRef.current.find(
+        (tab) => tab.kind === 'document' && tab.path === activePath,
+      ) ??
+      null;
+    const closedTabHasLocalEdits =
+      closedTab !== null &&
+      isDocumentTabDirty(closedTab, {
+        activeTabId: null,
+        localDraft: closedTab.draft,
+      });
+
+    if (!opened.activeDocumentDirty && !closedTabHasLocalEdits) {
+      try {
+        const reloaded = await reloadActiveDocumentFromDisk({
+          path: activePath,
+          expectedSource: opened.activeDocumentSource ?? '',
+          expectedDirty: opened.activeDocumentDirty,
+        });
+        return {
+          // Reload does not change mode or workspace metadata. Preserve the
+          // just-opened shell context while replacing the document payload.
+          snapshot: { ...opened, ...reloaded, mode: opened.mode },
+          preservedDocumentState: null,
+          externalChangeState: null,
+        };
+      } catch (error) {
+        // A clean document that cannot be re-read from disk falls back to the
+        // just-opened snapshot rather than failing the open outright. A
+        // precondition failure means the buffer changed under us, so surface a
+        // conflict the way the other reload paths do; any later external edit
+        // is still recovered by the focus/poll refresh.
+        let externalChangeState: ExternalChangeViewState | null = null;
+        if (isReloadDocumentPreconditionError(error)) {
+          externalConflictPathsRef.current.add(activePath);
+          externalChangeState = externalChangeDetectedState(opened.activeDocumentName);
+        }
+        return {
+          snapshot: opened,
+          preservedDocumentState: null,
+          externalChangeState,
+        };
+      }
+    }
+
+    const preservedDocumentState: PreservedDocumentState = closedTabHasLocalEdits
+      ? { source: closedTab.source, draft: closedTab.draft }
+      : {
+          source: opened.activeDocumentSyncedSource ?? opened.activeDocumentSource ?? '',
+          draft: opened.activeDocumentSource ?? '',
+        };
+    let externalChangeState: ExternalChangeViewState | null = null;
+    if (externalConflictPathsRef.current.has(activePath)) {
+      externalChangeState = externalChangeDetectedState(opened.activeDocumentName);
+    } else {
+      try {
+        if (await hasActiveDocumentExternalChanges()) {
+          externalConflictPathsRef.current.add(activePath);
+          externalChangeState = externalChangeDetectedState(opened.activeDocumentName);
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        externalChangeState = externalChangeVerificationErrorState(
+          opened.activeDocumentName,
+          reason,
+        );
+      }
+    }
+
+    return {
+      snapshot: opened,
+      preservedDocumentState,
+      externalChangeState,
+    };
+  };
+
+  const applyOpenedDocumentResolution = (
+    resolution: OpenedDocumentResolution,
+    options: {
+      reuseTabId?: string | null;
+    } = {},
+  ) => {
+    const preservedDocumentState = resolution.preservedDocumentState;
+    applySnapshot(resolution.snapshot, preservedDocumentState !== null);
+    upsertActiveTabFromSnapshot(resolution.snapshot, {
+      reuseTabId: options.reuseTabId,
+      preservedDocumentState,
+    });
+    if (preservedDocumentState) {
+      localDraftRef.current = preservedDocumentState.draft;
+      setLocalDraft(preservedDocumentState.draft);
+    }
+    if (resolution.externalChangeState) {
+      applyExternalChangeState(resolution.externalChangeState);
+    }
+  };
+
   // Single entry point for following a markdown link from any editor surface
   // (WYSIWYG, Split-view preview, source editor). Markdown targets open as an
   // editor tab (applying the returned snapshot so the UI actually reconciles —
@@ -3520,6 +3754,13 @@ export default function App() {
   // by the activeDocumentPath effect, so this stays navigation-agnostic.
   const openMarkdownDocumentByPath = useEffectEvent(
     async (absolutePath: string, options: { openInNewTab: boolean }) => {
+      const existingTab = findDocumentTabByPath(tabsRef.current, absolutePath);
+      if (existingTab) {
+        await switchToTab(existingTab.id);
+        focusActiveEditor();
+        return;
+      }
+
       const token = nextEditorOpRequest();
       let applied = false;
       await withBusy(async () => {
@@ -3527,11 +3768,12 @@ export default function App() {
         await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
         if (isEditorOpStale(token)) return;
 
-        const next = await openDocument(absolutePath);
+        const opened = await openDocument(absolutePath);
+        if (isEditorOpStale(token)) return;
+        const resolution = await resolveOpenedDocumentFromDisk(absolutePath, opened);
         if (isEditorOpStale(token)) return;
 
-        applySnapshot(next);
-        upsertActiveTabFromSnapshot(next, {
+        applyOpenedDocumentResolution(resolution, {
           reuseTabId: options.openInNewTab || hasActiveTabEdits ? null : activeTabIdRef.current,
         });
         applied = true;
@@ -3648,10 +3890,16 @@ export default function App() {
       await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
       if (isEditorOpStale(token)) return;
 
+      const openedResolutions = new Map<string, OpenedDocumentResolution>();
       const openResult = await openSelectedDocumentTabs({
         paths,
         currentTabs: tabs,
-        openPath: openDocument,
+        openPath: async (path) => {
+          const opened = await openDocument(path);
+          const resolution = await resolveOpenedDocumentFromDisk(path, opened);
+          openedResolutions.set(path, resolution);
+          return resolution.snapshot;
+        },
         createTabId: generateDocumentTabId,
         displayNameForPath: displayFileName,
         shouldAbort: () => isEditorOpStale(token),
@@ -3665,17 +3913,45 @@ export default function App() {
         case 'noop':
           return;
         case 'appendAdditions':
+          const activeResolution =
+            openedResolutions.get(openTransition.snapshot.activeDocumentPath ?? '') ??
+            [...openedResolutions.values()].find(
+              (resolution) =>
+                resolution.snapshot.activeDocumentPath ===
+                openTransition.snapshot.activeDocumentPath,
+            ) ??
+            null;
+          const preservedDocumentState = activeResolution?.preservedDocumentState ?? null;
+          applySnapshot(openTransition.snapshot, preservedDocumentState !== null);
+          activeTabIdRef.current = openTransition.activeTabId;
           startTransition(() => {
             setTabs((current) => {
               const next = resolveOpenSelectedDocumentTabsTransition({
                 result: openResult,
                 currentTabs: current,
               });
-              return next.kind === 'appendAdditions' ? next.tabs : current;
+              if (next.kind !== 'appendAdditions') return current;
+              return next.tabs.map((tab) => {
+                const resolution =
+                  (tab.path ? openedResolutions.get(tab.path) : null) ??
+                  [...openedResolutions.values()].find(
+                    (candidate) => candidate.snapshot.activeDocumentPath === tab.path,
+                  );
+                const preserved = resolution?.preservedDocumentState;
+                return preserved && tab.kind === 'document'
+                  ? { ...tab, source: preserved.source, draft: preserved.draft }
+                  : tab;
+              });
             });
             setActiveTabId(openTransition.activeTabId);
           });
-          applySnapshot(openTransition.snapshot);
+          if (preservedDocumentState) {
+            localDraftRef.current = preservedDocumentState.draft;
+            setLocalDraft(preservedDocumentState.draft);
+          }
+          if (activeResolution?.externalChangeState) {
+            applyExternalChangeState(activeResolution.externalChangeState);
+          }
           return;
         case 'switchExisting':
           // Every selected file was already open — switch to the last one.
@@ -3830,20 +4106,214 @@ export default function App() {
   });
 
   const handleReloadActiveDocument = async () => {
-    if (!activeDocumentOpen || !snapshot.activeDocumentPath) {
+    const currentSnapshot = snapshotRef.current;
+    const path = currentSnapshot.activeDocumentPath;
+    const activeTabId = activeTabIdRef.current;
+    if (currentSnapshot.activeDocumentSource === null || !path || !activeTabId) {
       return;
     }
 
-    const path = snapshot.activeDocumentPath;
+    const expectedSource = currentSnapshot.activeDocumentSource;
+    const draftAtRequestStart = localDraftRef.current;
     const token = nextEditorOpRequest();
     await withBusy(async () => {
-      const next = await openDocument(path);
-      if (isEditorOpStale(token)) return;
+      let next: AppSnapshot;
+      try {
+        next = await reloadActiveDocumentFromDisk({
+          path,
+          expectedSource,
+          expectedDirty: currentSnapshot.activeDocumentDirty,
+        });
+      } catch (error) {
+        if (isEditorOpStale(token)) return;
+        if (isReloadDocumentPreconditionError(error)) {
+          externalConflictPathsRef.current.add(path);
+          applyExternalChangeState(
+            externalChangeDetectedState(currentSnapshot.activeDocumentName),
+          );
+          return;
+        }
+        throw error;
+      }
+      if (
+        isEditorOpStale(token) ||
+        activeTabIdRef.current !== activeTabId ||
+        localDraftRef.current !== draftAtRequestStart
+      ) {
+        if (!isEditorOpStale(token) && activeTabIdRef.current === activeTabId) {
+          externalConflictPathsRef.current.add(path);
+          applyExternalChangeState(
+            externalChangeDetectedState(currentSnapshot.activeDocumentName),
+          );
+        }
+        return;
+      }
+      if (next.activeDocumentPath) {
+        externalConflictPathsRef.current.delete(next.activeDocumentPath);
+      }
       applySnapshot(next);
+      setTabs((prev) =>
+        refreshActiveDocumentTabFromSnapshot({
+          tabs: prev,
+          activeTabId,
+          snapshot: next,
+        }),
+      );
     });
   };
 
+  const refreshActiveDocumentAfterWindowFocus = useEffectEvent(async () => {
+    const currentSnapshot = snapshotRef.current;
+    const activePath = currentSnapshot.activeDocumentPath;
+    const activeTabId = activeTabIdRef.current;
+    const activeTab = tabsRef.current.find((tab) => tab.id === activeTabId);
+    // A WYSIWYG keystroke schedules a debounced flush before it reaches
+    // localDraftRef, so this must be re-evaluated after every await below —
+    // not just here — or a reload could land between the keystroke and its
+    // flush and silently overwrite the in-flight edit.
+    const wysiwygDraftPending = () =>
+      currentModeRef.current === 'Wysiwyg' &&
+      (isWysiwygComposingRef.current ||
+        Boolean(editorInstanceRef.current?.view?.composing) ||
+        wysiwygCompositionFlushTimerRef.current !== null);
+    if (
+      busy ||
+      externalRefreshInFlightRef.current ||
+      wysiwygDraftPending() ||
+      currentSnapshot.activeDocumentSource === null ||
+      !activePath ||
+      !activeTabId ||
+      !activeTab ||
+      activeTab.kind !== 'document'
+    ) {
+      return;
+    }
+
+    if (externalConflictPathsRef.current.has(activePath)) {
+      applyExternalChangeState(externalChangeDetectedState(currentSnapshot.activeDocumentName));
+      return;
+    }
+
+    const editorOperationToken = editorOpRequests.current();
+    const draftAtRequestStart = localDraftRef.current;
+    const requestId = externalRefreshRequests.begin();
+    externalRefreshInFlightRef.current = true;
+    const isCurrentRefresh = () =>
+      !externalRefreshRequests.isStale(requestId) &&
+      !isEditorOpStale(editorOperationToken) &&
+      snapshotRef.current.activeDocumentPath === activePath &&
+      activeTabIdRef.current === activeTabId;
+    const showExternalConflict = () => {
+      externalConflictPathsRef.current.add(activePath);
+      applyExternalChangeState(externalChangeDetectedState(currentSnapshot.activeDocumentName));
+    };
+
+    try {
+      const changed = await hasActiveDocumentExternalChanges();
+      if (!isCurrentRefresh() || !changed) {
+        return;
+      }
+
+      const currentTab = tabsRef.current.find((tab) => tab.id === activeTabId);
+      if (
+        !currentTab ||
+        currentTab.kind !== 'document' ||
+        currentSnapshot.activeDocumentDirty ||
+        wysiwygDraftPending() ||
+        localDraftRef.current !== draftAtRequestStart ||
+        isDocumentTabDirty(currentTab, {
+          activeTabId,
+          localDraft: localDraftRef.current,
+        })
+      ) {
+        showExternalConflict();
+        return;
+      }
+
+      const next = await reloadActiveDocumentFromDisk({
+        path: activePath,
+        expectedSource: currentSnapshot.activeDocumentSource,
+        expectedDirty: currentSnapshot.activeDocumentDirty,
+      });
+      if (!isCurrentRefresh()) {
+        return;
+      }
+
+      const refreshedTab = tabsRef.current.find((tab) => tab.id === activeTabId);
+      if (
+        !refreshedTab ||
+        refreshedTab.kind !== 'document' ||
+        wysiwygDraftPending() ||
+        localDraftRef.current !== draftAtRequestStart ||
+        isDocumentTabDirty(refreshedTab, {
+          activeTabId,
+          localDraft: localDraftRef.current,
+        })
+      ) {
+        showExternalConflict();
+        return;
+      }
+
+      externalConflictPathsRef.current.delete(activePath);
+      applySnapshot(next);
+      setTabs((prev) =>
+        refreshActiveDocumentTabFromSnapshot({
+          tabs: prev,
+          activeTabId,
+          snapshot: next,
+        }),
+      );
+    } catch (error) {
+      if (!isCurrentRefresh()) return;
+      if (isReloadDocumentPreconditionError(error)) {
+        // The backend's active document changed under us. In a single window
+        // this is a transient race; with several windows sharing the one
+        // backend it means another window currently owns it. Either way, an
+        // automatic refresh must re-verify on the next tick rather than flag a
+        // sticky (and possibly false) conflict that would suppress it forever.
+        return;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      applyExternalChangeState(
+        externalChangeVerificationErrorState(currentSnapshot.activeDocumentName, reason),
+      );
+    } finally {
+      externalRefreshInFlightRef.current = false;
+    }
+  });
+
+  useEffect(() => {
+    const refreshAfterLifecycleChange = () => {
+      void refreshActiveDocumentAfterWindowFocus();
+    };
+
+    window.addEventListener('focus', refreshAfterLifecycleChange);
+    return () => {
+      window.removeEventListener('focus', refreshAfterLifecycleChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
+        return;
+      }
+      void refreshActiveDocumentAfterWindowFocus();
+    }, EXTERNAL_REFRESH_INTERVAL_MS);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, []);
+
   const handleKeepLocalChanges = () => {
+    // The user explicitly accepted their local version, so drop the sticky
+    // conflict flag. A later Save (or the poll) then re-verifies against disk
+    // instead of being permanently gated — including once the on-disk change is
+    // reverted, at which point the save must go through.
+    const path = snapshotRef.current.activeDocumentPath;
+    if (path) {
+      externalConflictPathsRef.current.delete(path);
+    }
     clearExternalChangeState();
   };
 
@@ -4284,10 +4754,11 @@ export default function App() {
       stashActiveTabDraft();
       await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
       if (isEditorOpStale(token)) return;
-      const next = await openPath(pathTransition.path);
+      const opened = await openPath(pathTransition.path);
       if (isEditorOpStale(token)) return;
-      applySnapshot(next);
-      upsertActiveTabFromSnapshot(next);
+      const resolution = await resolveOpenedDocumentFromDisk(pathTransition.path, opened);
+      if (isEditorOpStale(token)) return;
+      applyOpenedDocumentResolution(resolution);
       applied = true;
     });
 
@@ -4337,12 +4808,15 @@ export default function App() {
           // Settings is a UI-only surface — stay on the current snapshot but
           // hand the active-tab pointer to the settings tab so the editor
           // area swaps to the settings content.
+          activeTabIdRef.current = transition.target.id;
           setActiveTabId(transition.target.id);
           return;
         }
         if (transition.kind === 'activateMissing') {
           // Missing files: stay on the empty editor; do not call into Rust.
+          activeTabIdRef.current = transition.target.id;
           setActiveTabId(transition.target.id);
+          localDraftRef.current = '';
           setLocalDraft('');
           return;
         }
@@ -4350,17 +4824,140 @@ export default function App() {
         if (transition.kind === 'openPath') {
           historySkipPathRef.current = transition.path;
         }
-        const next =
-          transition.kind === 'openPath'
-            ? await openDocument(transition.path)
-            : await newDocument();
+        if (transition.kind === 'openPath') {
+          // Activating an existing document intentionally returns its cached
+          // buffer so an unsaved draft is never discarded. A clean tab has no
+          // draft to protect, so immediately replace that cache with a fresh
+          // disk read before it reaches the editor surface.
+          let activated: AppSnapshot;
+          try {
+            activated = await openDocument(transition.path);
+          } catch {
+            if (isEditorOpStale(token)) return;
+            // Only a failure to activate the file itself means this tab is
+            // missing. Later disk verification/reload failures must preserve
+            // any draft already stored in the tab.
+            setTabs((prev) => markDocumentTabMissing(prev, target.id));
+            activeTabIdRef.current = target.id;
+            setActiveTabId(target.id);
+            localDraftRef.current = '';
+            setLocalDraft('');
+            return;
+          }
+          if (isEditorOpStale(token)) return;
+
+          const targetHasLocalEdits = isDocumentTabDirty(target, {
+            activeTabId: null,
+            localDraft: target.draft,
+          });
+          const backendHasLocalEdits = activated.activeDocumentDirty;
+          if (!targetHasLocalEdits && !backendHasLocalEdits) {
+            let reloaded: AppSnapshot;
+            try {
+              const reloadSnapshot = await reloadActiveDocumentFromDisk({
+                path: transition.path,
+                expectedSource: activated.activeDocumentSource ?? '',
+                expectedDirty: activated.activeDocumentDirty,
+              });
+              reloaded = { ...activated, ...reloadSnapshot, mode: activated.mode };
+            } catch (error) {
+              if (isEditorOpStale(token)) return;
+              applySnapshot(activated);
+              activeTabIdRef.current = target.id;
+              setActiveTabId(target.id);
+              setTabs((prev) =>
+                refreshActiveDocumentTabFromSnapshot({
+                  tabs: prev,
+                  activeTabId: target.id,
+                  snapshot: activated,
+                }),
+              );
+              if (isReloadDocumentPreconditionError(error)) {
+                externalConflictPathsRef.current.add(transition.path);
+                applyExternalChangeState(
+                  externalChangeDetectedState(activated.activeDocumentName),
+                );
+              } else {
+                const reason = error instanceof Error ? error.message : String(error);
+                applyExternalChangeState(
+                  externalChangeVerificationErrorState(activated.activeDocumentName, reason),
+                );
+              }
+              return;
+            }
+            if (isEditorOpStale(token)) return;
+            if (reloaded.activeDocumentPath) {
+              externalConflictPathsRef.current.delete(reloaded.activeDocumentPath);
+            }
+            applySnapshot(reloaded);
+            activeTabIdRef.current = target.id;
+            setActiveTabId(target.id);
+            setTabs((prev) =>
+              refreshActiveDocumentTabFromSnapshot({
+                tabs: prev,
+                activeTabId: target.id,
+                snapshot: reloaded,
+              }),
+            );
+            return;
+          }
+
+          // A dirty tab keeps its local draft. Check the disk only after the
+          // cached buffer is active, then surface a conflict instead of
+          // replacing the user's text.
+          const draftToRestore = targetHasLocalEdits
+            ? target.draft
+            : (activated.activeDocumentSource ?? target.draft);
+          applySnapshot(activated, true);
+          activeTabIdRef.current = target.id;
+          setActiveTabId(target.id);
+          localDraftRef.current = draftToRestore;
+          setLocalDraft(draftToRestore);
+          setTabs((prev) =>
+            prev.map((tab) =>
+              tab.id === target.id && tab.kind === 'document'
+                ? {
+                    ...tab,
+                    name: activated.activeDocumentName ?? tab.name,
+                    path: activated.activeDocumentPath ?? tab.path,
+                    draft: draftToRestore,
+                    missing: false,
+                  }
+                : tab,
+            ),
+          );
+
+          let changed: boolean;
+          try {
+            changed =
+              externalConflictPathsRef.current.has(transition.path) ||
+              (await hasActiveDocumentExternalChanges());
+          } catch (error) {
+            if (isEditorOpStale(token)) return;
+            const reason = error instanceof Error ? error.message : String(error);
+            applyExternalChangeState(
+              externalChangeVerificationErrorState(activated.activeDocumentName, reason),
+            );
+            return;
+          }
+          if (isEditorOpStale(token)) return;
+          if (changed) {
+            externalConflictPathsRef.current.add(transition.path);
+            applyExternalChangeState(
+              externalChangeDetectedState(activated.activeDocumentName),
+            );
+          }
+          return;
+        }
+
+        const next = await newDocument();
         if (isEditorOpStale(token)) return;
-        // preserveDraft so we can immediately swap to the stashed draft
+        // preserveDraft so we can immediately swap to the stashed draft.
         applySnapshot(next, true);
+        activeTabIdRef.current = target.id;
         setActiveTabId(target.id);
-        // Restore the target's stashed draft so unsaved edits survive switching.
+        localDraftRef.current = target.draft;
         setLocalDraft(target.draft);
-        // Refresh tab metadata in case the file changed on disk.
         setTabs((prev) =>
           refreshSwitchedDocumentTabFromSnapshot({
             tabs: prev,
@@ -4368,12 +4965,12 @@ export default function App() {
             snapshot: next,
           }),
         );
-      } catch {
+      } catch (error) {
         if (isEditorOpStale(token)) return;
-        // The file disappeared between sessions — convert this tab to missing.
-        setTabs((prev) => markDocumentTabMissing(prev, target.id));
-        setActiveTabId(target.id);
-        setLocalDraft('');
+        const reason = error instanceof Error ? error.message : String(error);
+        applyExternalChangeState(
+          externalChangeVerificationErrorState(target.name, reason),
+        );
       }
     });
   });
@@ -4398,6 +4995,9 @@ export default function App() {
         return;
       case 'setTabs':
         rememberClosedTab(closedTab);
+        if (closedTab?.path) {
+          externalConflictPathsRef.current.delete(closedTab.path);
+        }
         notifyCliWaitClosed(closedTab?.path);
         if (transition.clearPreSettingsDocTabId) {
           preSettingsDocTabIdRef.current = null;
@@ -4409,6 +5009,9 @@ export default function App() {
         // Pick a neighbor to activate first, then drop the closed tab.
         await switchToTab(transition.switchToTabId);
         rememberClosedTab(closedTab);
+        if (closedTab?.path) {
+          externalConflictPathsRef.current.delete(closedTab.path);
+        }
         notifyCliWaitClosed(closedTab?.path);
         setTabs((prev) => prev.filter((tab) => tab.id !== transition.targetId));
     }
@@ -4442,17 +5045,27 @@ export default function App() {
       if (isEditorOpStale(token)) return;
 
       let restoredTab: DocumentTab;
+      let restoredExternalChangeState: ExternalChangeViewState | null = null;
       if (closedTab.path) {
         try {
-          const next = await openDocument(closedTab.path);
+          const opened = await openDocument(closedTab.path);
           if (isEditorOpStale(token)) return;
-          applySnapshot(next, true);
+          const resolution = await resolveOpenedDocumentFromDisk(
+            closedTab.path,
+            opened,
+            closedTab,
+          );
+          if (isEditorOpStale(token)) return;
+          const preservedDocumentState = resolution.preservedDocumentState;
+          const next = resolution.snapshot;
+          applySnapshot(next, preservedDocumentState !== null);
+          restoredExternalChangeState = resolution.externalChangeState;
           restoredTab = createDocumentTab({
             id: closedTab.id,
             path: next.activeDocumentPath ?? closedTab.path,
             name: next.activeDocumentName ?? closedTab.name,
-            source: next.activeDocumentSource ?? closedTab.source,
-            draft: closedTab.draft,
+            source: preservedDocumentState?.source ?? next.activeDocumentSource ?? closedTab.source,
+            draft: preservedDocumentState?.draft ?? next.activeDocumentSource ?? closedTab.draft,
           });
         } catch {
           if (isEditorOpStale(token)) return;
@@ -4479,12 +5092,16 @@ export default function App() {
       tabsRef.current = nextTabs;
       activeTabIdRef.current = restoredTab.id;
       closedDocumentTabsRef.current = remainingClosedTabs;
+      localDraftRef.current = restoredTab.draft;
       startTransition(() => {
         setTabs(nextTabs);
         setActiveTabId(restoredTab.id);
         setClosedDocumentTabs(remainingClosedTabs);
         setLocalDraft(restoredTab.draft);
       });
+      if (restoredExternalChangeState) {
+        applyExternalChangeState(restoredExternalChangeState);
+      }
     });
 
     if (isEditorOpStale(token)) return;
@@ -5039,23 +5656,33 @@ export default function App() {
           if (paths && paths.length > 0) {
             const firstPath = paths[0];
             if (!firstPath) return;
+            const existingTab = findDocumentTabByPath(tabsRef.current, firstPath);
+            if (existingTab) {
+              await switchToTab(existingTab.id);
+              focusActiveEditor();
+              return;
+            }
             const token = nextEditorOpRequest();
             await withBusy(async () => {
               stashActiveTabDraft();
               await syncActiveDraftBestEffort(undefined, editorOpAbortOptions(token));
               if (isEditorOpStale(token)) return;
-              const next = await openDroppedPath(firstPath);
+              const opened = await openDroppedPath(firstPath);
               if (isEditorOpStale(token)) return;
               const openedDocument =
-                next.activeDocumentSource !== null && next.activeDocumentPath === firstPath;
-              applySnapshot(next, !openedDocument);
-              if (openedDocument) {
-                upsertActiveTabFromSnapshot(next);
-                // Dropping a file is an explicit open — focus the editor like
-                // File>Open does. focusActiveEditor is a useEffectEvent, so
-                // this mount-time listener still reads the current mode.
-                focusActiveEditor();
+                opened.activeDocumentSource !== null && opened.activeDocumentPath === firstPath;
+              if (!openedDocument) {
+                applySnapshot(opened, true);
+                return;
               }
+
+              const resolution = await resolveOpenedDocumentFromDisk(firstPath, opened);
+              if (isEditorOpStale(token)) return;
+              applyOpenedDocumentResolution(resolution);
+              // Dropping a file is an explicit open — focus the editor like
+              // File>Open does. focusActiveEditor is a useEffectEvent, so
+              // this mount-time listener still reads the current mode.
+              focusActiveEditor();
             });
           }
         }

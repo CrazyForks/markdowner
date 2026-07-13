@@ -21,6 +21,8 @@ export interface AppSnapshot {
   activeDocumentName: string | null;
   activeDocumentPath: string | null;
   activeDocumentSource: string | null;
+  /** Last disk-synced source for a dirty document, when supplied by desktop. */
+  activeDocumentSyncedSource?: string | null;
   activeDocumentDirty: boolean;
   mode: EditorMode;
   theme: ThemeSelection;
@@ -90,6 +92,24 @@ export async function saveActiveDocumentAs(path: string) {
 
 export async function hasActiveDocumentExternalChanges() {
   return invoke<boolean>('has_active_document_external_changes');
+}
+
+export type ReloadActiveDocumentFromDiskRequest = {
+  path: string;
+  expectedSource: string;
+  expectedDirty: boolean;
+};
+
+export async function reloadActiveDocumentFromDisk({
+  path,
+  expectedSource,
+  expectedDirty,
+}: ReloadActiveDocumentFromDiskRequest) {
+  return invoke<AppSnapshot>('reload_active_document_from_disk', {
+    path,
+    expectedSource,
+    expectedDirty,
+  });
 }
 
 export async function activeDocumentDiskSource() {
