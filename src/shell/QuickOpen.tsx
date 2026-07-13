@@ -148,8 +148,9 @@ export function QuickOpen({ open, onOpenChange, items, onSelect }: QuickOpenProp
   return (
     <div className="fixed inset-0 z-50" role="presentation">
       <div
+        data-slot="quick-open-overlay"
         aria-hidden="true"
-        className="fixed inset-0 cursor-default bg-black/10 supports-backdrop-filter:backdrop-blur-xs"
+        className="fixed inset-0 cursor-default bg-black/35"
         onMouseDown={() => onOpenChange(false)}
       />
       <div

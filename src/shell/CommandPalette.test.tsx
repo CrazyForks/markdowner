@@ -49,7 +49,11 @@ describe('CommandPalette submenu', () => {
 
     const overlay = document.querySelector('[data-slot="dialog-overlay"]');
     expect(overlay).toHaveClass('bg-black/35');
-    expect(overlay).toHaveClass('supports-backdrop-filter:backdrop-blur-none');
+    expect(
+      Array.from(overlay?.classList ?? []).some((className) =>
+        className.includes('backdrop-blur'),
+      ),
+    ).toBe(false);
   });
 
   it('opens the nested theme list and previews the initial selection', () => {
