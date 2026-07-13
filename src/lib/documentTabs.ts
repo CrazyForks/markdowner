@@ -1,6 +1,6 @@
 import { normalizeFinalNewline } from './sourceText';
 
-export type DocumentTabKind = 'document' | 'settings';
+export type DocumentTabKind = 'document' | 'settings' | 'export';
 
 export type DocumentTab = {
   id: string;
@@ -14,6 +14,8 @@ export type DocumentTab = {
 
 export const SETTINGS_TAB_ID = '__markdowner_settings__';
 export const SETTINGS_TAB_NAME = 'Settings';
+export const EXPORT_PREVIEW_TAB_ID = '__markdowner_export_preview__';
+export const EXPORT_PREVIEW_TAB_NAME = 'Export Preview';
 
 type TabIdEntropy = {
   randomUUID?: (() => string) | null;
@@ -70,6 +72,7 @@ export type DocumentTabViewState = {
   activeTab: DocumentTab | null;
   dirtyTabIds: ReadonlySet<string>;
   isSettingsTabActive: boolean;
+  isExportPreviewTabActive: boolean;
   hasActiveTabEdits: boolean;
   hasAnyTabEdits: boolean;
   hasUnsavedChanges: boolean;
@@ -236,6 +239,7 @@ type SettingsTabToggleTransition =
 type SwitchTabTransition =
   | { kind: 'noop' }
   | { kind: 'activateSettings'; target: DocumentTab }
+  | { kind: 'activateExportPreview'; target: DocumentTab }
   | { kind: 'activateMissing'; target: DocumentTab }
   | { kind: 'openPath'; target: DocumentTab; path: string }
   | { kind: 'newDocument'; target: DocumentTab };
@@ -328,6 +332,18 @@ export function createSettingsTab(): DocumentTab {
   };
 }
 
+export function createExportPreviewTab(): DocumentTab {
+  return {
+    id: EXPORT_PREVIEW_TAB_ID,
+    kind: 'export',
+    path: null,
+    name: EXPORT_PREVIEW_TAB_NAME,
+    source: '',
+    draft: '',
+    missing: false,
+  };
+}
+
 export function documentTabMetadataFromSnapshot(
   snapshot: DocumentTabSnapshotMetadataInput,
 ): DocumentTabSnapshotMetadata {
@@ -378,6 +394,7 @@ export function resolveDocumentTabViewState({
     activeTab,
     dirtyTabIds,
     isSettingsTabActive: activeTab?.kind === 'settings',
+    isExportPreviewTabActive: activeTab?.kind === 'export',
     hasActiveTabEdits,
     hasAnyTabEdits: dirtyTabIds.size > 0,
     hasUnsavedChanges: hasActiveTabEdits,
@@ -679,6 +696,10 @@ export function resolveSwitchTabTransition(
 
   if (target.kind === 'settings') {
     return { kind: 'activateSettings', target };
+  }
+
+  if (target.kind === 'export') {
+    return { kind: 'activateExportPreview', target };
   }
 
   if (target.missing && target.path) {

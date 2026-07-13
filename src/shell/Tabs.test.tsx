@@ -121,4 +121,22 @@ describe('Tabs drag reordering', () => {
       'false',
     );
   });
+
+  it('renders the Export Preview application tab with its own icon', () => {
+    render(
+      <Tabs
+        items={[
+          {
+            ...tabsItem('__markdowner_export_preview__', 'Export Preview'),
+            kind: 'export',
+          },
+        ]}
+        activeTabId="__markdowner_export_preview__"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('tab', { name: /Export Preview/ }).querySelectorAll('svg')).toHaveLength(2);
+  });
 });

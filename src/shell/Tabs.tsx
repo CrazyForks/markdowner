@@ -1,8 +1,8 @@
 import { DragEvent, MouseEvent, useState } from 'react';
-import { Settings as SettingsIcon, X } from 'lucide-react';
+import { FileDown, Settings as SettingsIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type TabsItemKind = 'document' | 'settings';
+export type TabsItemKind = 'document' | 'settings' | 'export';
 
 export interface TabsItem {
   id: string;
@@ -103,6 +103,9 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
           >
             {item.kind === 'settings' ? (
               <SettingsIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            ) : null}
+            {item.kind === 'export' ? (
+              <FileDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             ) : null}
             <span className={cn('truncate', item.missing && 'italic text-muted-foreground line-through')}>
               {item.name}

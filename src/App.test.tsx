@@ -2570,8 +2570,20 @@ describe('App recent documents', () => {
 
     expect(saveDialogMock).not.toHaveBeenCalled();
     expect(exportPdfFileMock).not.toHaveBeenCalled();
-    expect(await screen.findByRole('heading', { name: 'Export Studio' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Export Preview' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const exportTab = screen.getByRole('tab', { name: /Export Preview/i });
+    expect(exportTab).toHaveAttribute('aria-selected', 'true');
     fireEvent.change(screen.getByLabelText('Body size'), { target: { value: '13' } });
+
+    fireEvent.click(screen.getByRole('tab', { name: /meeting-notes\.md/i }));
+    await waitFor(() => {
+      expect(exportTab).toHaveAttribute('aria-selected', 'false');
+      expect(screen.getByTestId('export-preview-surface').parentElement).toHaveClass('hidden');
+    });
+    fireEvent.click(exportTab);
+    expect(await screen.findByLabelText('Body size')).toHaveValue('13');
+
     const exportButton = await screen.findByRole('button', { name: 'Export PDF' });
     await waitFor(() => expect(exportButton).toBeEnabled());
     fireEvent.click(exportButton);
@@ -2589,10 +2601,74 @@ describe('App recent documents', () => {
       );
     });
     expect(exportPdfFileMock.mock.calls[0]?.[1]).toContain('Meeting notes');
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: /Export Preview/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /meeting-notes\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
 
     const reopenedMenu = await openAppMenu();
     fireEvent.click(within(reopenedMenu).getByRole('menuitem', { name: /^export to pdf…$/i }));
     expect(await screen.findByLabelText('Body size')).toHaveValue('13');
+  });
+
+  it('keeps the Export Preview tab open when the native save dialog is cancelled', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        recentDocuments: ['/tmp/project/meeting-notes.md'],
+      }),
+    );
+    saveDialogMock.mockResolvedValue(null);
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to html…$/i }));
+    const exportTab = await screen.findByRole('tab', { name: /Export Preview/i });
+    fireEvent.click(await screen.findByRole('button', { name: 'Export HTML' }));
+
+    await waitFor(() => expect(saveDialogMock).toHaveBeenCalled());
+    expect(exportTextFileMock).not.toHaveBeenCalled();
+    expect(exportTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'Export Preview' })).toBeInTheDocument();
+  });
+
+  it('closes Export Preview with Cancel and restores the previous document tab', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        recentDocuments: ['/tmp/project/meeting-notes.md'],
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to pdf…$/i }));
+    expect(await screen.findByRole('tab', { name: /Export Preview/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: /Export Preview/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /meeting-notes\.md/i })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
   });
 
   it('flushes the live WYSIWYG draft before exporting HTML so inserted images are embedded', async () => {

@@ -55,7 +55,7 @@ import { ActivityBar } from '@/shell/ActivityBar';
 import { AppMenu } from '@/shell/AppMenu';
 import { AppOverlays } from '@/shell/AppOverlays';
 import { EditorArea } from '@/shell/EditorArea';
-import { ExportDialog, type ExportDialogRequest } from '@/shell/ExportDialog';
+import { ExportPreviewTab, type ExportPreviewRequest } from '@/shell/ExportPreviewTab';
 import { FindReplaceBar } from '@/shell/FindReplaceBar';
 import { MarkdownPreviewPane } from '@/shell/MarkdownPreviewPane';
 import { Tabs } from '@/shell/Tabs';
@@ -183,7 +183,9 @@ import {
 } from './lib/snapshotState';
 import {
   createDocumentTab,
+  createExportPreviewTab,
   createMissingDocumentTab,
+  EXPORT_PREVIEW_TAB_ID,
   findDocumentTabByPath,
   generateDocumentTabId,
   hydrateRestoredActiveDocumentTab,
@@ -519,9 +521,9 @@ export default function App() {
   const [manualUpdateCheckInfo, setManualUpdateCheckInfo] = useState<UpdateInfo | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [exportRequest, setExportRequest] = useState<ExportDialogRequest | null>(null);
+  const [exportRequest, setExportRequest] = useState<ExportPreviewRequest | null>(null);
   const [exportStyle, setExportStyle] = useState<ExportStyle>(() => loadExportStyle());
-  const exportDialogInitialStyle = useMemo(
+  const exportPreviewInitialStyle = useMemo(
     () => normalizeExportStyle({ ...exportStyle, paperSize: settings.pdfPaperSize }),
     [exportStyle, settings.pdfPaperSize],
   );
@@ -789,6 +791,7 @@ export default function App() {
   // round-tripping through Rust (the snapshot never changed while settings
   // was on screen).
   const preSettingsDocTabIdRef = useRef<string | null>(null);
+  const preExportTabIdRef = useRef<string | null>(null);
 
   // Stash the live editor draft into the active tab so a later switch back
   // restores the user's in-flight edits. No-op when the active tab is a
@@ -2571,6 +2574,7 @@ export default function App() {
   );
   const {
     activeTab,
+    isExportPreviewTabActive,
     isSettingsTabActive,
     hasActiveTabEdits,
     hasAnyTabEdits,
@@ -4400,10 +4404,30 @@ export default function App() {
     });
   };
 
+  const activateExportPreview = (request: ExportPreviewRequest) => {
+    stashActiveTabDraft();
+    const currentActiveTabId = activeTabIdRef.current;
+    if (currentActiveTabId !== EXPORT_PREVIEW_TAB_ID) {
+      preExportTabIdRef.current = currentActiveTabId;
+    }
+
+    const currentTabs = tabsRef.current;
+    const nextTabs = currentTabs.some((tab) => tab.id === EXPORT_PREVIEW_TAB_ID)
+      ? currentTabs
+      : [...currentTabs, createExportPreviewTab()];
+    tabsRef.current = nextTabs;
+    activeTabIdRef.current = EXPORT_PREVIEW_TAB_ID;
+    setExportRequest(request);
+    startTransition(() => {
+      setTabs(nextTabs);
+      setActiveTabId(EXPORT_PREVIEW_TAB_ID);
+    });
+  };
+
   const openDocumentExport = (format: ExportFormat) => {
     if (!activeDocumentOpen) return;
     const fresh = flushWysiwygDraftNow();
-    setExportRequest({
+    activateExportPreview({
       format,
       scope: 'document',
       title: exportBaseName(snapshot.activeDocumentName),
@@ -4434,7 +4458,7 @@ export default function App() {
     );
     if (activeTarget && activeDocumentOpen) {
       const fresh = flushWysiwygDraftNow();
-      setExportRequest({
+      activateExportPreview({
         format,
         scope: 'workspace',
         title: activeTarget.title,
@@ -4451,7 +4475,7 @@ export default function App() {
       if (!previewFile) {
         throw new Error(`Could not read markdown file: ${previewTarget.sourcePath}`);
       }
-      setExportRequest({
+      activateExportPreview({
         format,
         scope: 'workspace',
         title: previewTarget.title,
@@ -4515,7 +4539,7 @@ export default function App() {
           );
         }
         announceShell(`Exported ${formatLabel} to ${selected}`);
-        setExportRequest(null);
+        await handleCloseTab(EXPORT_PREVIEW_TAB_ID);
         return;
       }
 
@@ -4572,7 +4596,7 @@ export default function App() {
         );
       }
       announceShell(`Exported ${files.length} ${formatLabel} files to ${rootDir}/exports`);
-      setExportRequest(null);
+      await handleCloseTab(EXPORT_PREVIEW_TAB_ID);
     }, fallback);
   };
 
@@ -4901,10 +4925,16 @@ export default function App() {
       if (isEditorOpStale(token)) return;
 
       try {
-        if (transition.kind === 'activateSettings') {
-          // Settings is a UI-only surface — stay on the current snapshot but
-          // hand the active-tab pointer to the settings tab so the editor
-          // area swaps to the settings content.
+        if (
+          transition.kind === 'activateSettings' ||
+          transition.kind === 'activateExportPreview'
+        ) {
+          // Settings and Export Preview are UI-only surfaces — stay on the
+          // current snapshot but hand the active-tab pointer to the UI tab so
+          // the editor area swaps without re-opening the underlying document.
+          if (transition.kind === 'activateExportPreview') {
+            preExportTabIdRef.current = activeTabIdRef.current;
+          }
           activeTabIdRef.current = transition.target.id;
           setActiveTabId(transition.target.id);
           return;
@@ -5073,6 +5103,34 @@ export default function App() {
   });
 
   const handleCloseTab = useEffectEvent(async (targetId: string) => {
+    if (targetId === EXPORT_PREVIEW_TAB_ID) {
+      const currentTabs = tabsRef.current;
+      if (!currentTabs.some((tab) => tab.id === EXPORT_PREVIEW_TAB_ID)) {
+        setExportRequest(null);
+        return;
+      }
+
+      const remainingTabs = currentTabs.filter((tab) => tab.id !== EXPORT_PREVIEW_TAB_ID);
+      let nextActiveTabId = activeTabIdRef.current;
+      if (nextActiveTabId === EXPORT_PREVIEW_TAB_ID) {
+        const preferredTabId = preExportTabIdRef.current;
+        nextActiveTabId =
+          (preferredTabId && remainingTabs.some((tab) => tab.id === preferredTabId)
+            ? preferredTabId
+            : remainingTabs[remainingTabs.length - 1]?.id) ?? null;
+      }
+
+      tabsRef.current = remainingTabs;
+      activeTabIdRef.current = nextActiveTabId;
+      preExportTabIdRef.current = null;
+      setExportRequest(null);
+      startTransition(() => {
+        setTabs(remainingTabs);
+        setActiveTabId(nextActiveTabId);
+      });
+      return;
+    }
+
     const closedTab = snapshotClosedDocumentTab(targetId);
     const transition = resolveCloseTabTransition({
       tabs,
@@ -6111,7 +6169,28 @@ export default function App() {
           onDefaultMdHandlerChange={setDefaultMdHandlerStatus}
         />
       ) : null}
-      <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', isSettingsTabActive && 'hidden')}>
+      {exportRequest ? (
+        <div
+          className={cn(
+            'flex min-h-0 min-w-0 flex-1',
+            !isExportPreviewTabActive && 'hidden',
+          )}
+        >
+          <ExportPreviewTab
+            request={exportRequest}
+            initialStyle={exportPreviewInitialStyle}
+            busy={busy}
+            onCancel={() => void handleCloseTab(EXPORT_PREVIEW_TAB_ID)}
+            onConfirm={(style) => void handleConfirmExport(style)}
+          />
+        </div>
+      ) : null}
+      <div
+        className={cn(
+          'flex min-h-0 min-w-0 flex-1 flex-col',
+          (isSettingsTabActive || isExportPreviewTabActive) && 'hidden',
+        )}
+      >
       <EditorArea
         busy={busy}
         errorMessage={errorMessage}
@@ -6213,16 +6292,6 @@ export default function App() {
       </div>
       </div>
       </div>
-      <ExportDialog
-        open={exportRequest != null}
-        request={exportRequest}
-        initialStyle={exportDialogInitialStyle}
-        busy={busy}
-        onOpenChange={(open) => {
-          if (!open && !busy) setExportRequest(null);
-        }}
-        onConfirm={(style) => void handleConfirmExport(style)}
-      />
       <AppOverlays
         quickOpenOpen={isQuickOpenOpen}
         onQuickOpenOpenChange={setIsQuickOpenOpen}

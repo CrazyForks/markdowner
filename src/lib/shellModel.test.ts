@@ -7,7 +7,7 @@ import {
   buildStatusBarModel,
   buildTabStripItems,
 } from './shellModel';
-import type { DocumentTab } from './documentTabs';
+import { createExportPreviewTab, type DocumentTab } from './documentTabs';
 
 const tabs: DocumentTab[] = [
   {
@@ -105,6 +105,22 @@ describe('buildTabStripItems', () => {
     expect(items[8]).toMatchObject({ shortcutLabel: '⌘9' });
     expect(items[9]).toMatchObject({ shortcutLabel: '⌘0' });
     expect(items[10]).toMatchObject({ missing: true, shortcutLabel: null });
+  });
+
+  it('preserves the Export Preview UI kind for the tab strip', () => {
+    expect(
+      buildTabStripItems({
+        tabs: [createExportPreviewTab()],
+        isDirty: () => false,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: '__markdowner_export_preview__',
+        kind: 'export',
+        name: 'Export Preview',
+        isDirty: false,
+      }),
+    ]);
   });
 });
 

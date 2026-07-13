@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  EXPORT_PREVIEW_TAB_ID,
+  EXPORT_PREVIEW_TAB_NAME,
   SETTINGS_TAB_ID,
   SETTINGS_TAB_NAME,
   createDocumentTab,
   createDocumentTabFromSnapshot,
+  createExportPreviewTab,
   createMissingDocumentTab,
   createSettingsTab,
   documentTabMetadataFromSnapshot,
@@ -184,6 +187,20 @@ describe('createSettingsTab', () => {
   });
 });
 
+describe('createExportPreviewTab', () => {
+  it('creates a transient UI-only export preview tab', () => {
+    expect(createExportPreviewTab()).toEqual({
+      id: EXPORT_PREVIEW_TAB_ID,
+      kind: 'export',
+      path: null,
+      name: EXPORT_PREVIEW_TAB_NAME,
+      source: '',
+      draft: '',
+      missing: false,
+    });
+  });
+});
+
 describe('closed document tab stack', () => {
   it('keeps the most recently closed document tab at the front', () => {
     const first = documentTab({ id: 'first', path: '/tmp/first.md' });
@@ -286,10 +303,16 @@ describe('isDocumentTabDirty', () => {
     ).toBe(false);
   });
 
-  it('never marks the settings tab dirty', () => {
+  it('never marks UI-only settings or export tabs dirty', () => {
     expect(
       isDocumentTabDirty(createSettingsTab(), {
         activeTabId: SETTINGS_TAB_ID,
+        localDraft: 'changed',
+      }),
+    ).toBe(false);
+    expect(
+      isDocumentTabDirty(createExportPreviewTab(), {
+        activeTabId: EXPORT_PREVIEW_TAB_ID,
         localDraft: 'changed',
       }),
     ).toBe(false);
@@ -319,6 +342,7 @@ describe('resolveDocumentTabViewState', () => {
       activeTab: active,
       dirtyTabIds: new Set(['active', 'inactive']),
       isSettingsTabActive: false,
+      isExportPreviewTabActive: false,
       hasActiveTabEdits: true,
       hasAnyTabEdits: true,
       hasUnsavedChanges: true,
@@ -339,6 +363,7 @@ describe('resolveDocumentTabViewState', () => {
       activeTab: settings,
       dirtyTabIds: new Set<string>(),
       isSettingsTabActive: true,
+      isExportPreviewTabActive: false,
       hasActiveTabEdits: false,
       hasAnyTabEdits: false,
       hasUnsavedChanges: false,
@@ -354,9 +379,28 @@ describe('resolveDocumentTabViewState', () => {
       activeTab: null,
       dirtyTabIds: new Set<string>(),
       isSettingsTabActive: false,
+      isExportPreviewTabActive: false,
       hasActiveTabEdits: false,
       hasAnyTabEdits: false,
       hasUnsavedChanges: false,
+    });
+  });
+
+  it('identifies the export preview as a UI-only active surface', () => {
+    const exportPreview = createExportPreviewTab();
+
+    expect(
+      resolveDocumentTabViewState({
+        tabs: [documentTab(), exportPreview],
+        activeTabId: EXPORT_PREVIEW_TAB_ID,
+        localDraft: 'ignored',
+      }),
+    ).toMatchObject({
+      activeTab: exportPreview,
+      dirtyTabIds: new Set<string>(),
+      isSettingsTabActive: false,
+      isExportPreviewTabActive: true,
+      hasActiveTabEdits: false,
     });
   });
 });
@@ -1048,6 +1092,21 @@ describe('resolveSwitchTabTransition', () => {
     ).toEqual({
       kind: 'activateMissing',
       target: missing,
+    });
+  });
+
+  it('activates the Export Preview UI tab without opening a document', () => {
+    const exportPreview = createExportPreviewTab();
+
+    expect(
+      resolveSwitchTabTransition({
+        tabs: [documentTab(), exportPreview],
+        activeTabId: 'doc-1',
+        targetId: EXPORT_PREVIEW_TAB_ID,
+      }),
+    ).toEqual({
+      kind: 'activateExportPreview',
+      target: exportPreview,
     });
   });
 
