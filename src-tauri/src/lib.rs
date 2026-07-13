@@ -1382,7 +1382,7 @@ fn handle_cli_wait_connection(app_handle: AppHandle, stream: UnixStream) {
     if let Ok(mut backend) = state.0.lock() {
         let _ = backend.open_document(&path);
         if let Some(window) = app_handle.get_webview_window("main") {
-            let _ = window.set_focus();
+            focus_main_window(&app_handle);
             let _ = window.emit("markdowner://update-snapshot", backend.snapshot());
         }
     }
@@ -1966,6 +1966,10 @@ fn hide_app_or_window(window: tauri::WebviewWindow) -> tauri::Result<()> {
 /// Bring the main window forward and activate the app over whatever was in
 /// front (e.g. the terminal a `mdner …` command was typed into).
 ///
+/// macOS app hiding is separate from window visibility. If Markdowner was
+/// hidden via ⌘H, unhide the application first; otherwise a later window-level
+/// focus request may still leave the app hidden behind the caller.
+///
 /// macOS `set_focus()` short-circuits while the window is hidden or minimized
 /// (tao guards on `isVisible`/`isMiniaturized`), so `show()` + `unminimize()`
 /// must run first — both apply synchronously, so the subsequent `set_focus()`
@@ -1973,6 +1977,10 @@ fn hide_app_or_window(window: tauri::WebviewWindow) -> tauri::Result<()> {
 /// pre-steps a `mdner …` invocation against a hidden/minimized instance would
 /// silently do nothing.
 fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.show();
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -2505,6 +2513,70 @@ mod tests {
         // Missing files keep their literal path instead of erroring.
         let missing = temp.path().join("missing.md");
         assert_eq!(super::cli_wait_key(&missing), missing.to_string_lossy());
+    }
+
+    #[test]
+    fn focus_main_window_unhides_app_before_presenting_window() {
+        let source = include_str!("lib.rs");
+        let body = function_body(source, "fn focus_main_window")
+            .expect("focus_main_window body should be readable");
+
+        assert_in_order(
+            body,
+            &[
+                "app.show()",
+                "window.show()",
+                "window.unminimize()",
+                "window.set_focus()",
+            ],
+        );
+    }
+
+    #[test]
+    fn cli_wait_connection_presents_main_window_with_common_foreground_helper() {
+        let source = include_str!("lib.rs");
+        let body = function_body(source, "fn handle_cli_wait_connection")
+            .expect("handle_cli_wait_connection body should be readable");
+
+        assert!(
+            body.contains("focus_main_window(&app_handle)"),
+            "mdner --wait must bring an already-running app to the foreground through the common presenter"
+        );
+        assert!(
+            !body.contains("window.set_focus()"),
+            "mdner --wait should not bypass the common presenter with a bare focus call"
+        );
+    }
+
+    fn function_body<'a>(source: &'a str, signature: &str) -> Option<&'a str> {
+        let start = source.find(signature)?;
+        let after_signature = &source[start..];
+        let open_brace = after_signature.find('{')?;
+        let body_start = start + open_brace + 1;
+        let mut depth = 1usize;
+        for (offset, byte) in source[body_start..].bytes().enumerate() {
+            match byte {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(&source[body_start..body_start + offset]);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn assert_in_order(haystack: &str, needles: &[&str]) {
+        let mut cursor = 0usize;
+        for needle in needles {
+            let Some(relative_index) = haystack[cursor..].find(needle) else {
+                panic!("expected `{needle}` after byte offset {cursor}");
+            };
+            cursor += relative_index + needle.len();
+        }
     }
 
     #[test]
