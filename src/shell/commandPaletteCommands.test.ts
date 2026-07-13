@@ -68,6 +68,20 @@ function commandIds(activeDocumentOpen = true) {
 }
 
 describe('buildCommandPaletteCommands', () => {
+  it('names the keymap command Show Keyboard Shortcuts (keymap)', () => {
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: actions(),
+    });
+
+    expect(commands.find((command) => command.id === 'app.openKeymap')?.label).toBe(
+      'Show Keyboard Shortcuts (keymap)',
+    );
+  });
+
   it('keeps commands grouped in File, View, Preferences, and Theme order', () => {
     expect(commandIds()).toEqual([
       'file.new',

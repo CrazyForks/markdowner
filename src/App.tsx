@@ -6057,6 +6057,7 @@ export default function App() {
             onSetMode={(mode) => void handleSetMode(mode)}
             onSetTheme={(theme) => void handleSetTheme(theme)}
             onFollowSystemTheme={() => void handleFollowSystemTheme()}
+            onShowKeyboardShortcuts={() => setIsShortcutsOpen(true)}
             onOpenSettings={() => void toggleSettingsTab()}
           />
         }

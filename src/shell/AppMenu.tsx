@@ -7,6 +7,7 @@ import {
   FileCode,
   Files,
   FileUp,
+  Keyboard,
   Menu,
   Monitor,
   Moon,
@@ -47,6 +48,7 @@ interface AppMenuProps {
   onSetMode: (mode: EditorMode) => void;
   onSetTheme: (theme: ThemeKind) => void;
   onFollowSystemTheme: () => void;
+  onShowKeyboardShortcuts: () => void;
   onOpenSettings: () => void;
 }
 
@@ -181,6 +183,7 @@ export function AppMenu({
   onSetMode,
   onSetTheme,
   onFollowSystemTheme,
+  onShowKeyboardShortcuts,
   onOpenSettings,
 }: AppMenuProps) {
   const [open, setOpen] = useState(false);
@@ -350,6 +353,15 @@ export function AppMenu({
           </MenuRadio>
 
           <MenuSeparator />
+          <MenuAction
+            icon={<Keyboard className="size-4" />}
+            title="Show Keyboard Shortcuts (Cmd+/)"
+            shortcut="Cmd+/"
+            ariaKeyshortcuts="Meta+/ Control+/"
+            onSelect={() => run(onShowKeyboardShortcuts)}
+          >
+            Show Keyboard Shortcuts
+          </MenuAction>
           <MenuAction
             icon={<Settings className="size-4" />}
             onSelect={() => run(onOpenSettings)}

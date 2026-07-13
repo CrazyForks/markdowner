@@ -343,7 +343,7 @@ export function buildCommandPaletteCommands(
     {
       id: 'app.openKeymap',
       category: 'Preferences',
-      label: 'Open Keymap (Keyboard Shortcuts)',
+      label: 'Show Keyboard Shortcuts (keymap)',
       shortcut: '⌘/',
       run: actions.openKeymap,
     },

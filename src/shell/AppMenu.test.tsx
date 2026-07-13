@@ -47,6 +47,7 @@ function renderAppMenu(overrides: Partial<React.ComponentProps<typeof AppMenu>> 
       onSetMode={() => {}}
       onSetTheme={() => {}}
       onFollowSystemTheme={() => {}}
+      onShowKeyboardShortcuts={() => {}}
       onOpenSettings={() => {}}
       {...overrides}
     />,
@@ -141,5 +142,22 @@ describe('AppMenu mode shortcuts', () => {
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
     expect(screen.getByRole('menuitem', { name: /Export All Markdown to HTML/ })).toBeDisabled();
     expect(screen.getByRole('menuitem', { name: /Export All Markdown to PDFs/ })).toBeDisabled();
+  });
+
+  it('shows Keyboard Shortcuts immediately above Settings and invokes its handler', () => {
+    const onShowKeyboardShortcuts = vi.fn();
+    renderAppMenu({ onShowKeyboardShortcuts });
+    fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
+
+    const shortcutsItem = screen.getByRole('menuitem', { name: 'Show Keyboard Shortcuts' });
+    const settingsItem = screen.getByRole('menuitem', { name: 'Settings' });
+    expect(shortcutsItem).toHaveTextContent('Cmd+/');
+    expect(shortcutsItem).toHaveAttribute('aria-keyshortcuts', 'Meta+/ Control+/');
+    expect(shortcutsItem.compareDocumentPosition(settingsItem)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+
+    fireEvent.click(shortcutsItem);
+    expect(onShowKeyboardShortcuts).toHaveBeenCalledTimes(1);
   });
 });

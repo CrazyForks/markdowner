@@ -2671,6 +2671,26 @@ describe('App recent documents', () => {
     });
   });
 
+  it('opens Keyboard Shortcuts from the app menu item above Settings', async () => {
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const menu = await openAppMenu();
+    const shortcutsItem = within(menu).getByRole('menuitem', {
+      name: 'Show Keyboard Shortcuts',
+    });
+    const settingsItem = within(menu).getByRole('menuitem', { name: 'Settings' });
+    expect(shortcutsItem.compareDocumentPosition(settingsItem)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    fireEvent.click(shortcutsItem);
+
+    expect(await screen.findByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeInTheDocument();
+  });
+
   it('flushes the live WYSIWYG draft before exporting HTML so inserted images are embedded', async () => {
     const editor = createMockTiptapEditor('# Meeting notes', [{ text: '# Meeting notes', from: 1 }]);
     tiptapMockState.editor = editor;
