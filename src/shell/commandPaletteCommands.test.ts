@@ -16,6 +16,7 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     saveAs: vi.fn(),
     exportHtml: vi.fn(),
     exportPdf: vi.fn(),
+    exportWorkspaceHtml: vi.fn(),
     exportWorkspacePdfs: vi.fn(),
     revealActiveFileInFinder: vi.fn(),
     revealProjectInFinder: vi.fn(),
@@ -76,6 +77,7 @@ describe('buildCommandPaletteCommands', () => {
       'file.saveAs',
       'file.exportHtml',
       'file.exportPdf',
+      'file.exportWorkspaceHtml',
       'file.exportWorkspacePdfs',
       'file.revealInFinder',
       'file.revealProjectInFinder',
@@ -128,6 +130,9 @@ describe('buildCommandPaletteCommands', () => {
     expect(commands.find((command) => command.id === 'file.saveAs')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'file.exportHtml')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'file.exportPdf')?.disabled).toBe(true);
+    expect(commands.find((command) => command.id === 'file.exportWorkspaceHtml')?.disabled).toBe(
+      true,
+    );
     expect(commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.disabled).toBe(
       true,
     );
@@ -135,7 +140,7 @@ describe('buildCommandPaletteCommands', () => {
     expect(commands.find((command) => command.id === 'app.documentStats')?.disabled).toBe(true);
   });
 
-  it('disables workspace PDF export without a workspace root', () => {
+  it('disables workspace HTML and PDF export without a workspace root', () => {
     const commands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
       hasWorkspaceRoot: false,
@@ -145,6 +150,9 @@ describe('buildCommandPaletteCommands', () => {
       actions: actions(),
     });
 
+    expect(commands.find((command) => command.id === 'file.exportWorkspaceHtml')?.disabled).toBe(
+      true,
+    );
     expect(commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.disabled).toBe(
       true,
     );
@@ -153,6 +161,7 @@ describe('buildCommandPaletteCommands', () => {
   it('wires the export commands to their actions', () => {
     const exportHtml = vi.fn();
     const exportPdf = vi.fn();
+    const exportWorkspaceHtml = vi.fn();
     const exportWorkspacePdfs = vi.fn();
     const commands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
@@ -160,14 +169,16 @@ describe('buildCommandPaletteCommands', () => {
       canGoBack: true,
       canGoForward: true,
       settings: settings(),
-      actions: actions({ exportHtml, exportPdf, exportWorkspacePdfs }),
+      actions: actions({ exportHtml, exportPdf, exportWorkspaceHtml, exportWorkspacePdfs }),
     });
 
     commands.find((command) => command.id === 'file.exportHtml')?.run?.();
     commands.find((command) => command.id === 'file.exportPdf')?.run?.();
+    commands.find((command) => command.id === 'file.exportWorkspaceHtml')?.run?.();
     commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.run?.();
     expect(exportHtml).toHaveBeenCalledTimes(1);
     expect(exportPdf).toHaveBeenCalledTimes(1);
+    expect(exportWorkspaceHtml).toHaveBeenCalledTimes(1);
     expect(exportWorkspacePdfs).toHaveBeenCalledTimes(1);
   });
 

@@ -55,6 +55,7 @@ import { ActivityBar } from '@/shell/ActivityBar';
 import { AppMenu } from '@/shell/AppMenu';
 import { AppOverlays } from '@/shell/AppOverlays';
 import { EditorArea } from '@/shell/EditorArea';
+import { ExportDialog, type ExportDialogRequest } from '@/shell/ExportDialog';
 import { FindReplaceBar } from '@/shell/FindReplaceBar';
 import { MarkdownPreviewPane } from '@/shell/MarkdownPreviewPane';
 import { Tabs } from '@/shell/Tabs';
@@ -99,6 +100,7 @@ import {
   exportPdfFile,
   exportPdfFiles,
   exportTextFile,
+  exportTextFiles,
   readTextFiles,
   setMode,
   setTheme,
@@ -113,9 +115,14 @@ import {
 } from './lib/desktop';
 import {
   buildExportHtml,
-  buildWorkspacePdfExportTargets,
+  buildWorkspaceExportTargets,
   defaultPdfExportPath,
   exportBaseName,
+  loadExportStyle,
+  normalizeExportStyle,
+  saveExportStyle,
+  type ExportFormat,
+  type ExportStyle,
 } from '@/lib/exportDocument';
 import {
   applyDraftBackupsToRestoredTabs,
@@ -512,6 +519,12 @@ export default function App() {
   const [manualUpdateCheckInfo, setManualUpdateCheckInfo] = useState<UpdateInfo | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [exportRequest, setExportRequest] = useState<ExportDialogRequest | null>(null);
+  const [exportStyle, setExportStyle] = useState<ExportStyle>(() => loadExportStyle());
+  const exportDialogInitialStyle = useMemo(
+    () => normalizeExportStyle({ ...exportStyle, paperSize: settings.pdfPaperSize }),
+    [exportStyle, settings.pdfPaperSize],
+  );
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState<number>(readTerminalHeight());
   const [isResizingTerminal, setIsResizingTerminal] = useState(false);
@@ -4387,96 +4400,180 @@ export default function App() {
     });
   };
 
-  const handleExportToHtml = async () => {
+  const openDocumentExport = (format: ExportFormat) => {
     if (!activeDocumentOpen) return;
-    const baseName = exportBaseName(snapshot.activeDocumentName);
-    const selected = await saveDialog({
-      defaultPath: `${baseName}.html`,
-      filters: [{ name: 'HTML', extensions: ['html'] }],
+    const fresh = flushWysiwygDraftNow();
+    setExportRequest({
+      format,
+      scope: 'document',
+      title: exportBaseName(snapshot.activeDocumentName),
+      source: fresh ?? localDraft,
+      activeDocumentPath: snapshot.activeDocumentPath,
+      targetCount: 1,
     });
-    if (typeof selected !== 'string') return;
-    try {
-      const fresh = flushWysiwygDraftNow();
-      const html = await buildExportHtml({
-        title: baseName,
-        source: fresh ?? localDraft,
-        activeDocumentPath: snapshot.activeDocumentPath,
-      });
-      await exportTextFile(selected, html);
-      announceShell(`Exported HTML to ${selected}`);
-    } catch (error) {
-      reportOperationError(error, 'Could not export to HTML');
-    }
   };
 
-  const handleExportToPdf = async () => {
-    if (!activeDocumentOpen) return;
-    const baseName = exportBaseName(snapshot.activeDocumentName);
-    const selected = await saveDialog({
-      defaultPath: defaultPdfExportPath(
-        snapshot.activeDocumentPath,
-        snapshot.activeDocumentName,
-      ),
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-    });
-    if (typeof selected !== 'string') return;
-    try {
-      const fresh = flushWysiwygDraftNow();
-      const html = await buildExportHtml({
-        title: baseName,
-        source: fresh ?? localDraft,
-        activeDocumentPath: snapshot.activeDocumentPath,
-        forPrint: true,
-        paperSize: settings.pdfPaperSize,
-      });
-      await exportPdfFile(selected, html, settings.pdfPaperSize);
-      announceShell(`Exported PDF to ${selected}`);
-    } catch (error) {
-      reportOperationError(error, 'Could not export to PDF');
-    }
-  };
-
-  const handleExportWorkspaceToPdfs = async () => {
+  const openWorkspaceExport = async (format: ExportFormat) => {
     const rootDir = snapshot.rootDir;
     if (!rootDir) {
-      announceShell('Open a workspace to export all Markdown files to PDFs');
+      announceShell('Open a workspace to export all Markdown files');
       return;
     }
-    const targets = buildWorkspacePdfExportTargets({
+    const targets = buildWorkspaceExportTargets({
       rootDir,
       workspaceDocuments: snapshot.workspaceDocuments,
+      format,
     });
     if (targets.length === 0) {
       announceShell('No Markdown files found to export');
       return;
     }
-    try {
+
+    const activeTarget = targets.find(
+      (target) => target.sourcePath === snapshot.activeDocumentPath,
+    );
+    if (activeTarget && activeDocumentOpen) {
+      const fresh = flushWysiwygDraftNow();
+      setExportRequest({
+        format,
+        scope: 'workspace',
+        title: activeTarget.title,
+        source: fresh ?? localDraft,
+        activeDocumentPath: activeTarget.sourcePath,
+        targetCount: targets.length,
+      });
+      return;
+    }
+
+    const previewTarget = targets[0];
+    await withBusy(async () => {
+      const [previewFile] = await readTextFiles([previewTarget.sourcePath]);
+      if (!previewFile) {
+        throw new Error(`Could not read markdown file: ${previewTarget.sourcePath}`);
+      }
+      setExportRequest({
+        format,
+        scope: 'workspace',
+        title: previewTarget.title,
+        source: previewFile.contents,
+        activeDocumentPath: previewTarget.sourcePath,
+        targetCount: targets.length,
+      });
+    }, `Could not prepare workspace ${format.toUpperCase()} export`);
+  };
+
+  const handleConfirmExport = async (nextStyle: ExportStyle) => {
+    const request = exportRequest;
+    if (!request) return;
+    const style = normalizeExportStyle(nextStyle);
+    setExportStyle(style);
+    saveExportStyle(style);
+    if (request.format === 'pdf' && settings.pdfPaperSize !== style.paperSize) {
+      handleSettingsChange({ ...settings, pdfPaperSize: style.paperSize });
+    }
+
+    const formatLabel = request.format.toUpperCase();
+    const fallback =
+      request.scope === 'workspace'
+        ? `Could not export workspace to ${formatLabel}`
+        : `Could not export to ${formatLabel}`;
+
+    await withBusy(async () => {
+      if (request.scope === 'document') {
+        const selected = await saveDialog(
+          request.format === 'html'
+            ? {
+                defaultPath: `${request.title}.html`,
+                filters: [{ name: 'HTML', extensions: ['html'] }],
+              }
+            : {
+                defaultPath: defaultPdfExportPath(
+                  request.activeDocumentPath,
+                  snapshot.activeDocumentName,
+                ),
+                filters: [{ name: 'PDF', extensions: ['pdf'] }],
+              },
+        );
+        if (typeof selected !== 'string') return;
+
+        const html = await buildExportHtml({
+          title: request.title,
+          source: request.source,
+          activeDocumentPath: request.activeDocumentPath,
+          forPrint: request.format === 'pdf',
+          paperSize: style.paperSize,
+          style,
+        });
+        if (request.format === 'html') {
+          await exportTextFile(selected, html);
+        } else {
+          await exportPdfFile(
+            selected,
+            html,
+            style.paperSize,
+            style.contentPadding,
+          );
+        }
+        announceShell(`Exported ${formatLabel} to ${selected}`);
+        setExportRequest(null);
+        return;
+      }
+
+      const rootDir = snapshot.rootDir;
+      if (!rootDir) {
+        throw new Error('The workspace is no longer open');
+      }
+      const targets = buildWorkspaceExportTargets({
+        rootDir,
+        workspaceDocuments: snapshot.workspaceDocuments,
+        format: request.format,
+      });
+      if (targets.length === 0) {
+        throw new Error('No Markdown files found to export');
+      }
       const sources = await readTextFiles(targets.map((target) => target.sourcePath));
       const sourceByPath = new Map(sources.map((file) => [file.path, file.contents]));
       const files = await Promise.all(
         targets.map(async (target) => {
-          const source = sourceByPath.get(target.sourcePath);
+          const source =
+            target.sourcePath === request.activeDocumentPath
+              ? request.source
+              : sourceByPath.get(target.sourcePath);
           if (source == null) {
             throw new Error(`Could not read markdown file: ${target.sourcePath}`);
           }
-          return {
-            path: target.outputPath,
-            html: await buildExportHtml({
-              title: target.title,
-              source,
-              activeDocumentPath: target.sourcePath,
-              forPrint: true,
-              paperSize: settings.pdfPaperSize,
-            }),
-            paperSize: settings.pdfPaperSize,
-          };
+          const html = await buildExportHtml({
+            title: target.title,
+            source,
+            activeDocumentPath: target.sourcePath,
+            forPrint: request.format === 'pdf',
+            paperSize: style.paperSize,
+            style,
+          });
+          return { target, html };
         }),
       );
-      await exportPdfFiles(files);
-      announceShell(`Exported ${files.length} PDFs to ${rootDir}/exports`);
-    } catch (error) {
-      reportOperationError(error, 'Could not export workspace to PDFs');
-    }
+
+      if (request.format === 'html') {
+        await exportTextFiles(
+          files.map(({ target, html }) => ({
+            path: target.outputPath,
+            contents: html,
+          })),
+        );
+      } else {
+        await exportPdfFiles(
+          files.map(({ target, html }) => ({
+            path: target.outputPath,
+            html,
+            paperSize: style.paperSize,
+            pageMargin: style.contentPadding,
+          })),
+        );
+      }
+      announceShell(`Exported ${files.length} ${formatLabel} files to ${rootDir}/exports`);
+      setExportRequest(null);
+    }, fallback);
   };
 
   const autoSaveEligibility = resolveAutoSaveEligibility({
@@ -5788,9 +5885,10 @@ export default function App() {
       openWorkspace: () => void handleOpenWorkspace(),
       save: () => void handleSave(),
       saveAs: () => void handleSaveAs(),
-      exportHtml: () => void handleExportToHtml(),
-      exportPdf: () => void handleExportToPdf(),
-      exportWorkspacePdfs: () => void handleExportWorkspaceToPdfs(),
+      exportHtml: () => openDocumentExport('html'),
+      exportPdf: () => openDocumentExport('pdf'),
+      exportWorkspaceHtml: () => void openWorkspaceExport('html'),
+      exportWorkspacePdfs: () => void openWorkspaceExport('pdf'),
       revealActiveFileInFinder: () => {
         void (async () => {
           const path = snapshot.activeDocumentPath;
@@ -5894,9 +5992,10 @@ export default function App() {
             onSave={() => void handleSave()}
             onSaveAs={() => void handleSaveAs()}
             onImportTheme={() => void handleImportTheme()}
-            onExportHtml={() => void handleExportToHtml()}
-            onExportPdf={() => void handleExportToPdf()}
-            onExportWorkspacePdfs={() => void handleExportWorkspaceToPdfs()}
+            onExportHtml={() => openDocumentExport('html')}
+            onExportPdf={() => openDocumentExport('pdf')}
+            onExportWorkspaceHtml={() => void openWorkspaceExport('html')}
+            onExportWorkspacePdfs={() => void openWorkspaceExport('pdf')}
             onSetMode={(mode) => void handleSetMode(mode)}
             onSetTheme={(theme) => void handleSetTheme(theme)}
             onFollowSystemTheme={() => void handleFollowSystemTheme()}
@@ -6114,6 +6213,16 @@ export default function App() {
       </div>
       </div>
       </div>
+      <ExportDialog
+        open={exportRequest != null}
+        request={exportRequest}
+        initialStyle={exportDialogInitialStyle}
+        busy={busy}
+        onOpenChange={(open) => {
+          if (!open && !busy) setExportRequest(null);
+        }}
+        onConfirm={(style) => void handleConfirmExport(style)}
+      />
       <AppOverlays
         quickOpenOpen={isQuickOpenOpen}
         onQuickOpenOpenChange={setIsQuickOpenOpen}

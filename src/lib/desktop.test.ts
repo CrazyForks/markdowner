@@ -6,7 +6,12 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
-import { reloadActiveDocumentFromDisk } from './desktop';
+import {
+  exportPdfFile,
+  exportPdfFiles,
+  exportTextFiles,
+  reloadActiveDocumentFromDisk,
+} from './desktop';
 
 describe('desktop document reload', () => {
   beforeEach(() => {
@@ -41,5 +46,41 @@ describe('desktop document reload', () => {
       expectedSource: '# Previous',
       expectedDirty: false,
     });
+  });
+});
+
+describe('desktop export bridge', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it('passes batch HTML files to the native writer', async () => {
+    const files = [{ path: '/tmp/exports/a.html', contents: '<h1>A</h1>' }];
+
+    await exportTextFiles(files);
+
+    expect(invokeMock).toHaveBeenCalledWith('write_export_files', { files });
+  });
+
+  it('passes the selected page margin for single and batch PDF exports', async () => {
+    await exportPdfFile('/tmp/a.pdf', '<h1>A</h1>', 'A4', 36);
+    expect(invokeMock).toHaveBeenLastCalledWith('write_pdf_file', {
+      path: '/tmp/a.pdf',
+      html: '<h1>A</h1>',
+      paperSize: 'A4',
+      pageMargin: 36,
+    });
+
+    const files = [
+      {
+        path: '/tmp/a.pdf',
+        html: '<h1>A</h1>',
+        paperSize: 'A4' as const,
+        pageMargin: 28,
+      },
+    ];
+    await exportPdfFiles(files);
+    expect(invokeMock).toHaveBeenLastCalledWith('write_pdf_files', { files });
   });
 });

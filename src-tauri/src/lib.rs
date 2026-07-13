@@ -26,6 +26,7 @@ use shell_managed_block::ManagedShellBlock;
 
 mod default_handler;
 mod diagnostics;
+mod export_file;
 mod link_actions;
 mod pdf_export;
 mod shell_managed_block;
@@ -1566,7 +1567,21 @@ fn save_active_document_as(
 /// mutates the active-document state.
 #[tauri::command]
 fn write_export_file(path: String, contents: String) -> Result<(), String> {
-    std::fs::write(&path, contents).map_err(|error| error.to_string())
+    export_file::write_text_file(&path, &contents)
+}
+
+#[derive(Debug, Deserialize)]
+struct TextExportFile {
+    path: String,
+    contents: String,
+}
+
+#[tauri::command]
+fn write_export_files(files: Vec<TextExportFile>) -> Result<(), String> {
+    for file in files {
+        export_file::write_text_file(&file.path, &file.contents)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -1594,17 +1609,23 @@ struct PdfExportFile {
     path: String,
     html: String,
     paper_size: String,
+    page_margin: f64,
 }
 
 #[tauri::command]
-fn write_pdf_file(path: String, html: String, paper_size: String) -> Result<(), String> {
-    pdf_export::write_pdf_file(&path, &html, &paper_size)
+fn write_pdf_file(
+    path: String,
+    html: String,
+    paper_size: String,
+    page_margin: f64,
+) -> Result<(), String> {
+    pdf_export::write_pdf_file(&path, &html, &paper_size, page_margin)
 }
 
 #[tauri::command]
 fn write_pdf_files(files: Vec<PdfExportFile>) -> Result<(), String> {
     for file in files {
-        pdf_export::write_pdf_file(&file.path, &file.html, &file.paper_size)?;
+        pdf_export::write_pdf_file(&file.path, &file.html, &file.paper_size, file.page_margin)?;
     }
     Ok(())
 }
@@ -2120,6 +2141,7 @@ pub fn run() {
             save_active_document,
             save_active_document_as,
             write_export_file,
+            write_export_files,
             read_text_files,
             read_images_base64,
             write_pdf_file,

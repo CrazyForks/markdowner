@@ -42,6 +42,7 @@ interface AppMenuProps {
   onImportTheme: () => void;
   onExportHtml: () => void;
   onExportPdf: () => void;
+  onExportWorkspaceHtml: () => void;
   onExportWorkspacePdfs: () => void;
   onSetMode: (mode: EditorMode) => void;
   onSetTheme: (theme: ThemeKind) => void;
@@ -175,6 +176,7 @@ export function AppMenu({
   onImportTheme,
   onExportHtml,
   onExportPdf,
+  onExportWorkspaceHtml,
   onExportWorkspacePdfs,
   onSetMode,
   onSetTheme,
@@ -279,6 +281,14 @@ export function AppMenu({
             onSelect={() => run(onExportPdf)}
           >
             Export to PDF…
+          </MenuAction>
+          <MenuAction
+            disabled={!hasWorkspaceRoot || busy}
+            icon={<Files className="size-4" />}
+            title="Export all Markdown files in the workspace as HTML"
+            onSelect={() => run(onExportWorkspaceHtml)}
+          >
+            Export All Markdown to HTML…
           </MenuAction>
           <MenuAction
             disabled={!hasWorkspaceRoot || busy}

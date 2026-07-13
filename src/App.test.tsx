@@ -71,6 +71,7 @@ const readImagesBase64Mock = vi.fn();
 const exportPdfFileMock = vi.fn();
 const exportPdfFilesMock = vi.fn();
 const exportTextFileMock = vi.fn();
+const exportTextFilesMock = vi.fn();
 const openDialogMock = vi.fn();
 const saveDialogMock = vi.fn();
 const messageMock = vi.fn();
@@ -127,6 +128,7 @@ vi.mock('./lib/desktop', () => ({
   exportPdfFile: exportPdfFileMock,
   exportPdfFiles: exportPdfFilesMock,
   exportTextFile: exportTextFileMock,
+  exportTextFiles: exportTextFilesMock,
 }));
 
 vi.mock('@/shell/TerminalPanel', async () => {
@@ -599,6 +601,8 @@ describe('App recent documents', () => {
     exportPdfFilesMock.mockResolvedValue(undefined);
     exportTextFileMock.mockReset();
     exportTextFileMock.mockResolvedValue(undefined);
+    exportTextFilesMock.mockReset();
+    exportTextFilesMock.mockResolvedValue(undefined);
     openDialogMock.mockReset();
     saveDialogMock.mockReset();
     messageMock.mockReset();
@@ -619,6 +623,7 @@ describe('App recent documents', () => {
     updateSnapshotHandler = undefined;
     window.localStorage.removeItem('markdowner.sidebarOpen');
     window.localStorage.removeItem('markdowner.sidebarWidth');
+    window.localStorage.removeItem('markdowner.exportStyle.v1');
     window.history.replaceState(null, '', '/');
     onCloseRequestedMock.mockImplementation(async (handler) => {
       closeRequestedHandler = handler;
@@ -2545,7 +2550,7 @@ describe('App recent documents', () => {
     });
   });
 
-  it('asks for a PDF path before exporting the active document to PDF', async () => {
+  it('previews and styles the active document before exporting to a PDF path', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({
         activeDocumentName: 'meeting-notes.md',
@@ -2563,6 +2568,14 @@ describe('App recent documents', () => {
     const menu = await openAppMenu();
     fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to pdf…$/i }));
 
+    expect(saveDialogMock).not.toHaveBeenCalled();
+    expect(exportPdfFileMock).not.toHaveBeenCalled();
+    expect(await screen.findByRole('heading', { name: 'Export Studio' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Body size'), { target: { value: '13' } });
+    const exportButton = await screen.findByRole('button', { name: 'Export PDF' });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
     await waitFor(() => {
       expect(saveDialogMock).toHaveBeenCalledWith({
         defaultPath: '/tmp/project/meeting-notes.pdf',
@@ -2570,11 +2583,16 @@ describe('App recent documents', () => {
       });
       expect(exportPdfFileMock).toHaveBeenCalledWith(
         '/tmp/project/exports/meeting-notes.pdf',
-        expect.stringContaining('<h1'),
+        expect.stringContaining('font-size: 13px'),
         'A4',
+        32,
       );
     });
     expect(exportPdfFileMock.mock.calls[0]?.[1]).toContain('Meeting notes');
+
+    const reopenedMenu = await openAppMenu();
+    fireEvent.click(within(reopenedMenu).getByRole('menuitem', { name: /^export to pdf…$/i }));
+    expect(await screen.findByLabelText('Body size')).toHaveValue('13');
   });
 
   it('flushes the live WYSIWYG draft before exporting HTML so inserted images are embedded', async () => {
@@ -2603,6 +2621,12 @@ describe('App recent documents', () => {
 
     const menu = await openAppMenu();
     fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to html…$/i }));
+
+    expect(saveDialogMock).not.toHaveBeenCalled();
+    expect(exportTextFileMock).not.toHaveBeenCalled();
+    const exportButton = await screen.findByRole('button', { name: 'Export HTML' });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
 
     await waitFor(() => {
       expect(readImagesBase64Mock).toHaveBeenCalledWith(['/tmp/project/assets/shot.png']);
@@ -2640,12 +2664,19 @@ describe('App recent documents', () => {
     const menu = await openAppMenu();
     fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to pdf…$/i }));
 
+    expect(saveDialogMock).not.toHaveBeenCalled();
+    expect(exportPdfFileMock).not.toHaveBeenCalled();
+    const exportButton = await screen.findByRole('button', { name: 'Export PDF' });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
     await waitFor(() => {
       expect(readImagesBase64Mock).toHaveBeenCalledWith(['/tmp/project/assets/shot.png']);
       expect(exportPdfFileMock).toHaveBeenCalledWith(
         '/tmp/project/exports/meeting-notes.pdf',
         expect.stringContaining('src="data:image/png;base64,EMBED(/tmp/project/assets/shot.png)"'),
         'A4',
+        32,
       );
     });
   });
@@ -2678,6 +2709,11 @@ describe('App recent documents', () => {
       within(menu).getByRole('menuitem', { name: /^export all markdown to pdfs…$/i }),
     );
 
+    expect(exportPdfFilesMock).not.toHaveBeenCalled();
+    const exportButton = await screen.findByRole('button', { name: 'Export 2 PDF files' });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
     await waitFor(() => {
       expect(readTextFilesMock).toHaveBeenCalledWith([
         '/tmp/project/README.md',
@@ -2688,11 +2724,59 @@ describe('App recent documents', () => {
           path: '/tmp/project/exports/README.pdf',
           html: expect.stringContaining('Readme'),
           paperSize: 'A4',
+          pageMargin: 32,
         },
         {
           path: '/tmp/project/exports/docs/guide.pdf',
           html: expect.stringContaining('Guide'),
           paperSize: 'A4',
+          pageMargin: 32,
+        },
+      ]);
+    });
+  });
+
+  it('exports every workspace Markdown file to HTML under the project exports folder', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        rootDir: '/tmp/project',
+        workspaceDocuments: [
+          '/tmp/project/README.md',
+          '/tmp/project/docs/guide.md',
+          '/tmp/project/exports/old.md',
+        ],
+        activeDocumentName: 'README.md',
+        activeDocumentPath: '/tmp/project/README.md',
+        activeDocumentSource: '# Readme',
+      }),
+    );
+    readTextFilesMock.mockResolvedValue([
+      { path: '/tmp/project/README.md', contents: '# Readme' },
+      { path: '/tmp/project/docs/guide.md', contents: '# Guide' },
+    ]);
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(
+      within(menu).getByRole('menuitem', { name: /^export all markdown to html…$/i }),
+    );
+
+    expect(exportTextFilesMock).not.toHaveBeenCalled();
+    const exportButton = await screen.findByRole('button', { name: 'Export 2 HTML files' });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(exportTextFilesMock).toHaveBeenCalledWith([
+        {
+          path: '/tmp/project/exports/README.html',
+          contents: expect.stringContaining('Readme'),
+        },
+        {
+          path: '/tmp/project/exports/docs/guide.html',
+          contents: expect.stringContaining('Guide'),
         },
       ]);
     });

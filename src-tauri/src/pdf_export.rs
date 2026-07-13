@@ -1,15 +1,27 @@
 use std::path::Path;
 
-pub fn write_pdf_file(path: &str, html: &str, paper_size: &str) -> Result<(), String> {
+pub fn write_pdf_file(
+    path: &str,
+    html: &str,
+    paper_size: &str,
+    page_margin: f64,
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        macos::write_pdf_file(path, html, paper_size)
+        macos::write_pdf_file(path, html, paper_size, page_margin)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (path, html, paper_size);
+        let _ = (path, html, paper_size, page_margin);
         Err("PDF export is only supported on macOS".to_string())
     }
+}
+
+fn safe_page_margin(value: f64, paper_width: f64, paper_height: f64) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    value.clamp(0.0, paper_width.min(paper_height) / 3.0)
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<(), String> {
@@ -36,22 +48,19 @@ mod macos {
     };
 
     use block2::RcBlock;
+    use objc2::AnyThread;
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
-    use objc2::AnyThread;
-    use objc2_core_foundation::{kCFRunLoopDefaultMode, CFRunLoop, CGPoint, CGRect, CGSize};
+    use objc2_core_foundation::{CFRunLoop, CGPoint, CGRect, CGSize, kCFRunLoopDefaultMode};
     use objc2_foundation::{MainThreadMarker, NSData, NSError, NSNumber, NSString};
     use objc2_pdf_kit::PDFDocument;
     use objc2_web_kit::{WKPDFConfiguration, WKWebView, WKWebViewConfiguration};
 
-    use super::ensure_parent_dir;
+    use super::{ensure_parent_dir, safe_page_margin};
 
     const LOAD_TIMEOUT: Duration = Duration::from_secs(10);
     const JS_TIMEOUT: Duration = Duration::from_secs(10);
     const PDF_TIMEOUT: Duration = Duration::from_secs(20);
-    /// 10 mm in PostScript points (and CSS px — WebKit maps 1 px → 1 pt for
-    /// `createPDF`, so the same number works as a page margin in both spaces).
-    const PAGE_MARGIN: f64 = 10.0 / 25.4 * 72.0;
     const INITIAL_HEIGHT: f64 = 1160.0;
     /// Hard ceiling on generated pages — a deterministic backstop, never reached
     /// by a real document, that bounds the work even for pathological input.
@@ -183,7 +192,12 @@ mod macos {
         }
     }
 
-    pub fn write_pdf_file(path: &str, html: &str, paper_size: &str) -> Result<(), String> {
+    pub fn write_pdf_file(
+        path: &str,
+        html: &str,
+        paper_size: &str,
+        page_margin: f64,
+    ) -> Result<(), String> {
         let output_path = Path::new(path);
         ensure_parent_dir(output_path)?;
 
@@ -191,6 +205,7 @@ mod macos {
             .ok_or_else(|| "PDF export must run on the macOS main thread".to_string())?;
 
         let (paper_width, paper_height) = paper_points(paper_size);
+        let page_margin = safe_page_margin(page_margin, paper_width, paper_height);
 
         let configuration = unsafe { WKWebViewConfiguration::new(mtm) };
         let frame = CGRect {
@@ -212,7 +227,7 @@ mod macos {
         // Align block boundaries to page edges, then measure the paginated height.
         let script = PAGINATE_JS
             .replace("__PAGE__", &paper_height.to_string())
-            .replace("__MARGIN__", &PAGE_MARGIN.to_string());
+            .replace("__MARGIN__", &page_margin.to_string());
         let total_height = eval_js_number(&webview, &script)?.max(paper_height);
         let page_count = ((total_height / paper_height).ceil() as usize).clamp(1, MAX_PAGES);
         tick_run_loop();
@@ -245,5 +260,18 @@ mod macos {
         } else {
             Err("WebKit could not write the PDF file".to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_page_margin;
+
+    #[test]
+    fn clamps_page_margin_to_a_safe_finite_range() {
+        assert_eq!(safe_page_margin(-4.0, 595.0, 842.0), 0.0);
+        assert_eq!(safe_page_margin(36.0, 595.0, 842.0), 36.0);
+        assert_eq!(safe_page_margin(500.0, 595.0, 842.0), 595.0 / 3.0);
+        assert_eq!(safe_page_margin(f64::NAN, 595.0, 842.0), 0.0);
     }
 }

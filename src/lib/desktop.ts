@@ -163,6 +163,15 @@ export async function exportTextFile(path: string, contents: string): Promise<vo
   await invoke<void>('write_export_file', { path, contents });
 }
 
+export interface TextExportFile {
+  path: string;
+  contents: string;
+}
+
+export async function exportTextFiles(files: readonly TextExportFile[]): Promise<void> {
+  await invoke<void>('write_export_files', { files });
+}
+
 export interface ReadTextFileResult {
   path: string;
   contents: string;
@@ -195,14 +204,16 @@ export interface PdfExportFile {
   path: string;
   html: string;
   paperSize: PdfPaperSize;
+  pageMargin: number;
 }
 
 export async function exportPdfFile(
   path: string,
   html: string,
   paperSize: PdfPaperSize,
+  pageMargin: number,
 ): Promise<void> {
-  await invoke<void>('write_pdf_file', { path, html, paperSize });
+  await invoke<void>('write_pdf_file', { path, html, paperSize, pageMargin });
 }
 
 export async function exportPdfFiles(files: readonly PdfExportFile[]): Promise<void> {
