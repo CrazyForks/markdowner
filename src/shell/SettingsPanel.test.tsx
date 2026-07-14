@@ -97,15 +97,23 @@ describe('SettingsPanel update section', () => {
 
   it('renders and toggles WYSIWYG code block wrapping', () => {
     const onSettingsChange = vi.fn();
-    renderPanel({ onSettingsChange });
+    renderPanel({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        wysiwygCodeBlockWrap: true,
+      },
+      onSettingsChange,
+    });
 
     expect(
       screen.getByText('Wrap long code lines instead of scrolling horizontally.'),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/WYSIWYG Code Block Wrap/i));
+    const wrapSwitch = screen.getByLabelText(/WYSIWYG Code Block Wrap/i);
+    expect(wrapSwitch).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(wrapSwitch);
     expect(onSettingsChange).toHaveBeenCalledWith({
       ...DEFAULT_SETTINGS,
-      wysiwygCodeBlockWrap: true,
+      wysiwygCodeBlockWrap: false,
     });
   });
 

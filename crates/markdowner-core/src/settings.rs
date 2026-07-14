@@ -1,8 +1,16 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::EditorMode;
+
+fn deserialize_bool_or_false<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_bool().unwrap_or(false))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -16,6 +24,7 @@ pub struct Settings {
     pub editor_wrap_column: u32,
     pub editor_show_wrap_line: bool,
     pub editor_word_break_keep_all: bool,
+    #[serde(deserialize_with = "deserialize_bool_or_false")]
     pub wysiwyg_code_block_wrap: bool,
     pub outline_font_size: u32,
     pub outline_row_spacing: u32,
@@ -212,11 +221,25 @@ mod tests {
             "missing wysiwygCodeBlockWrap should default to false"
         );
 
-        let json = serde_json::json!({ "wysiwygCodeBlockWrap": true });
-        let parsed: Settings = serde_json::from_value(json).expect("wrap setting parse");
-        assert!(parsed.wysiwyg_code_block_wrap);
-        let value = serde_json::to_value(parsed).expect("serialize settings");
-        assert_eq!(value["wysiwygCodeBlockWrap"], true);
+        for expected in [true, false] {
+            let json = serde_json::json!({ "wysiwygCodeBlockWrap": expected });
+            let parsed: Settings = serde_json::from_value(json).expect("wrap setting parse");
+            assert_eq!(parsed.wysiwyg_code_block_wrap, expected);
+            let value = serde_json::to_value(parsed).expect("serialize settings");
+            assert_eq!(value["wysiwygCodeBlockWrap"], expected);
+        }
+    }
+
+    #[test]
+    fn wysiwyg_code_block_wrap_malformed_value_defaults_field_only() {
+        let malformed =
+            r#"{"autoSave":true,"editorFontSize":18,"wysiwygCodeBlockWrap":"true"}"#;
+        let parsed: Settings =
+            serde_json::from_str(malformed).expect("malformed wrap value should still parse");
+
+        assert!(!parsed.wysiwyg_code_block_wrap);
+        assert!(parsed.auto_save);
+        assert_eq!(parsed.editor_font_size, 18);
     }
 
     #[test]
