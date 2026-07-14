@@ -16,6 +16,7 @@ import {
   normalizeWrapColumn,
   resolveEditorFontSizeAdjustment,
   resolveOutlinePanelSizing,
+  saveSettings,
 } from './settings';
 
 const invokeMock = vi.hoisted(() => vi.fn());
@@ -334,5 +335,36 @@ describe('word wrap column + wrap line', () => {
         editorWordBreakKeepAll: false,
       }),
     ).toEqual(['editorWordBreakKeepAll']);
+  });
+});
+
+describe('WYSIWYG code block wrap setting', () => {
+  it('defaults to off', () => {
+    expect(DEFAULT_SETTINGS.wysiwygCodeBlockWrap).toBe(false);
+  });
+
+  it('normalizes malformed values before saving and preserves booleans', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValueOnce({ wysiwygCodeBlockWrap: 'true' });
+    const malformed = await loadSettings();
+    expect(malformed.wysiwygCodeBlockWrap).toBe(false);
+
+    invokeMock.mockResolvedValueOnce(undefined);
+    await saveSettings(malformed);
+    expect(invokeMock).toHaveBeenLastCalledWith('save_settings', {
+      settings: expect.objectContaining({ wysiwygCodeBlockWrap: false }),
+    });
+
+    invokeMock.mockResolvedValueOnce({ wysiwygCodeBlockWrap: true });
+    expect((await loadSettings()).wysiwygCodeBlockWrap).toBe(true);
+  });
+
+  it('tracks the preference as a changed setting', () => {
+    expect(
+      getChangedSettingsKeys(DEFAULT_SETTINGS, {
+        ...DEFAULT_SETTINGS,
+        wysiwygCodeBlockWrap: true,
+      }),
+    ).toEqual(['wysiwygCodeBlockWrap']);
   });
 });

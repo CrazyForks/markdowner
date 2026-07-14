@@ -302,6 +302,18 @@ export function buildCommandPaletteCommands(
         }),
     },
     {
+      id: 'preferences.toggleWysiwygCodeBlockWrap',
+      category: 'Preferences',
+      label: settings.wysiwygCodeBlockWrap
+        ? 'Disable WYSIWYG Code Block Wrap'
+        : 'Enable WYSIWYG Code Block Wrap',
+      run: () =>
+        actions.updateSettings({
+          ...settings,
+          wysiwygCodeBlockWrap: !settings.wysiwygCodeBlockWrap,
+        }),
+    },
+    {
       id: 'preferences.toggleWordBreakKeepAll',
       category: 'Preferences',
       label: settings.editorWordBreakKeepAll

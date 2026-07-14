@@ -984,6 +984,20 @@ export function SettingsPanel({
             />
           </div>
 
+          <div className={switchFieldClass}>
+            <Label htmlFor="wysiwyg-code-block-wrap" className="flex flex-col items-start gap-0.5 text-left text-sm">
+              <span>WYSIWYG Code Block Wrap</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                Wrap long code lines instead of scrolling horizontally.
+              </span>
+            </Label>
+            <Switch
+              id="wysiwyg-code-block-wrap"
+              checked={settings.wysiwygCodeBlockWrap}
+              onCheckedChange={(checked) => handleSettingChange('wysiwygCodeBlockWrap', checked)}
+            />
+          </div>
+
           <div className={inputFieldClass}>
             <Label htmlFor="wrap-column" className="flex flex-col items-start gap-0.5 text-left text-sm">
               <span>Wrap Column</span>

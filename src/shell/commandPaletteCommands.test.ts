@@ -113,6 +113,7 @@ describe('buildCommandPaletteCommands', () => {
       'preferences.toggleFocusMode',
       'preferences.toggleTypewriterMode',
       'preferences.toggleWordWrap',
+      'preferences.toggleWysiwygCodeBlockWrap',
       'preferences.toggleWordBreakKeepAll',
       'preferences.toggleTableViewMode',
       'preferences.toggleAutoSave',
@@ -262,6 +263,7 @@ describe('buildCommandPaletteCommands', () => {
     const current = settings({
       autoSave: true,
       editorLineWrap: false,
+      wysiwygCodeBlockWrap: false,
       editorWordBreakKeepAll: true,
       focusModeEnabled: true,
       typewriterModeEnabled: false,
@@ -280,6 +282,13 @@ describe('buildCommandPaletteCommands', () => {
       .toBe('Enable Typewriter Mode');
     expect(commands.find((command) => command.id === 'preferences.toggleWordWrap')?.label)
       .toBe('Enable Word Wrap');
+    expect(
+      commands.find((command) => command.id === 'preferences.toggleWysiwygCodeBlockWrap')?.label,
+    ).toBe('Enable WYSIWYG Code Block Wrap');
+    expect(
+      commands.find((command) => command.id === 'preferences.toggleWysiwygCodeBlockWrap')
+        ?.shortcut,
+    ).toBeUndefined();
     expect(commands.find((command) => command.id === 'preferences.toggleWordBreakKeepAll')?.label)
       .toBe('Disable Word Break Keep All');
     expect(commands.find((command) => command.id === 'preferences.toggleAutoSave')?.label)
@@ -291,6 +300,14 @@ describe('buildCommandPaletteCommands', () => {
       editorLineWrap: true,
     });
 
+    commands
+      .find((command) => command.id === 'preferences.toggleWysiwygCodeBlockWrap')
+      ?.run?.();
+    expect(updateSettings).toHaveBeenCalledWith({
+      ...current,
+      wysiwygCodeBlockWrap: true,
+    });
+
     commands.find((command) => command.id === 'preferences.toggleWordBreakKeepAll')?.run?.();
     expect(updateSettings).toHaveBeenCalledWith({
       ...current,
@@ -299,6 +316,20 @@ describe('buildCommandPaletteCommands', () => {
 
     commands.find((command) => command.id === 'preferences.resetDefaults')?.run?.();
     expect(updateSettings).toHaveBeenLastCalledWith(DEFAULT_SETTINGS);
+  });
+
+  it('labels enabled WYSIWYG code block wrapping by the inverse action', () => {
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings({ wysiwygCodeBlockWrap: true }),
+      actions: actions(),
+    });
+
+    expect(
+      commands.find((command) => command.id === 'preferences.toggleWysiwygCodeBlockWrap')?.label,
+    ).toBe('Disable WYSIWYG Code Block Wrap');
   });
 
   it('labels the word-break keep-all toggle by the next action', () => {

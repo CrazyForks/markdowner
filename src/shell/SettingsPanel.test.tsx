@@ -95,6 +95,20 @@ describe('SettingsPanel update section', () => {
     );
   });
 
+  it('renders and toggles WYSIWYG code block wrapping', () => {
+    const onSettingsChange = vi.fn();
+    renderPanel({ onSettingsChange });
+
+    expect(
+      screen.getByText('Wrap long code lines instead of scrolling horizontally.'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/WYSIWYG Code Block Wrap/i));
+    expect(onSettingsChange).toHaveBeenCalledWith({
+      ...DEFAULT_SETTINGS,
+      wysiwygCodeBlockWrap: true,
+    });
+  });
+
   it('shows the diagnostics log path and opens the log file', async () => {
     renderPanel();
 

@@ -16,6 +16,7 @@ pub struct Settings {
     pub editor_wrap_column: u32,
     pub editor_show_wrap_line: bool,
     pub editor_word_break_keep_all: bool,
+    pub wysiwyg_code_block_wrap: bool,
     pub outline_font_size: u32,
     pub outline_row_spacing: u32,
     pub default_mode: EditorMode,
@@ -61,6 +62,7 @@ impl Default for Settings {
             editor_wrap_column: 120,
             editor_show_wrap_line: true,
             editor_word_break_keep_all: true,
+            wysiwyg_code_block_wrap: false,
             outline_font_size: 12,
             outline_row_spacing: 0,
             default_mode: EditorMode::Wysiwyg,
@@ -199,6 +201,22 @@ mod tests {
         assert!(payload.contains("\"editorShowWrapLine\":false"));
         let parsed: Settings = serde_json::from_str(&payload).expect("parse");
         assert!(!parsed.editor_show_wrap_line);
+    }
+
+    #[test]
+    fn wysiwyg_code_block_wrap_defaults_off_and_round_trips() {
+        let legacy = r#"{"autoSave":true,"editorLineWrap":true}"#;
+        let parsed: Settings = serde_json::from_str(legacy).expect("legacy settings parse");
+        assert!(
+            !parsed.wysiwyg_code_block_wrap,
+            "missing wysiwygCodeBlockWrap should default to false"
+        );
+
+        let json = serde_json::json!({ "wysiwygCodeBlockWrap": true });
+        let parsed: Settings = serde_json::from_value(json).expect("wrap setting parse");
+        assert!(parsed.wysiwyg_code_block_wrap);
+        let value = serde_json::to_value(parsed).expect("serialize settings");
+        assert_eq!(value["wysiwygCodeBlockWrap"], true);
     }
 
     #[test]

@@ -7457,6 +7457,7 @@ describe('App recent documents', () => {
           editorFontSize: 22,
           editorFontFamily: 'JetBrains Mono',
           editorLineWrap: false,
+          wysiwygCodeBlockWrap: true,
         };
       }
       return undefined;
@@ -7494,6 +7495,7 @@ describe('App recent documents', () => {
           editorWrapColumn: 120,
           editorShowWrapLine: true,
           editorWordBreakKeepAll: true,
+          wysiwygCodeBlockWrap: false,
           outlineFontSize: 12,
           outlineRowSpacing: 0,
           defaultMode: 'Wysiwyg',
@@ -8329,6 +8331,40 @@ describe('App recent documents', () => {
     });
   });
 
+  it('persists WYSIWYG Code Block Wrap changes from the Settings dialog through save_settings', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return { wysiwygCodeBlockWrap: false };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'code.md',
+        activeDocumentPath: '/tmp/project/code.md',
+        activeDocumentSource: '```text\nlong-line\n```',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByTestId('settings-panel');
+    const wrapToggle = within(dialog).getByLabelText(/WYSIWYG Code Block Wrap/i);
+
+    fireEvent.click(wrapToggle);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: expect.objectContaining({ wysiwygCodeBlockWrap: true }),
+      });
+    });
+  });
+
   it('persists Word Break Keep All changes from the Settings dialog through save_settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
@@ -8812,6 +8848,7 @@ describe('App recent documents', () => {
           editorFontSize: 22,
           editorFontFamily: 'JetBrains Mono',
           editorLineWrap: false,
+          wysiwygCodeBlockWrap: true,
         };
       }
       return undefined;
@@ -8839,6 +8876,7 @@ describe('App recent documents', () => {
           editorWrapColumn: 120,
           editorShowWrapLine: true,
           editorWordBreakKeepAll: true,
+          wysiwygCodeBlockWrap: false,
           outlineFontSize: 12,
           outlineRowSpacing: 0,
           defaultMode: 'Wysiwyg',
