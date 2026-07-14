@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { ElementType, HTMLAttributes } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CodeBlockView } from './CodeBlockView';
@@ -10,16 +11,32 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
+type NodeViewContentDoubleProps = HTMLAttributes<HTMLElement> & {
+  as?: ElementType;
+};
+
 // Tiptap pulls in ProseMirror primitives in CodeBlockView.tsx only via the
 // NodeView render helpers (which we stub below), so mocking @tiptap/react
-// here keeps the test isolated from the full editor stack.
+// here keeps the component tests isolated from the full editor stack. This
+// NodeViewContent double intentionally mirrors Tiptap's default-first style
+// merge so the rendered DOM exposes the same inline white-space behavior.
 vi.mock('@tiptap/react', () => ({
   NodeViewWrapper: ({ children, ...props }: { children: React.ReactNode } & Record<string, unknown>) => (
     <div data-testid="node-view-wrapper" {...props}>
       {children}
     </div>
   ),
-  NodeViewContent: (props: Record<string, unknown>) => <div data-testid="node-view-content" {...props} />,
+  NodeViewContent: ({
+    as: Tag = 'div',
+    style,
+    ...props
+  }: NodeViewContentDoubleProps) => (
+    <Tag
+      data-testid="node-view-content"
+      {...props}
+      style={{ whiteSpace: 'pre-wrap', ...style }}
+    />
+  ),
 }));
 
 vi.mock('./mermaidRenderer', () => ({
@@ -89,6 +106,24 @@ describe('CodeBlockView language picker', () => {
   afterEach(() => {
     cleanup();
     mocks.renderMermaidDiagramSvg.mockClear();
+  });
+
+  it('lets ordinary code content inherit white-space from its pre', () => {
+    renderView({ language: 'typescript' });
+
+    const content = screen.getByTestId('node-view-content');
+    expect(content.tagName).toBe('CODE');
+    expect(content.parentElement?.tagName).toBe('PRE');
+    expect(content.style.whiteSpace).toBe('inherit');
+  });
+
+  it('lets Mermaid source content inherit white-space from its pre', () => {
+    renderView({ language: 'mermaid' });
+
+    const content = screen.getByTestId('node-view-content');
+    expect(content.tagName).toBe('CODE');
+    expect(content.parentElement).toHaveClass('mermaid-source-pre');
+    expect(content.style.whiteSpace).toBe('inherit');
   });
 
   it('cycles through languages starting with the same letter on repeated key presses', () => {

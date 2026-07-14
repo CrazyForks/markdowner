@@ -1,14 +1,18 @@
 /**
- * Behaviour tests for the custom code-block keyboard handling. These are pure
- * document-structure operations (no layout), so a real Tiptap editor in jsdom
- * is sufficient and matches what WebKit/Tauri runs.
+ * Behaviour tests for the custom code-block node view and keyboard handling.
+ * A real Tiptap editor in jsdom exposes document structure and rendered DOM,
+ * but jsdom has no layout, so it cannot prove actual visual-row geometry.
  *
  * Guards the down-arrow exit specifically: our addKeyboardShortcuts override
  * shadows CodeBlockLowlight's built-in exitOnArrowDown, so the exit must be
- * re-implemented here — a regression test stops it silently disappearing again.
+ * re-implemented here. The endOfTextblock mock verifies our delegation and
+ * decision boundary; constrained-width visual wrapping is covered live.
  */
 import StarterKit from '@tiptap/starter-kit';
 import { Editor } from '@tiptap/core';
+import { EditorContent } from '@tiptap/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
+import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createCodeBlockExtension } from './codeBlockExtension';
@@ -35,17 +39,33 @@ describe('code block keyboard handling', () => {
   let editor: Editor;
 
   afterEach(() => {
+    cleanup();
     const el = editor?.view.dom.parentElement;
     editor?.destroy();
     el?.remove();
+  });
+
+  it('lets ordinary code content inherit white-space in the real React node view', async () => {
+    editor = buildEditor('<pre><code>only</code></pre>');
+    const { container } = render(createElement(EditorContent, { editor }));
+
+    const content = await waitFor(() => {
+      const element = container.querySelector<HTMLElement>(
+        '.code-block-view > pre > code',
+      );
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(content.style.whiteSpace).toBe('inherit');
   });
 
   describe('ArrowDown exit', () => {
     beforeEach(() => {
       editor = buildEditor('<pre><code>line1\nline2</code></pre>');
       // jsdom has no layout; downstream keymap handlers (gapcursor) call
-      // endOfTextblock -> coordsAtPos -> getClientRects, which throws. Stub it
-      // so only our ArrowDown decision is exercised.
+      // endOfTextblock -> coordsAtPos -> getClientRects, which throws. The
+      // stub models ProseMirror's visual-boundary result so these tests verify
+      // our shortcut decision rather than browser wrapping geometry.
       vi.spyOn(editor.view, 'endOfTextblock').mockReturnValue(false);
     });
 
@@ -67,7 +87,7 @@ describe('code block keyboard handling', () => {
       expect(editor.state.selection.$from.parent.type.name).toBe('codeBlock');
     });
 
-    it('does not exit when the last logical line has another visual row below', () => {
+    it('does not exit when ProseMirror reports another visual row below', () => {
       editor.chain().focus().setTextSelection(8).run();
       const handled = pressArrowDown(editor);
       expect(editor.view.endOfTextblock).toHaveBeenCalledWith('down');

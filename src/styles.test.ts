@@ -4,21 +4,33 @@ import { describe, expect, it } from 'vitest';
 
 const stylesheet = readFileSync('src/styles.css', 'utf8');
 
-function ruleBody(selector: string): string {
-  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = stylesheet.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+function ruleBody(selector: string, css = stylesheet): string {
+  const cssWithoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
 
-  return match?.[1] ?? '';
+  for (const match of cssWithoutComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = match[1].split(',').map((candidate) => candidate.trim());
+    if (selectors.includes(selector)) return match[2] ?? '';
+  }
+
+  return '';
 }
 
-function ruleBodyContaining(selector: string): string {
-  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = stylesheet.match(
-    new RegExp(`[^{}]*${escapedSelector}[^{}]*\\{([^}]*)\\}`),
-  );
+describe('stylesheet rule lookup', () => {
+  it('matches exact selectors within comma-separated rule lists', () => {
+    const css = `
+      .fixture > pre > code,
+      .fixture-secondary { white-space: pre-wrap; }
+    `;
 
-  return match?.[1] ?? '';
-}
+    expect(ruleBody('.fixture > pre', css)).toBe('');
+    expect(ruleBody('.fixture > pre > code', css)).toContain(
+      'white-space: pre-wrap;',
+    );
+    expect(ruleBody('.fixture-secondary', css)).toContain(
+      'white-space: pre-wrap;',
+    );
+  });
+});
 
 describe('editor word wrap stylesheet', () => {
   it('disables automatic ProseMirror wrapping when WYSIWYG word wrap is off', () => {
@@ -42,7 +54,7 @@ describe('WYSIWYG code block wrapping stylesheet', () => {
     ];
 
     for (const selector of selectors) {
-      const rule = ruleBodyContaining(selector);
+      const rule = ruleBody(selector);
       expect(rule).toContain('white-space: pre-wrap;');
       expect(rule).toContain('overflow-wrap: anywhere;');
     }

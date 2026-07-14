@@ -475,6 +475,7 @@ export function CodeBlockView(props: NodeViewProps) {
               <NodeViewContent
                 as={'code' as unknown as 'div'}
                 className="language-mermaid hljs"
+                style={{ whiteSpace: 'inherit' }}
               />
             </pre>
           </div>
@@ -484,6 +485,7 @@ export function CodeBlockView(props: NodeViewProps) {
           <NodeViewContent
             as={'code' as unknown as 'div'}
             className={`language-${language} hljs`}
+            style={{ whiteSpace: 'inherit' }}
           />
         </pre>
       )}
