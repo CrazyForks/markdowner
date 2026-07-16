@@ -1,6 +1,7 @@
 import { FileDown, RotateCcw, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,6 +33,7 @@ export interface ExportPreviewTabProps {
   initialStyle: ExportStyle;
   appTheme: ExportTheme;
   busy: boolean;
+  errorMessage?: string | null;
   onCancel: () => void;
   onConfirm: (style: ExportStyle) => void;
   buildPreview?: (options: ExportHtmlOptions) => Promise<string>;
@@ -156,6 +158,7 @@ export function ExportPreviewTab({
   initialStyle,
   appTheme,
   busy,
+  errorMessage = null,
   onCancel,
   onConfirm,
   buildPreview = buildExportHtml,
@@ -271,6 +274,15 @@ export function ExportPreviewTab({
           </Button>
         </div>
       </header>
+
+      {errorMessage ? (
+        <div className="shrink-0 border-b border-border bg-destructive/5 px-4 py-3">
+          <Alert variant="destructive">
+            <AlertTitle>Export failed</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(220px,auto)_minmax(0,1fr)] lg:grid-cols-[300px_minmax(0,1fr)] lg:grid-rows-1">
         <aside className="overflow-y-auto border-b border-border bg-background px-4 py-4 lg:border-r lg:border-b-0">

@@ -523,6 +523,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [exportRequest, setExportRequest] = useState<ExportPreviewRequest | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [exportStyle, setExportStyle] = useState<ExportStyle>(() => loadExportStyle());
   const exportAppTheme: ExportTheme =
     snapshot.theme.kind === 'BuiltInDark' ? 'dark' : 'light';
@@ -3535,13 +3536,18 @@ export default function App() {
     return () => window.cancelAnimationFrame(animationFrame);
   }, [settings.typewriterModeEnabled, currentMode, editor]);
 
-  const withBusy = async (action: () => Promise<void>, fallback?: string) => {
+  const withBusy = async (
+    action: () => Promise<void>,
+    fallback?: string,
+    onError?: (message: string) => void,
+  ) => {
     busyDepthRef.current += 1;
     setBusy(true);
     try {
       await action();
     } catch (error) {
-      reportOperationError(error, fallback);
+      const message = reportOperationError(error, fallback);
+      onError?.(message);
     } finally {
       busyDepthRef.current = Math.max(0, busyDepthRef.current - 1);
       if (busyDepthRef.current === 0) {
@@ -4420,6 +4426,7 @@ export default function App() {
       : [...currentTabs, createExportPreviewTab()];
     tabsRef.current = nextTabs;
     activeTabIdRef.current = EXPORT_PREVIEW_TAB_ID;
+    setExportError(null);
     setExportRequest(request);
     startTransition(() => {
       setTabs(nextTabs);
@@ -4505,6 +4512,8 @@ export default function App() {
         ? `Could not export workspace to ${formatLabel}`
         : `Could not export to ${formatLabel}`;
 
+    setExportError(null);
+    setSnapshot((current) => setSnapshotLastError(current, null));
     await withBusy(async () => {
       if (request.scope === 'document') {
         const selected = await saveDialog(
@@ -4600,7 +4609,7 @@ export default function App() {
       }
       announceShell(`Exported ${files.length} ${formatLabel} files to ${rootDir}/exports`);
       await handleCloseTab(EXPORT_PREVIEW_TAB_ID);
-    }, fallback);
+    }, fallback, setExportError);
   };
 
   const autoSaveEligibility = resolveAutoSaveEligibility({
@@ -5109,6 +5118,7 @@ export default function App() {
     if (targetId === EXPORT_PREVIEW_TAB_ID) {
       const currentTabs = tabsRef.current;
       if (!currentTabs.some((tab) => tab.id === EXPORT_PREVIEW_TAB_ID)) {
+        setExportError(null);
         setExportRequest(null);
         return;
       }
@@ -5126,6 +5136,7 @@ export default function App() {
       tabsRef.current = remainingTabs;
       activeTabIdRef.current = nextActiveTabId;
       preExportTabIdRef.current = null;
+      setExportError(null);
       setExportRequest(null);
       startTransition(() => {
         setTabs(remainingTabs);
@@ -6185,6 +6196,7 @@ export default function App() {
             initialStyle={exportPreviewInitialStyle}
             appTheme={exportAppTheme}
             busy={busy}
+            errorMessage={exportError}
             onCancel={() => void handleCloseTab(EXPORT_PREVIEW_TAB_ID)}
             onConfirm={(style) => void handleConfirmExport(style)}
           />

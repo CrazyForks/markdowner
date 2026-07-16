@@ -1620,12 +1620,14 @@ fn write_pdf_file(
     page_margin: f64,
 ) -> Result<(), String> {
     pdf_export::write_pdf_file(&path, &html, &paper_size, page_margin)
+        .map_err(|error| pdf_export::format_pdf_export_error(&path, &error))
 }
 
 #[tauri::command]
 fn write_pdf_files(files: Vec<PdfExportFile>) -> Result<(), String> {
     for file in files {
-        pdf_export::write_pdf_file(&file.path, &file.html, &file.paper_size, file.page_margin)?;
+        pdf_export::write_pdf_file(&file.path, &file.html, &file.paper_size, file.page_margin)
+            .map_err(|error| pdf_export::format_pdf_export_error(&file.path, &error))?;
     }
     Ok(())
 }

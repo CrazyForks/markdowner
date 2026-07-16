@@ -2839,6 +2839,42 @@ describe('App recent documents', () => {
     });
   });
 
+  it('keeps a failed batch PDF export visible on the export preview surface', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        rootDir: '/tmp/project',
+        workspaceDocuments: ['/tmp/project/README.md'],
+        activeDocumentName: 'README.md',
+        activeDocumentPath: '/tmp/project/README.md',
+        activeDocumentSource: '# Readme',
+      }),
+    );
+    readTextFilesMock.mockResolvedValue([
+      { path: '/tmp/project/README.md', contents: '# Readme' },
+    ]);
+    exportPdfFilesMock.mockRejectedValueOnce(
+      new Error("Could not export '/tmp/project/README.md' to PDF: WebKit timed out"),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(
+      within(menu).getByRole('menuitem', { name: /^export all markdown to pdfs…$/i }),
+    );
+    const exportButton = await screen.findByRole('button', { name: 'Export 1 PDF files' });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
+    const preview = await screen.findByTestId('export-preview-surface');
+    await waitFor(() => {
+      expect(within(preview).getByRole('alert')).toHaveTextContent(
+        "Could not export '/tmp/project/README.md' to PDF: WebKit timed out",
+      );
+    });
+  });
+
   it('exports every workspace Markdown file to HTML under the project exports folder', async () => {
     bootstrapMock.mockResolvedValue(
       baseSnapshot({

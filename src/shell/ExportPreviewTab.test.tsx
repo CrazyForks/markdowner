@@ -264,6 +264,16 @@ describe('ExportPreviewTab', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it('shows a native export failure on the export preview surface', () => {
+    renderPreview({
+      errorMessage: "Could not export '/tmp/project/README.md' to PDF: WebKit timed out",
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      "Could not export '/tmp/project/README.md' to PDF: WebKit timed out",
+    );
+  });
+
   it('describes and confirms workspace batch size', () => {
     renderPreview({ request: { ...HTML_REQUEST, scope: 'workspace', targetCount: 3 } });
 

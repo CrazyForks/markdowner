@@ -31,7 +31,7 @@ objc2 = "0.6"
 objc2-core-foundation = { version = "0.3", features = ["CFRunLoop", "CFDate"] }
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSURL", "NSString", "NSError", "NSData", "NSValue"] }
 objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "block2", "objc2-uniform-type-identifiers"] }
-objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfiguration", "WKPDFConfiguration", "WKNavigation", "block2", "objc2-app-kit", "objc2-core-foundation"] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfiguration", "WKPDFConfiguration", "WKNavigation", "WKNavigationDelegate", "block2", "objc2-app-kit", "objc2-core-foundation"] }
 objc2-pdf-kit = { version = "0.3", features = ["PDFDocument", "PDFPage"] }
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType"] }
 block2 = "0.6"
