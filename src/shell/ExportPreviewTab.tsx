@@ -321,11 +321,11 @@ export function ExportPreviewTab({
       data-testid="export-preview-surface"
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
     >
-      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-muted/15 px-4 py-3">
+      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-muted/15 px-4 py-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-background shadow-sm">
           <FileDown className="size-4" />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h2 className="font-heading text-base font-medium tracking-[-0.02em]">Export Preview</h2>
           <p className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
             <span className="font-mono font-semibold tracking-[0.12em] text-foreground">
@@ -337,7 +337,10 @@ export function ExportPreviewTab({
             </span>
           </p>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div
+          data-testid="export-preview-actions"
+          className="ml-auto flex shrink-0 items-center gap-2 max-sm:w-full max-sm:justify-end"
+        >
           <Button
             type="button"
             variant="ghost"

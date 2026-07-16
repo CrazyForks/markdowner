@@ -112,6 +112,10 @@ describe('ExportPreviewTab', () => {
       'overflow-y-auto',
     );
     expect(screen.getByTestId('export-preview-panel')).toHaveClass('min-h-0', 'overflow-hidden');
+    expect(screen.getByTestId('export-preview-actions')).toHaveClass(
+      'max-sm:w-full',
+      'max-sm:justify-end',
+    );
   });
 
   it('starts PDF preview in Fit with accessible controls and a fixed base page', () => {
