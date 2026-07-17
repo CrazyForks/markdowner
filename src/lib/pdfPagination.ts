@@ -106,7 +106,7 @@ export function paginatePdfDocument(
 }
 
 export function buildPdfPaginationScript(config: PdfPaginationRuntimeConfig): string {
-  const serialized = JSON.stringify(config).replaceAll('<', '\\u003c');
+  const serialized = JSON.stringify(config).replace(/</g, '\\u003c');
   const paginator = paginatePdfDocument.toString();
   return `(function () {
   "use strict";
