@@ -97,7 +97,9 @@ describe('PDF pagination runtime', () => {
       maxPages: 100,
     };
 
-    expect(buildPdfPaginationScript(config)).toContain(JSON.stringify(config));
+    const script = buildPdfPaginationScript(config);
+    expect(script).toContain(JSON.stringify(config));
+    expect(script).toContain('markdowner:pdf-preview-error');
   });
 
   it('accepts only token-scoped, finite ready messages within the page cap', () => {

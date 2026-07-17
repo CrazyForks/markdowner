@@ -2,6 +2,7 @@ import { MAX_PDF_PAGES } from './pdfPaper';
 
 export const PDF_PREVIEW_CONFIG_MESSAGE = 'markdowner:pdf-preview-config';
 export const PDF_PREVIEW_READY_MESSAGE = 'markdowner:pdf-preview-ready';
+export const PDF_PREVIEW_ERROR_MESSAGE = 'markdowner:pdf-preview-error';
 
 export interface PdfPaginationOptions {
   pageHeight: number;
@@ -165,9 +166,15 @@ export function buildPdfPaginationScript(config: PdfPaginationRuntimeConfig): st
         pageWidth: config.pageWidth,
         pageHeight: config.pageHeight
       }, "*");
+    }).catch(function () {
+      parent.postMessage({
+        type: "${PDF_PREVIEW_ERROR_MESSAGE}",
+        token: config.token,
+        pageIndex: data.pageIndex
+      }, "*");
     });
   });
-  run();
+  run().catch(function () {});
 })();`;
 }
 
