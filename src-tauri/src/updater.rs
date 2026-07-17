@@ -313,7 +313,8 @@ mod tests {
         // Waits for the running app to exit before touching the bundle.
         assert!(script.contains("kill -0 \"$APP_PID\""));
         // Stages the new bundle into a scratch path, NOT directly over DEST...
-        assert!(script.contains("ditto \"$MOUNT/Markdowner.app\" \"$STAGED\""));
+        assert!(script.contains("DITTO_BIN=\"${MARKDOWNER_DITTO_BIN:-/usr/bin/ditto}\""));
+        assert!(script.contains("\"$DITTO_BIN\" \"$MOUNT/Markdowner.app\" \"$STAGED\""));
         assert!(script.contains("xattr -dr com.apple.quarantine \"$STAGED\""));
         // ...then swaps it in atomically, with a backup that can be restored.
         assert!(script.contains("mv \"$DEST\" \"$BACKUP\""));

@@ -19,6 +19,7 @@
 APP_PID="$1"
 DMG="$2"
 DEST="$3"
+DITTO_BIN="${MARKDOWNER_DITTO_BIN:-/usr/bin/ditto}"
 
 if [ -z "$APP_PID" ] || [ -z "$DMG" ] || [ -z "$DEST" ]; then
   exit 2
@@ -80,7 +81,7 @@ fi
 
 # Stage the new bundle next to the destination (same volume => the swap is an
 # atomic rename). A failed copy aborts here, before the live bundle is touched.
-ditto "$MOUNT/Markdowner.app" "$STAGED" || fail
+"$DITTO_BIN" "$MOUNT/Markdowner.app" "$STAGED" || fail
 xattr -dr com.apple.quarantine "$STAGED" 2>/dev/null || true
 detach_mount
 

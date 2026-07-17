@@ -71,6 +71,8 @@ make_common_stubs() {
 printf "open %s\n" "$1" >>"${COMMAND_LOG}"'
   write_stub "${bin}/osascript" '#!/usr/bin/env bash
 printf "osascript\n" >>"${COMMAND_LOG}"'
+  write_stub "${bin}/ditto" '#!/usr/bin/env bash
+/usr/bin/ditto "$@"'
 }
 
 setup_dest() {
@@ -87,7 +89,19 @@ run_self_update() {
   # Usage: run_self_update <bin_dir> <dmg> <dest>
   local bin="$1" dmg="$2" dest="$3"
   PATH="${bin}:/usr/bin:/bin" COMMAND_LOG="${COMMAND_LOG}" \
+    MARKDOWNER_DITTO_BIN="${bin}/ditto" \
     bash "${SELF_UPDATE}" "$(dead_pid)" "${dmg}" "${dest}"
+}
+
+run_self_update_with_default_ditto() {
+  # Usage: run_self_update_with_default_ditto <bin_dir> <dmg> <dest>
+  # Leaves MARKDOWNER_DITTO_BIN unset so the production default is exercised.
+  local bin="$1" dmg="$2" dest="$3"
+  (
+    unset MARKDOWNER_DITTO_BIN
+    PATH="${bin}:/usr/bin:/bin" COMMAND_LOG="${COMMAND_LOG}" \
+      bash "${SELF_UPDATE}" "$(dead_pid)" "${dmg}" "${dest}"
+  )
 }
 
 # --- Test 1: a successful update replaces the bundle ------------------------
@@ -236,11 +250,39 @@ fi
   rm -rf "${tmp}"
 }
 
+# --- Test 6: a PATH collision cannot hijack macOS bundle copying ------------
+test_path_ditto_collision_uses_system_bundle_copy() {
+  local tmp; tmp="$(mktemp -d)"
+  local bin="${tmp}/bin"; mkdir -p "${bin}"
+  export COMMAND_LOG="${tmp}/log"; : >"${COMMAND_LOG}"
+  make_common_stubs "${bin}"
+  write_stub "${bin}/hdiutil" "${HDIUTIL_WITH_APP}"
+  # Reproduce a user-installed CLI named `ditto` shadowing /usr/bin/ditto.
+  write_stub "${bin}/ditto" '#!/usr/bin/env bash
+printf "shadowed-ditto\n" >>"${COMMAND_LOG}"
+exit 64'
+
+  local dest="${tmp}/Markdowner.app"
+  setup_dest "${dest}"
+  local dmg="${tmp}/update.dmg"; : >"${dmg}"
+
+  run_self_update_with_default_ditto "${bin}" "${dmg}" "${dest}"
+  local rc=$?
+
+  local ok=1
+  [ "$rc" -eq 0 ] || { fail "PATH ditto collision: expected exit 0, got ${rc}"; ok=0; }
+  [ "$(marker "${dest}")" = "NEW" ] || { fail "PATH ditto collision: bundle not replaced (marker=$(marker "${dest}"))"; ok=0; }
+  ! grep -Fq "shadowed-ditto" "${COMMAND_LOG}" || { fail "PATH ditto collision: user CLI intercepted bundle copy"; ok=0; }
+  [ "$ok" -eq 1 ] && pass
+  rm -rf "${tmp}"
+}
+
 test_successful_update_replaces_bundle
 test_failed_copy_preserves_existing_bundle
 test_missing_app_preserves_existing_bundle
 test_failed_final_swap_restores_existing_bundle
 test_failed_restore_keeps_backup_bundle
+test_path_ditto_collision_uses_system_bundle_copy
 
 printf '\nself-update.sh: %d passed, %d failed\n' "${PASS}" "${FAIL}"
 [ "${FAIL}" -eq 0 ]
