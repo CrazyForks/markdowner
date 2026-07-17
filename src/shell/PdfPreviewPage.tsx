@@ -10,7 +10,6 @@ export interface PdfPreviewPageProps {
   html: string;
   token: string;
   pageIndex: number;
-  pageCount: number;
   width: number;
   height: number;
   backgroundColor: string;
@@ -22,7 +21,6 @@ export function PdfPreviewPage({
   html,
   token,
   pageIndex,
-  pageCount,
   width,
   height,
   backgroundColor,
@@ -73,24 +71,19 @@ export function PdfPreviewPage({
   };
 
   return (
-    <figure className="m-0 grid shrink-0 gap-2" style={{ width }}>
-      <div
-        className="overflow-hidden border border-border/70 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.45)]"
+    <div
+      className="overflow-hidden border border-border/70 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.45)]"
+      style={{ width, height, backgroundColor }}
+    >
+      <iframe
+        ref={iframeRef}
+        title={`PDF preview page ${pageIndex + 1}`}
+        sandbox="allow-scripts"
+        srcDoc={html}
+        onLoad={configurePage}
+        className="block border-0"
         style={{ width, height, backgroundColor }}
-      >
-        <iframe
-          ref={iframeRef}
-          title={`PDF preview page ${pageIndex + 1}`}
-          sandbox="allow-scripts"
-          srcDoc={html}
-          onLoad={configurePage}
-          className="block border-0"
-          style={{ width, height, backgroundColor }}
-        />
-      </div>
-      <figcaption className="text-center text-xs tabular-nums text-muted-foreground">
-        Page {pageIndex + 1} / {pageCount}
-      </figcaption>
-    </figure>
+      />
+    </div>
   );
 }

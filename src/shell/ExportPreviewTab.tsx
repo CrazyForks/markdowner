@@ -692,36 +692,46 @@ export function ExportPreviewTab({
               <div className="flex min-h-full min-w-full flex-col items-center gap-4">
                 {previewHtml
                   ? Array.from({ length: pageCount }, (_, pageIndex) => (
-                      <div
+                      <figure
                         key={`${paginationToken}-${pageIndex}`}
                         data-testid="pdf-preview-wrapper"
-                        className="relative shrink-0"
+                        className="m-0 grid shrink-0 gap-2"
                         style={{
                           width: pageSize.width * zoomScale,
-                          height: pageSize.height * zoomScale,
                         }}
                       >
                         <div
-                          data-testid="pdf-preview-page-scale"
-                          className="origin-top-left"
+                          data-testid="pdf-preview-sheet-slot"
+                          className="relative shrink-0"
                           style={{
-                            transform: `scale(${zoomScale})`,
-                            transformOrigin: 'top left',
+                            width: pageSize.width * zoomScale,
+                            height: pageSize.height * zoomScale,
                           }}
                         >
-                          <PdfPreviewPage
-                            html={previewHtml}
-                            token={paginationToken}
-                            pageIndex={pageIndex}
-                            pageCount={pageCount}
-                            width={pageSize.width}
-                            height={pageSize.height}
-                            backgroundColor={draftStyle.backgroundColor}
-                            onReady={handlePageReady}
-                            onError={() => handlePaginationError(paginationToken)}
-                          />
+                          <div
+                            data-testid="pdf-preview-page-scale"
+                            className="origin-top-left"
+                            style={{
+                              transform: `scale(${zoomScale})`,
+                              transformOrigin: 'top left',
+                            }}
+                          >
+                            <PdfPreviewPage
+                              html={previewHtml}
+                              token={paginationToken}
+                              pageIndex={pageIndex}
+                              width={pageSize.width}
+                              height={pageSize.height}
+                              backgroundColor={draftStyle.backgroundColor}
+                              onReady={handlePageReady}
+                              onError={() => handlePaginationError(paginationToken)}
+                            />
+                          </div>
                         </div>
-                      </div>
+                        <figcaption className="text-center text-xs tabular-nums text-muted-foreground">
+                          Page {pageIndex + 1} / {pageCount}
+                        </figcaption>
+                      </figure>
                     ))
                   : null}
               </div>

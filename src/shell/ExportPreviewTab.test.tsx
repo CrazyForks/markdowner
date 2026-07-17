@@ -15,7 +15,6 @@ vi.mock('./PdfPreviewPage', () => ({
   PdfPreviewPage: ({
     token,
     pageIndex,
-    pageCount,
     width,
     height,
     onReady,
@@ -23,7 +22,6 @@ vi.mock('./PdfPreviewPage', () => ({
   }: {
     token: string;
     pageIndex: number;
-    pageCount: number;
     width: number;
     height: number;
     onReady: (result: {
@@ -58,7 +56,6 @@ vi.mock('./PdfPreviewPage', () => ({
         data-width={width}
         data-height={height}
       >
-        <span>Page {pageIndex + 1} / {pageCount}</span>
         <button type="button" onClick={() => ready()}>
           Ready page {pageIndex + 1}
         </button>
@@ -207,6 +204,9 @@ describe('ExportPreviewTab', () => {
       transformOrigin: 'top left',
     });
     expect(screen.getByTestId('pdf-preview-wrapper')).toHaveStyle({
+      width: '595.2755905511812px',
+    });
+    expect(screen.getByTestId('pdf-preview-sheet-slot')).toHaveStyle({
       width: '595.2755905511812px',
       height: '841.8897637795276px',
     });
@@ -556,6 +556,14 @@ describe('ExportPreviewTab', () => {
     for (const sheet of screen.getAllByTestId('pdf-preview-page-scale')) {
       expect(sheet).toHaveStyle({ transform: 'scale(0.67)' });
     }
+  });
+
+  it('keeps page labels outside the scaled sheet geometry', async () => {
+    renderPreview({ request: PDF_REQUEST });
+
+    const label = await screen.findByText('Page 1 / 1');
+
+    expect(label.closest('[data-testid="pdf-preview-page-scale"]')).toBeNull();
   });
 
   it('ignores a ready callback retained by an older preview token', async () => {

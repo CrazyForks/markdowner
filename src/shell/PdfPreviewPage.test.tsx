@@ -16,7 +16,6 @@ function renderPage() {
       html="<!doctype html><html><body>Preview</body></html>"
       token="preview-7"
       pageIndex={1}
-      pageCount={3}
       width={595.2755905511812}
       height={841.8897637795276}
       backgroundColor="#ffffff"
@@ -43,7 +42,7 @@ function readyMessage(overrides: Record<string, unknown> = {}) {
 describe('PdfPreviewPage', () => {
   afterEach(() => cleanup());
 
-  it('posts its page configuration after load and renders a sandboxed label', () => {
+  it('posts its page configuration after load and renders a sandboxed page', () => {
     const { frame } = renderPage();
     const postMessage = vi.spyOn(frame.contentWindow!, 'postMessage');
 
@@ -57,7 +56,6 @@ describe('PdfPreviewPage', () => {
       },
       '*',
     );
-    expect(screen.getByText('Page 2 / 3')).toBeInTheDocument();
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
   });
 
