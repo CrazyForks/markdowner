@@ -3,25 +3,53 @@ use std::path::Path;
 pub fn write_pdf_file(
     path: &str,
     html: &str,
-    paper_size: &str,
-    page_margin: f64,
+    paper_width_mm: f64,
+    paper_height_mm: f64,
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        macos::write_pdf_file(path, html, paper_size, page_margin)
+        macos::write_pdf_file(path, html, paper_width_mm, paper_height_mm)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (path, html, paper_size, page_margin);
+        let _ = (path, html, paper_width_mm, paper_height_mm);
         Err("PDF export is only supported on macOS".to_string())
     }
 }
 
-fn safe_page_margin(value: f64, paper_width: f64, paper_height: f64) -> f64 {
-    if !value.is_finite() {
-        return 0.0;
+const MIN_PAPER_MM: f64 = 25.4;
+const MAX_PAPER_MM: f64 = 2000.0;
+const MAX_PAGES: usize = 100;
+
+fn paper_points(width_mm: f64, height_mm: f64) -> Result<(f64, f64), String> {
+    if !width_mm.is_finite() || !height_mm.is_finite() {
+        return Err("PDF paper dimensions must be finite".to_string());
     }
-    value.clamp(0.0, paper_width.min(paper_height) / 3.0)
+    if !(MIN_PAPER_MM..=MAX_PAPER_MM).contains(&width_mm)
+        || !(MIN_PAPER_MM..=MAX_PAPER_MM).contains(&height_mm)
+    {
+        return Err(format!(
+            "PDF paper dimensions must be between {MIN_PAPER_MM} and {MAX_PAPER_MM} mm"
+        ));
+    }
+    Ok((width_mm * 72.0 / 25.4, height_mm * 72.0 / 25.4))
+}
+
+fn pagination_probe_result(value: f64) -> Option<Result<f64, String>> {
+    if value == 0.0 {
+        return None;
+    }
+    if value == -1.0 {
+        return Some(Err(
+            "The embedded PDF pagination script reported an error".to_string()
+        ));
+    }
+    if !value.is_finite() || value < 0.0 {
+        return Some(Err(
+            "The embedded PDF pagination script returned an invalid height".to_string(),
+        ));
+    }
+    Some(Ok(value))
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<(), String> {
@@ -80,15 +108,19 @@ mod macos {
         WKNavigation, WKNavigationDelegate, WKPDFConfiguration, WKWebView, WKWebViewConfiguration,
     };
 
-    use super::{NavigationLoadState, ensure_parent_dir, navigation_load_result, safe_page_margin};
+    use super::{
+        MAX_PAGES, NavigationLoadState, ensure_parent_dir, navigation_load_result,
+        pagination_probe_result, paper_points,
+    };
 
     const LOAD_TIMEOUT: Duration = Duration::from_secs(10);
     const JS_TIMEOUT: Duration = Duration::from_secs(10);
     const PDF_TIMEOUT: Duration = Duration::from_secs(20);
-    const INITIAL_HEIGHT: f64 = 1160.0;
-    /// Hard ceiling on generated pages — a deterministic backstop, never reached
-    /// by a real document, that bounds the work even for pathological input.
-    const MAX_PAGES: usize = 1000;
+    const PAGINATION_PROBE_JS: &str = r#"(function () {
+  if (window.__markdownerPdfPaginationStatus === "error") return -1;
+  var result = window.__markdownerPdfPaginationResult;
+  return result && Number.isFinite(result.totalHeight) ? result.totalHeight : 0;
+})()"#;
 
     struct ExportNavigationDelegateIvars {
         state: Rc<RefCell<NavigationLoadState>>,
@@ -162,42 +194,6 @@ mod macos {
         }
     }
 
-    /// Pushes block elements that would straddle a page boundary down to the next
-    /// page (leaving a top margin), so fixed-height A4 slices break cleanly between
-    /// blocks instead of cutting through text. Returns the paginated document
-    /// height. Blocks taller than a usable page are left in place (and may split).
-    const PAGINATE_JS: &str = r#"(function(){
-  var PAGE=__PAGE__, M=__MARGIN__;
-  var c=document.querySelector('.markdowner-export')||document.body;
-  c.style.boxSizing='border-box';
-  c.style.margin='0';
-  c.style.padding=M+'px '+M+'px 0 '+M+'px';
-  var kids=Array.prototype.slice.call(c.children);
-  for(var i=0;i<kids.length;i++){
-    var el=kids[i];
-    if(!el.getBoundingClientRect) continue;
-    var r=el.getBoundingClientRect();
-    var top=r.top+window.scrollY, h=r.height;
-    if(h<=0||h>PAGE-2*M) continue;
-    var pageStart=Math.floor(top/PAGE)*PAGE;
-    if(top+h>pageStart+PAGE-M){
-      var target=pageStart+PAGE+M;
-      var cur=parseFloat(window.getComputedStyle(el).marginTop)||0;
-      el.style.marginTop=(cur+(target-top))+'px';
-    }
-  }
-  return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-})()"#;
-
-    /// Paper dimensions in points: (width, height).
-    fn paper_points(paper_size: &str) -> (f64, f64) {
-        match paper_size {
-            "Letter" => (612.0, 792.0),
-            // A4: 210 mm × 297 mm.
-            _ => (210.0 / 25.4 * 72.0, 297.0 / 25.4 * 72.0),
-        }
-    }
-
     fn tick_run_loop() {
         CFRunLoop::run_in_mode(unsafe { kCFRunLoopDefaultMode }, 0.05, true);
     }
@@ -252,6 +248,20 @@ mod macos {
         }
     }
 
+    fn wait_for_pagination(webview: &WKWebView) -> Result<f64, String> {
+        let deadline = Instant::now() + JS_TIMEOUT;
+        loop {
+            let value = eval_js_number(webview, PAGINATION_PROBE_JS)?;
+            if let Some(result) = pagination_probe_result(value) {
+                return result;
+            }
+            if Instant::now() >= deadline {
+                return Err("Timed out waiting for embedded PDF pagination".to_string());
+            }
+            tick_run_loop();
+        }
+    }
+
     /// Render one page-sized region of the web view to standalone PDF data.
     fn create_pdf_page(
         mtm: MainThreadMarker,
@@ -295,8 +305,8 @@ mod macos {
     pub fn write_pdf_file(
         path: &str,
         html: &str,
-        paper_size: &str,
-        page_margin: f64,
+        paper_width_mm: f64,
+        paper_height_mm: f64,
     ) -> Result<(), String> {
         let output_path = Path::new(path);
         ensure_parent_dir(output_path)?;
@@ -304,15 +314,14 @@ mod macos {
         let mtm = MainThreadMarker::new()
             .ok_or_else(|| "PDF export must run on the macOS main thread".to_string())?;
 
-        let (paper_width, paper_height) = paper_points(paper_size);
-        let page_margin = safe_page_margin(page_margin, paper_width, paper_height);
+        let (paper_width, paper_height) = paper_points(paper_width_mm, paper_height_mm)?;
 
         let configuration = unsafe { WKWebViewConfiguration::new(mtm) };
         let frame = CGRect {
             origin: CGPoint { x: 0.0, y: 0.0 },
             size: CGSize {
                 width: paper_width,
-                height: INITIAL_HEIGHT,
+                height: paper_height,
             },
         };
         let webview = unsafe {
@@ -330,15 +339,14 @@ mod macos {
         }
         wait_for_load(&navigation_state)?;
 
-        // Align block boundaries to page edges, then measure the paginated height.
-        let script = PAGINATE_JS
-            .replace("__PAGE__", &paper_height.to_string())
-            .replace("__MARGIN__", &page_margin.to_string());
-        let total_height = eval_js_number(&webview, &script)?.max(paper_height);
-        let page_count = ((total_height / paper_height).ceil() as usize).clamp(1, MAX_PAGES);
+        let total_height = wait_for_pagination(&webview)?.max(paper_height);
+        let page_count = ((total_height / paper_height).ceil() as usize).max(1);
+        if page_count > MAX_PAGES {
+            return Err(format!("PDF export exceeds the {MAX_PAGES} pages limit"));
+        }
         tick_run_loop();
 
-        // Each page is a fixed A4/Letter slice; merge them into one document.
+        // Each page is a fixed physical-paper slice; merge them into one document.
         let combined = unsafe { PDFDocument::new() };
         for index in 0..page_count {
             let rect = CGRect {
@@ -372,7 +380,8 @@ mod macos {
 #[cfg(test)]
 mod tests {
     use super::{
-        NavigationLoadState, format_pdf_export_error, navigation_load_result, safe_page_margin,
+        NavigationLoadState, format_pdf_export_error, navigation_load_result,
+        pagination_probe_result, paper_points,
     };
 
     #[test]
@@ -397,10 +406,32 @@ mod tests {
     }
 
     #[test]
-    fn clamps_page_margin_to_a_safe_finite_range() {
-        assert_eq!(safe_page_margin(-4.0, 595.0, 842.0), 0.0);
-        assert_eq!(safe_page_margin(36.0, 595.0, 842.0), 36.0);
-        assert_eq!(safe_page_margin(500.0, 595.0, 842.0), 595.0 / 3.0);
-        assert_eq!(safe_page_margin(f64::NAN, 595.0, 842.0), 0.0);
+    fn converts_valid_custom_millimetres_to_points() {
+        let (width, height) = paper_points(25.4, 50.8).expect("valid dimensions");
+        assert!((width - 72.0).abs() < 1e-9);
+        assert!((height - 144.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rejects_invalid_custom_dimensions() {
+        assert!(paper_points(f64::NAN, 297.0).is_err());
+        assert!(paper_points(10.0, 297.0).is_err());
+        assert!(paper_points(210.0, 2500.0).is_err());
+    }
+
+    #[test]
+    fn classifies_embedded_pagination_probe_values() {
+        assert_eq!(pagination_probe_result(0.0), None);
+        assert!(
+            pagination_probe_result(-1.0)
+                .expect("error result")
+                .is_err()
+        );
+        assert_eq!(pagination_probe_result(842.0), Some(Ok(842.0)),);
+        assert!(
+            pagination_probe_result(f64::NAN)
+                .expect("invalid result")
+                .is_err()
+        );
     }
 }

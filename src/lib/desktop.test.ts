@@ -63,21 +63,21 @@ describe('desktop export bridge', () => {
     expect(invokeMock).toHaveBeenCalledWith('write_export_files', { files });
   });
 
-  it('passes the selected page margin for single and batch PDF exports', async () => {
-    await exportPdfFile('/tmp/a.pdf', '<h1>A</h1>', 'A4', 36);
+  it('passes explicit paper dimensions for single and batch PDF exports', async () => {
+    await exportPdfFile('/tmp/a.pdf', '<h1>A</h1>', 297, 210);
     expect(invokeMock).toHaveBeenLastCalledWith('write_pdf_file', {
       path: '/tmp/a.pdf',
       html: '<h1>A</h1>',
-      paperSize: 'A4',
-      pageMargin: 36,
+      paperWidthMm: 297,
+      paperHeightMm: 210,
     });
 
     const files = [
       {
         path: '/tmp/a.pdf',
         html: '<h1>A</h1>',
-        paperSize: 'A4' as const,
-        pageMargin: 28,
+        paperWidthMm: 180.5,
+        paperHeightMm: 240.2,
       },
     ];
     await exportPdfFiles(files);

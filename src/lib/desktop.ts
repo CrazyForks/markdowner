@@ -198,22 +198,25 @@ export async function readImagesBase64(
   return invoke<EmbeddedImageResult[]>('read_images_base64', { sources });
 }
 
-export type PdfPaperSize = 'A4' | 'Letter';
-
 export interface PdfExportFile {
   path: string;
   html: string;
-  paperSize: PdfPaperSize;
-  pageMargin: number;
+  paperWidthMm: number;
+  paperHeightMm: number;
 }
 
 export async function exportPdfFile(
   path: string,
   html: string,
-  paperSize: PdfPaperSize,
-  pageMargin: number,
+  paperWidthMm: number,
+  paperHeightMm: number,
 ): Promise<void> {
-  await invoke<void>('write_pdf_file', { path, html, paperSize, pageMargin });
+  await invoke<void>('write_pdf_file', {
+    path,
+    html,
+    paperWidthMm,
+    paperHeightMm,
+  });
 }
 
 export async function exportPdfFiles(files: readonly PdfExportFile[]): Promise<void> {
