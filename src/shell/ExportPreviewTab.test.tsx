@@ -383,7 +383,7 @@ describe('ExportPreviewTab', () => {
     expect(screen.getByLabelText('Line height')).toHaveAttribute('min', '0.8');
     expect(screen.getByLabelText('Line height')).toHaveAttribute('max', '2.2');
     expect(screen.getByLabelText('Paragraph spacing')).toHaveValue('8');
-    expect(screen.getByLabelText('Content padding')).toHaveValue('32');
+    expect(screen.getByLabelText('All sides padding')).toHaveValue('32');
     expect(screen.getByLabelText('Inline code text color')).toHaveValue('#7c2d12');
     expect(screen.getByLabelText('Inline code background color')).toHaveValue('#ffedd5');
     expect(screen.getByLabelText('Keyboard key text color')).toHaveValue('#334155');
@@ -391,6 +391,51 @@ describe('ExportPreviewTab', () => {
     expect(screen.getByLabelText('Table border color')).toHaveValue('#d4d4d8');
     expect(screen.getByLabelText('Table header text color')).toHaveValue('#18181b');
     expect(screen.getByLabelText('Table header background color')).toHaveValue('#f4f4f5');
+  });
+
+  it('passes independent padding through preview and confirmation', async () => {
+    const buildPreview = previewBuilder();
+    const onConfirm = vi.fn();
+    renderPreview({ request: PDF_REQUEST, buildPreview, onConfirm });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Per side' }));
+    fireEvent.change(screen.getByLabelText('Top padding'), {
+      target: { value: '10' },
+    });
+    fireEvent.change(screen.getByLabelText('Right padding'), {
+      target: { value: '20' },
+    });
+    fireEvent.change(screen.getByLabelText('Bottom padding'), {
+      target: { value: '30' },
+    });
+    fireEvent.change(screen.getByLabelText('Left padding'), {
+      target: { value: '40' },
+    });
+
+    await waitFor(() => {
+      expect(buildPreview).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          style: expect.objectContaining({
+            contentPaddingMode: 'individual',
+            contentPaddingTop: 10,
+            contentPaddingRight: 20,
+            contentPaddingBottom: 30,
+            contentPaddingLeft: 40,
+          }),
+        }),
+      );
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Ready page 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentPaddingMode: 'individual',
+        contentPaddingTop: 10,
+        contentPaddingRight: 20,
+        contentPaddingBottom: 30,
+        contentPaddingLeft: 40,
+      }),
+    );
   });
 
   it('switches presets, marks manual edits Custom, and preserves paper settings', () => {

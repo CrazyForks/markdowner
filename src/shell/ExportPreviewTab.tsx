@@ -3,7 +3,6 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   applyExportStylePreset,
@@ -34,6 +33,11 @@ import {
 import { resolvePdfPaper, type PdfPaper } from '@/lib/pdfPaper';
 import type { PdfPreviewReadyMessage } from '@/lib/pdfPagination';
 import { cn } from '@/lib/utils';
+import { ContentPaddingControls } from './ContentPaddingControls';
+import {
+  ExportColorControl,
+  ExportRangeControl,
+} from './ExportControlPrimitives';
 import { PdfPaperControls } from './PdfPaperControls';
 import { PdfPreviewPage } from './PdfPreviewPage';
 
@@ -68,94 +72,6 @@ type ColorStyleKey =
   | 'tableBorderColor'
   | 'tableHeaderTextColor'
   | 'tableHeaderBackgroundColor';
-
-interface RangeControlProps {
-  id: string;
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  suffix: string;
-  disabled: boolean;
-  onChange: (value: number) => void;
-}
-
-function RangeControl({
-  id,
-  label,
-  value,
-  min,
-  max,
-  step,
-  suffix,
-  disabled,
-  onChange,
-}: RangeControlProps) {
-  return (
-    <div className="grid gap-2">
-      <div className="flex items-center justify-between gap-3">
-        <Label htmlFor={id} className="text-xs font-medium text-foreground/85">
-          {label}
-        </Label>
-        <output
-          htmlFor={id}
-          className="min-w-12 rounded-md bg-muted px-1.5 py-0.5 text-right font-mono text-[11px] tabular-nums text-muted-foreground"
-        >
-          {value}{suffix}
-        </output>
-      </div>
-      <Input
-        id={id}
-        aria-label={label}
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="h-2 cursor-pointer appearance-none border-0 bg-muted p-0 accent-foreground shadow-none focus-visible:ring-2"
-      />
-    </div>
-  );
-}
-
-function ColorControl({
-  id,
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  disabled: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="grid min-w-0 gap-2">
-      <Label htmlFor={id} className="truncate text-xs font-medium text-foreground/85" title={label}>
-        {label}
-      </Label>
-      <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-1.5">
-        <Input
-          id={id}
-          aria-label={label}
-          type="color"
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-          className="h-7 w-8 shrink-0 cursor-pointer rounded border-0 p-0 shadow-none"
-        />
-        <span className="min-w-0 truncate font-mono text-[10px] uppercase text-muted-foreground">
-          {value}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 function exportActionLabel(request: ExportPreviewRequest, busy: boolean): string {
   if (busy) return 'Exporting…';
@@ -291,18 +207,14 @@ export function ExportPreviewTab({
   };
   const updateColor = (key: ColorStyleKey, value: string) => {
     setDraftStyle((current) =>
-      normalizeExportStyle({ ...current, [key]: value, preset: 'custom' }),
-    );
-  };
-  const updateUniformPadding = (value: number) => {
-    setDraftStyle((current) =>
       normalizeExportStyle({
         ...current,
-        contentPaddingMode: 'all',
-        contentPaddingTop: value,
-        contentPaddingRight: value,
-        contentPaddingBottom: value,
-        contentPaddingLeft: value,
+        [key]: value,
+        ...(key === 'inlineCodeTextColor' ||
+        key === 'inlineCodeBackgroundColor'
+          ? { inlineCodePreset: 'custom' as const }
+          : {}),
+        preset: 'custom',
       }),
     );
   };
@@ -471,7 +383,7 @@ export function ExportPreviewTab({
               </select>
             </div>
 
-            <RangeControl
+            <ExportRangeControl
               id={controlId('font-size')}
               label="Body size"
               value={draftStyle.fontSize}
@@ -510,14 +422,14 @@ export function ExportPreviewTab({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <ColorControl
+              <ExportColorControl
                 id={controlId('text-color')}
                 label="Text color"
                 value={draftStyle.textColor}
                 disabled={busy}
                 onChange={(value) => updateColor('textColor', value)}
               />
-              <ColorControl
+              <ExportColorControl
                 id={controlId('background-color')}
                 label="Background color"
                 value={draftStyle.backgroundColor}
@@ -530,7 +442,7 @@ export function ExportPreviewTab({
               <legend className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Table
               </legend>
-              <ColorControl
+              <ExportColorControl
                 id={controlId('table-border-color')}
                 label="Table border color"
                 value={draftStyle.tableBorderColor}
@@ -538,14 +450,14 @@ export function ExportPreviewTab({
                 onChange={(value) => updateColor('tableBorderColor', value)}
               />
               <div className="grid grid-cols-2 gap-3">
-                <ColorControl
+                <ExportColorControl
                   id={controlId('table-header-text-color')}
                   label="Table header text color"
                   value={draftStyle.tableHeaderTextColor}
                   disabled={busy}
                   onChange={(value) => updateColor('tableHeaderTextColor', value)}
                 />
-                <ColorControl
+                <ExportColorControl
                   id={controlId('table-header-background-color')}
                   label="Table header background color"
                   value={draftStyle.tableHeaderBackgroundColor}
@@ -555,7 +467,7 @@ export function ExportPreviewTab({
               </div>
             </fieldset>
 
-            <RangeControl
+            <ExportRangeControl
               id={controlId('line-height')}
               label="Line height"
               value={draftStyle.lineHeight}
@@ -566,7 +478,7 @@ export function ExportPreviewTab({
               disabled={busy}
               onChange={(value) => updateNumber('lineHeight', value)}
             />
-            <RangeControl
+            <ExportRangeControl
               id={controlId('paragraph-spacing')}
               label="Paragraph spacing"
               value={draftStyle.paragraphSpacing}
@@ -577,16 +489,14 @@ export function ExportPreviewTab({
               disabled={busy}
               onChange={(value) => updateNumber('paragraphSpacing', value)}
             />
-            <RangeControl
-              id={controlId('content-padding')}
-              label="Content padding"
-              value={draftStyle.contentPaddingTop}
-              min={0}
-              max={72}
-              step={2}
-              suffix=" px"
+            <ContentPaddingControls
+              value={draftStyle}
               disabled={busy}
-              onChange={updateUniformPadding}
+              onChange={(layout) =>
+                setDraftStyle((current) =>
+                  normalizeExportStyle({ ...current, ...layout }),
+                )
+              }
             />
 
             <fieldset className="grid gap-3 border-t border-border pt-4">
@@ -594,14 +504,14 @@ export function ExportPreviewTab({
                 Inline code
               </legend>
               <div className="grid grid-cols-2 gap-3">
-                <ColorControl
+                <ExportColorControl
                   id={controlId('inline-code-text-color')}
                   label="Inline code text color"
                   value={draftStyle.inlineCodeTextColor}
                   disabled={busy}
                   onChange={(value) => updateColor('inlineCodeTextColor', value)}
                 />
-                <ColorControl
+                <ExportColorControl
                   id={controlId('inline-code-background-color')}
                   label="Inline code background color"
                   value={draftStyle.inlineCodeBackgroundColor}
@@ -616,14 +526,14 @@ export function ExportPreviewTab({
                 Keyboard keys
               </legend>
               <div className="grid grid-cols-2 gap-3">
-                <ColorControl
+                <ExportColorControl
                   id={controlId('kbd-text-color')}
                   label="Keyboard key text color"
                   value={draftStyle.kbdTextColor}
                   disabled={busy}
                   onChange={(value) => updateColor('kbdTextColor', value)}
                 />
-                <ColorControl
+                <ExportColorControl
                   id={controlId('kbd-background-color')}
                   label="Keyboard key background color"
                   value={draftStyle.kbdBackgroundColor}
