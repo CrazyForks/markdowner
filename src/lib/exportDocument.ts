@@ -5,6 +5,15 @@ import remarkGfm from 'remark-gfm';
 
 import { readImagesBase64, type EmbeddedImageResult } from './desktop';
 import {
+  inferInlineCodePreset,
+  normalizeExportCodeBlockTheme,
+  normalizeInlineCodePreset,
+  resolveExportTone,
+  resolveInlineCodePalette,
+  type ExportCodeBlockTheme,
+  type InlineCodePreset,
+} from './exportCodeStyles';
+import {
   resolveMarkdownImageLocalPath,
   resolveMarkdownImageSrc,
 } from './markdownImageSrc';
@@ -42,6 +51,8 @@ export type ExportTheme = 'light' | 'dark';
 
 export interface ExportStyle extends PdfPaper, ExportPageLayout {
   preset: ExportStylePreset;
+  codeBlockTheme: ExportCodeBlockTheme;
+  inlineCodePreset: InlineCodePreset;
   fontSize: number;
   fontFamily: ExportFontFamily;
   textColor: string;
@@ -59,6 +70,8 @@ export interface ExportStyle extends PdfPaper, ExportPageLayout {
 
 export const DEFAULT_EXPORT_STYLE: ExportStyle = {
   preset: 'app',
+  codeBlockTheme: 'app',
+  inlineCodePreset: 'amber',
   fontSize: 14,
   fontFamily: 'sans',
   textColor: '#202124',
@@ -151,9 +164,26 @@ export function normalizeExportStyle(value: unknown): ExportStyle {
   const fontFamily = candidate.fontFamily;
   const textColor = candidate.textColor;
   const backgroundColor = candidate.backgroundColor;
+  const inlineCodeTextColor = normalizeHexColor(
+    candidate.inlineCodeTextColor,
+    fallbackStyle.inlineCodeTextColor,
+  );
+  const inlineCodeBackgroundColor = normalizeHexColor(
+    candidate.inlineCodeBackgroundColor,
+    fallbackStyle.inlineCodeBackgroundColor,
+  );
+  const inferredInlineCodePreset = inferInlineCodePreset(
+    inlineCodeTextColor,
+    inlineCodeBackgroundColor,
+  );
 
   const normalized: ExportStyle = {
     preset: hasValidPreset ? presetCandidate : 'app',
+    codeBlockTheme: normalizeExportCodeBlockTheme(candidate.codeBlockTheme),
+    inlineCodePreset: normalizeInlineCodePreset(
+      candidate.inlineCodePreset,
+      inferredInlineCodePreset,
+    ),
     fontSize: clampNumber(candidate.fontSize, DEFAULT_EXPORT_STYLE.fontSize, 10, 24),
     fontFamily:
       fontFamily === 'sans' || fontFamily === 'serif' || fontFamily === 'mono'
@@ -161,14 +191,8 @@ export function normalizeExportStyle(value: unknown): ExportStyle {
         : DEFAULT_EXPORT_STYLE.fontFamily,
     textColor: normalizeHexColor(textColor, fallbackStyle.textColor),
     backgroundColor: normalizeHexColor(backgroundColor, fallbackStyle.backgroundColor),
-    inlineCodeTextColor: normalizeHexColor(
-      candidate.inlineCodeTextColor,
-      fallbackStyle.inlineCodeTextColor,
-    ),
-    inlineCodeBackgroundColor: normalizeHexColor(
-      candidate.inlineCodeBackgroundColor,
-      fallbackStyle.inlineCodeBackgroundColor,
-    ),
+    inlineCodeTextColor,
+    inlineCodeBackgroundColor,
     kbdTextColor: normalizeHexColor(candidate.kbdTextColor, fallbackStyle.kbdTextColor),
     kbdBackgroundColor: normalizeHexColor(
       candidate.kbdBackgroundColor,
@@ -208,6 +232,20 @@ export function normalizeExportStyle(value: unknown): ExportStyle {
     normalized.preset = hasLegacyCustomization ? 'custom' : 'app';
   }
 
+  if (normalized.inlineCodePreset !== 'custom') {
+    const tone = resolveExportTone(
+      normalized.preset,
+      normalized.backgroundColor,
+      fallbackStyle.preset === 'dark' ? 'dark' : 'light',
+    );
+    const palette = resolveInlineCodePalette(normalized.inlineCodePreset, tone, {
+      textColor: normalized.textColor,
+      surfaceColor: normalized.tableHeaderBackgroundColor,
+    });
+    normalized.inlineCodeTextColor = palette.textColor;
+    normalized.inlineCodeBackgroundColor = palette.backgroundColor;
+  }
+
   return normalized;
 }
 
@@ -223,7 +261,30 @@ export function applyExportStylePreset(
   const template = useDark ? DARK_EXPORT_STYLE : DEFAULT_EXPORT_STYLE;
   const pageLayout = normalizeExportPageLayout(current);
   const paper = normalizePdfPaper(current);
-  return { ...template, ...pageLayout, ...paper, preset };
+  const inlinePalette =
+    current.inlineCodePreset === 'custom'
+      ? {
+          textColor: current.inlineCodeTextColor,
+          backgroundColor: current.inlineCodeBackgroundColor,
+        }
+      : resolveInlineCodePalette(
+          current.inlineCodePreset,
+          useDark ? 'dark' : 'light',
+          {
+            textColor: template.textColor,
+            surfaceColor: template.tableHeaderBackgroundColor,
+          },
+        );
+  return {
+    ...template,
+    ...pageLayout,
+    ...paper,
+    preset,
+    codeBlockTheme: current.codeBlockTheme,
+    inlineCodePreset: current.inlineCodePreset,
+    inlineCodeTextColor: inlinePalette.textColor,
+    inlineCodeBackgroundColor: inlinePalette.backgroundColor,
+  };
 }
 
 export function resolveExportStyleForTheme(
@@ -587,10 +648,24 @@ function collectDocumentCss(doc: Document): string {
  * data-cb-highlight, class, …) so the exported document inherits the exact
  * on-screen theme — light/dark and the chosen code-block palette.
  */
-function rootAttributes(doc: Document): string {
-  return Array.from(doc.documentElement.attributes)
-    .map((attr) => `${attr.name}="${escapeHtml(attr.value)}"`)
-    .join(' ');
+function rootAttributes(
+  doc: Document,
+  codeBlockTheme: ExportCodeBlockTheme,
+): string {
+  const attributes = new Map(
+    Array.from(doc.documentElement.attributes, (attr) => [
+      attr.name,
+      attr.value,
+    ]),
+  );
+  if (codeBlockTheme !== 'app') {
+    attributes.set('data-cb-theme', codeBlockTheme);
+  }
+  attributes.set('data-cb-highlight', 'on');
+  return Array.from(
+    attributes,
+    ([name, value]) => `${name}="${escapeHtml(value)}"`,
+  ).join(' ');
 }
 
 export interface ExportHtmlOptions {
@@ -709,7 +784,7 @@ ${printCss}
 ${styleCss}`;
 
   return `<!doctype html>
-<html ${rootAttributes(doc)}>
+<html ${rootAttributes(doc, style.codeBlockTheme)}>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />

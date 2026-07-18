@@ -169,11 +169,42 @@ describe('export styles', () => {
     );
   });
 
+  it('migrates legacy inline colors and defaults fenced code to Match app', () => {
+    expect(
+      normalizeExportStyle({
+        inlineCodeTextColor: '#7c2d12',
+        inlineCodeBackgroundColor: '#ffedd5',
+      }),
+    ).toMatchObject({
+      codeBlockTheme: 'app',
+      inlineCodePreset: 'amber',
+    });
+  });
+
+  it('preserves fixed code choices while changing the Export Theme', () => {
+    const next = applyExportStylePreset(
+      {
+        ...DEFAULT_EXPORT_STYLE,
+        codeBlockTheme: 'ayu-dark',
+        inlineCodePreset: 'blue',
+      },
+      'dark',
+      'light',
+    );
+    expect(next).toMatchObject({
+      codeBlockTheme: 'ayu-dark',
+      inlineCodePreset: 'blue',
+      inlineCodeTextColor: '#bfdbfe',
+      inlineCodeBackgroundColor: '#172554',
+    });
+  });
+
   it('accepts compact line heights down to 0.8 and normalizes export element colors', () => {
     expect(
       normalizeExportStyle({
         ...DEFAULT_EXPORT_STYLE,
         lineHeight: 0.8,
+        inlineCodePreset: 'custom',
         inlineCodeTextColor: '#314158',
         inlineCodeBackgroundColor: 'orange',
         kbdTextColor: '#abcdef',
@@ -182,6 +213,7 @@ describe('export styles', () => {
     ).toEqual({
       ...DEFAULT_EXPORT_STYLE,
       lineHeight: 0.8,
+      inlineCodePreset: 'custom',
       inlineCodeTextColor: '#314158',
       kbdTextColor: '#abcdef',
       kbdBackgroundColor: '#f1e6d2',
@@ -416,6 +448,21 @@ describe('buildExportHtml', () => {
     expect(html).toContain('"pageNumberTemplate":"{page}/{pages}"');
   });
 
+  it('overrides the exported root with a fixed fenced-code theme', async () => {
+    const html = await buildExportHtml({
+      title: 'Code',
+      source: '```ts\nconst n = 1\n```',
+      activeDocumentPath: null,
+      style: {
+        ...DEFAULT_EXPORT_STYLE,
+        codeBlockTheme: 'github-light',
+      },
+    });
+    expect(html).toContain('data-cb-theme="github-light"');
+    expect(html).toContain('data-cb-highlight="on"');
+    expect(html).not.toContain('data-cb-theme="one-dark"');
+  });
+
   it('injects the selected typography, colors, and spacing into the standalone document', async () => {
     const html = await buildExportHtml({
       title: 'Styled',
@@ -435,6 +482,7 @@ describe('buildExportHtml', () => {
         contentPaddingRight: 36,
         contentPaddingBottom: 36,
         contentPaddingLeft: 36,
+        inlineCodePreset: 'custom',
         inlineCodeTextColor: '#314158',
         inlineCodeBackgroundColor: '#e8eef5',
         kbdTextColor: '#4a3520',
