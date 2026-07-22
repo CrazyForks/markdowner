@@ -1,5 +1,5 @@
 import { FileDown, Minus, Plus, RotateCcw, Scan, X } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -92,6 +92,34 @@ function requestDescription(request: ExportPreviewRequest): string {
     : request.activeDocumentPath ?? 'Unsaved document';
 }
 
+function preserveInvalidPageNumberDraft(
+  source: ExportStyle,
+  normalized: ExportStyle,
+): ExportStyle {
+  if (
+    source.pageNumberFormat === 'custom' &&
+    !validatePageNumberTemplate(source.pageNumberTemplate).valid
+  ) {
+    return { ...normalized, pageNumberTemplate: source.pageNumberTemplate };
+  }
+  return normalized;
+}
+
+function normalizeDraftStyle(style: ExportStyle): ExportStyle {
+  return preserveInvalidPageNumberDraft(style, normalizeExportStyle(style));
+}
+
+function applyDraftStylePreset(
+  style: ExportStyle,
+  preset: ExportStylePreset,
+  appTheme: ExportTheme,
+): ExportStyle {
+  return preserveInvalidPageNumberDraft(
+    style,
+    applyExportStylePreset(style, preset, appTheme),
+  );
+}
+
 export function ExportPreviewTab({
   request,
   initialStyle,
@@ -105,14 +133,25 @@ export function ExportPreviewTab({
 }: ExportPreviewTabProps) {
   const idPrefix = useId();
   const isPdf = request.format === 'pdf';
-  const requestIdentity = JSON.stringify([
-    request.format,
-    request.scope,
-    request.activeDocumentPath,
-    request.title,
-    request.source,
-    request.targetCount,
-  ]);
+  const requestIdentity = useMemo(
+    () =>
+      JSON.stringify([
+        request.format,
+        request.scope,
+        request.activeDocumentPath,
+        request.title,
+        request.source,
+        request.targetCount,
+      ]),
+    [
+      request.activeDocumentPath,
+      request.format,
+      request.scope,
+      request.source,
+      request.targetCount,
+      request.title,
+    ],
+  );
   const [draftStyle, setDraftStyle] = useState<ExportStyle>(() =>
     resolveExportStyleForTheme(initialStyle, appTheme),
   );
@@ -163,7 +202,7 @@ export function ExportPreviewTab({
     }
     setDraftStyle((current) =>
       current.preset === 'app'
-        ? resolveExportStyleForTheme(initialStyle, appTheme)
+        ? applyDraftStylePreset(current, 'app', appTheme)
         : current,
     );
   }, [appTheme, initialStyle, requestIdentity]);
@@ -209,7 +248,10 @@ export function ExportPreviewTab({
     isPdf,
     pageLayoutValid,
     paperValid,
-    request,
+    request.activeDocumentPath,
+    request.format,
+    request.source,
+    request.title,
   ]);
 
   useEffect(() => {
@@ -238,12 +280,12 @@ export function ExportPreviewTab({
 
   const updateNumber = (key: NumericStyleKey, value: number) => {
     setDraftStyle((current) =>
-      normalizeExportStyle({ ...current, [key]: value, preset: 'custom' }),
+      normalizeDraftStyle({ ...current, [key]: value, preset: 'custom' }),
     );
   };
   const updateColor = (key: ColorStyleKey, value: string) => {
     setDraftStyle((current) =>
-      normalizeExportStyle({ ...current, [key]: value, preset: 'custom' }),
+      normalizeDraftStyle({ ...current, [key]: value, preset: 'custom' }),
     );
   };
   const controlId = (name: string) => `${idPrefix}-${name}`;
@@ -263,7 +305,7 @@ export function ExportPreviewTab({
   };
   const updatePaper = (paper: PdfPaper) => {
     setDraftStyle((current) =>
-      normalizeExportStyle({
+      normalizeDraftStyle({
         ...current,
         paperSize: paper.paperSize,
         paperOrientation: paper.paperOrientation,
@@ -343,7 +385,7 @@ export function ExportPreviewTab({
             onClick={() => {
               setPaperValid(true);
               setDraftStyle((current) =>
-                applyExportStylePreset(
+                applyDraftStylePreset(
                   {
                     ...current,
                     codeBlockTheme: 'app',
@@ -408,7 +450,7 @@ export function ExportPreviewTab({
                 disabled={busy}
                 onChange={(event) =>
                   setDraftStyle((current) =>
-                    applyExportStylePreset(
+                    applyDraftStylePreset(
                       current,
                       event.target.value as ExportStylePreset,
                       appTheme,
@@ -447,9 +489,9 @@ export function ExportPreviewTab({
                 disabled={busy}
                 onChange={(event) =>
                   setDraftStyle((current) =>
-                    normalizeExportStyle({
+                    normalizeDraftStyle({
                       ...current,
-                      fontFamily: event.target.value,
+                      fontFamily: event.target.value as ExportStyle['fontFamily'],
                       preset: 'custom',
                     }),
                   )
@@ -535,7 +577,7 @@ export function ExportPreviewTab({
               disabled={busy}
               onChange={(layout) =>
                 setDraftStyle((current) =>
-                  normalizeExportStyle({ ...current, ...layout }),
+                  normalizeDraftStyle({ ...current, ...layout }),
                 )
               }
             />
@@ -547,7 +589,7 @@ export function ExportPreviewTab({
               disabled={busy}
               onChange={(patch) =>
                 setDraftStyle((current) =>
-                  normalizeExportStyle({ ...current, ...patch }),
+                  normalizeDraftStyle({ ...current, ...patch }),
                 )
               }
             />

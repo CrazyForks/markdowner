@@ -665,6 +665,62 @@ describe('ExportPreviewTab', () => {
     expect(screen.getByLabelText('Background color')).toHaveValue('#123456');
   });
 
+  it('keeps page layout and code choices when Match app follows a theme change', async () => {
+    const buildPreview = previewBuilder();
+    const { rerender } = renderPreview({
+      request: PDF_REQUEST,
+      appTheme: 'light',
+      buildPreview,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Per side' }));
+    fireEvent.change(screen.getByLabelText('Left padding'), {
+      target: { value: '40' },
+    });
+    fireEvent.change(screen.getByLabelText('Header text (optional)'), {
+      target: { value: 'Project Atlas' },
+    });
+    fireEvent.click(screen.getByRole('switch', { name: 'Page numbers' }));
+    fireEvent.change(screen.getByLabelText('Code block theme'), {
+      target: { value: 'ayu-dark' },
+    });
+    fireEvent.change(screen.getByLabelText('Inline code preset'), {
+      target: { value: 'blue' },
+    });
+
+    rerender(
+      <ExportPreviewTab
+        request={PDF_REQUEST}
+        initialStyle={DEFAULT_EXPORT_STYLE}
+        appTheme="dark"
+        appCodeBlockTheme="one-dark"
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        buildPreview={buildPreview}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Background color')).toHaveValue('#18181b');
+    });
+    expect(screen.getByRole('button', { name: 'Per side' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByLabelText('Left padding')).toHaveValue('40');
+    expect(screen.getByLabelText('Header text (optional)')).toHaveValue(
+      'Project Atlas',
+    );
+    expect(screen.getByRole('switch', { name: 'Page numbers' })).toBeChecked();
+    expect(screen.getByLabelText('Code block theme')).toHaveValue('ayu-dark');
+    expect(screen.getByLabelText('Inline code preset')).toHaveValue('blue');
+    expect(screen.getByText('const page = 1')).toHaveStyle({
+      color: '#bfdbfe',
+      backgroundColor: '#172554',
+    });
+  });
+
   it('uses the selected dark background for the preview sheet and iframe', async () => {
     renderPreview({ appTheme: 'dark' });
 
@@ -859,6 +915,39 @@ describe('ExportPreviewTab', () => {
     fireEvent.change(screen.getByLabelText('Body size'), { target: { value: '13' } });
     await act(async () => Promise.resolve());
     expect(buildPreview).toHaveBeenCalledTimes(callsBeforeInvalidEdit);
+  });
+
+  it('keeps an invalid page-number draft while other controls change', async () => {
+    const buildPreview = previewBuilder();
+    renderPreview({ request: PDF_REQUEST, buildPreview });
+    fireEvent.click(screen.getByRole('switch', { name: 'Page numbers' }));
+    fireEvent.change(screen.getByLabelText('Page number format'), {
+      target: { value: 'custom' },
+    });
+    await waitFor(() =>
+      expect(buildPreview).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          style: expect.objectContaining({ pageNumberFormat: 'custom' }),
+        }),
+      ),
+    );
+    fireEvent.change(screen.getByLabelText('Custom page number template'), {
+      target: { value: '{pages}' },
+    });
+    const callsBeforeUnrelatedEdit = buildPreview.mock.calls.length;
+
+    fireEvent.change(screen.getByLabelText('Body size'), {
+      target: { value: '13' },
+    });
+
+    expect(screen.getByLabelText('Custom page number template')).toHaveValue(
+      '{pages}',
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Include {page} in the template.',
+    );
+    await act(async () => Promise.resolve());
+    expect(buildPreview).toHaveBeenCalledTimes(callsBeforeUnrelatedEdit);
   });
 
   it('accepts only the current first page result and renders one shared-scale page stack', async () => {
