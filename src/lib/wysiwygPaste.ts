@@ -192,6 +192,14 @@ function tryPasteAsMarkdown(editor: EditorLike | null, text: string): boolean {
   }
 }
 
+function isCodePasteContext(view: EditorView): boolean {
+  return view.state.selection.$from.parent.type.spec.code === true;
+}
+
+function hasProseMirrorSliceMetadata(clipboardData: DataTransfer): boolean {
+  return clipboardData.getData('text/html').includes('data-pm-slice=');
+}
+
 /**
  * Tiptap `editorProps.handlePaste` that drives WYSIWYG paste behaviour.
  *
@@ -202,27 +210,22 @@ function tryPasteAsMarkdown(editor: EditorLike | null, text: string): boolean {
  * ProseMirror's DOMParser silently drops what its schema can't map, so the
  * pasted content loses chunks that the user actually copied.
  *
- * We instead lean on `text/plain` — which mirrors what the user visibly
- * highlighted — and route it through two paths in order:
+ * We preserve three context-sensitive routes in priority order:
  *
- *   1. We parse it through @tiptap/markdown. If the parse yields real
- *      formatting or structure — inline marks (`**bold**`, `*italic*`,
- *      `` `code` ``, `[link](url)`, `~~strike~~`) or block nodes (headings,
- *      lists, tables, blockquotes, code fences, setext `===`, …) — we insert
- *      the rendered result so the user gets the formatted blocks they'd
- *      expect from a markdown editor.
+ *   1. Inside a code node, return false so ProseMirror inserts the text-only
+ *      slice it already parsed for that code context.
  *
- *   2. Otherwise we insert the text verbatim, auto-linking any URLs along
- *      the way (see `buildPlainTextPasteSlice`). This is also what happens
- *      for ambiguous prose like "5 * 3 = 15" (marked leaves it a plain
- *      paragraph) and what `forcePlainText` forces unconditionally.
+ *   2. For a normal paste carrying ProseMirror `data-pm-slice` HTML, return
+ *      false so open text selections merge as text while closed node
+ *      selections retain their block type and attrs.
  *
- * `forcePlainText` (Cmd/Ctrl+Shift+V — see `isPlainTextPasteRequest`) skips the
- * markdown path entirely so the raw characters land as typed.
+ *   3. For external clipboard text, retain Markdowner's text/plain-first
+ *      policy: render real Markdown structure, otherwise insert verbatim text
+ *      with conservative URL auto-linking.
  *
- * Returns `true` to short-circuit the default handler when we've handled
- * the paste; falls through (`false`) for clipboard payloads without text
- * (image/file pastes still work via the default path).
+ * Forced plain-text paste skips route 2 and keeps Markdowner's existing
+ * `buildPlainTextPasteSlice` behavior outside code. Clipboard payloads without
+ * text still fall through for image/file handling.
  */
 export function handleWysiwygPlainTextPaste(
   view: EditorView,
@@ -234,6 +237,14 @@ export function handleWysiwygPlainTextPaste(
   if (!clipboardData) return false;
   const text = clipboardData.getData('text/plain');
   if (!text) return false;
+
+  if (isCodePasteContext(view)) {
+    return false;
+  }
+
+  if (!forcePlainText && hasProseMirrorSliceMetadata(clipboardData)) {
+    return false;
+  }
 
   if (!forcePlainText && tryPasteAsMarkdown(editor, text)) {
     return true;

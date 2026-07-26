@@ -144,11 +144,20 @@ describe('buildPlainTextPasteSlice', () => {
 });
 
 describe('handleWysiwygPlainTextPaste', () => {
-  function makeView() {
+  function makeView({ inCodeBlock = false } = {}) {
     const dispatch = vi.fn();
     const view = {
       state: {
         schema,
+        selection: {
+          $from: {
+            parent: {
+              type: {
+                spec: { code: inCodeBlock },
+              },
+            },
+          },
+        },
         tr: {
           replaceSelection: vi.fn(function (this: any) {
             return this;
@@ -184,6 +193,49 @@ describe('handleWysiwygPlainTextPaste', () => {
     );
     expect(handled).toBe(true);
     expect(view.state.tr.replaceSelection).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers markdown-looking text to ProseMirror inside a code block', () => {
+    const { view, dispatch } = makeView({ inCodeBlock: true });
+    const handled = handleWysiwygPlainTextPaste(
+      view as any,
+      makeEvent({ 'text/plain': '# heading\n- item\n```ts' }),
+    );
+
+    expect(handled).toBe(false);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('defers a structured ProseMirror slice when plain text was not requested', () => {
+    const { view, dispatch } = makeView();
+    const handled = handleWysiwygPlainTextPaste(
+      view as any,
+      makeEvent({
+        'text/plain': '# heading',
+        'text/html':
+          '<pre data-pm-slice="0 0 []"><code class="language-md"># heading</code></pre>',
+      }),
+    );
+
+    expect(handled).toBe(false);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('keeps forced plain-text paste ahead of structured clipboard HTML', () => {
+    const { view, dispatch } = makeView();
+    const handled = handleWysiwygPlainTextPaste(
+      view as any,
+      makeEvent({
+        'text/plain': '# heading',
+        'text/html':
+          '<pre data-pm-slice="0 0 []"><code class="language-md"># heading</code></pre>',
+      }),
+      null,
+      true,
+    );
+
+    expect(handled).toBe(true);
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
@@ -409,4 +461,3 @@ describe('isPlainTextPasteRequest', () => {
     expect(isPlainTextPasteRequest({ input: undefined })).toBe(false);
   });
 });
-
