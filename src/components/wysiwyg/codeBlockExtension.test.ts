@@ -11,6 +11,7 @@
 import { readFileSync } from 'node:fs';
 
 import StarterKit from '@tiptap/starter-kit';
+import { Markdown } from '@tiptap/markdown';
 import { Editor, type Content } from '@tiptap/core';
 import { EditorContent } from '@tiptap/react';
 import { cleanup, render, waitFor } from '@testing-library/react';
@@ -190,6 +191,53 @@ describe('code block keyboard handling', () => {
       return element!;
     });
     expect(content.style.whiteSpace).toBe('inherit');
+  });
+
+  it.each([
+    {
+      name: 'ordinary content with a triple fence',
+      language: 'typescript',
+      body: 'const value = 1;',
+      expected: '```typescript\nconst value = 1;\n```',
+    },
+    {
+      name: 'literal triple backticks with a longer outer fence',
+      language: 'text',
+      body: 'target\n```ts\nconst value = 1;\n```',
+      expected: '````text\ntarget\n```ts\nconst value = 1;\n```\n````',
+    },
+  ])('serializes $name', ({ language, body, expected }) => {
+    editor = new Editor({
+      extensions: [
+        StarterKit.configure({ codeBlock: false }),
+        createCodeBlockExtension(),
+        Markdown,
+      ],
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'codeBlock',
+            attrs: { language },
+            content: [{ type: 'text', text: body }],
+          },
+        ],
+      },
+    });
+
+    expect(editor.getMarkdown()).toBe(expected);
+
+    editor.commands.setContent(expected, {
+      contentType: 'markdown',
+      emitUpdate: false,
+    } as never);
+    const codeBlocks = Array.from(
+      { length: editor.state.doc.childCount },
+      (_, index) => editor.state.doc.child(index),
+    ).filter((node) => node.type.name === 'codeBlock');
+    expect(codeBlocks).toHaveLength(1);
+    expect(codeBlocks[0]?.attrs.language).toBe(language);
+    expect(codeBlocks[0]?.textContent).toBe(body);
   });
 
   describe('ArrowDown exit', () => {

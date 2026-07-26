@@ -201,6 +201,30 @@ function hasProseMirrorSliceMetadata(clipboardData: DataTransfer): boolean {
 }
 
 /**
+ * ProseMirror serializes a text selection inside a code block as one open
+ * `<pre><code>` slice (`data-pm-slice="1 1 …"`). A code-block NodeSelection
+ * uses the same DOM shape but is closed (`0 0`).
+ *
+ * The default parser usually merges the open slice as text when the target is
+ * a non-empty paragraph, but promotes it back to a code block at an empty
+ * paragraph. Detect the precise open-code shape so text selections stay
+ * literal in every non-code target while closed node selections keep their
+ * structure and language.
+ */
+function isOpenProseMirrorCodeTextSlice(clipboardData: DataTransfer): boolean {
+  const html = clipboardData.getData('text/html').trim();
+  const rootPre = html.match(/^<pre\b([^>]*)>[\s\S]*<\/pre>$/i);
+  if (!rootPre || !/<code\b/i.test(html)) return false;
+
+  const slice = rootPre[1]?.match(
+    /\bdata-pm-slice\s*=\s*["']\s*(\d+)\s+(\d+)(?:\s+[^"']*)?["']/i,
+  );
+  if (!slice) return false;
+
+  return Number(slice[1]) > 0 && Number(slice[2]) > 0;
+}
+
+/**
  * Tiptap `editorProps.handlePaste` that drives WYSIWYG paste behaviour.
  *
  * The browser's default paste handler prefers `text/html` over `text/plain`.
@@ -215,9 +239,10 @@ function hasProseMirrorSliceMetadata(clipboardData: DataTransfer): boolean {
  *   1. Inside a code node, return false so ProseMirror inserts the text-only
  *      slice it already parsed for that code context.
  *
- *   2. For a normal paste carrying ProseMirror `data-pm-slice` HTML, return
- *      false so open text selections merge as text while closed node
- *      selections retain their block type and attrs.
+ *   2. Outside code, handle an open ProseMirror `<pre><code>` slice as
+ *      literal text. Defer every other internal slice so closed code-block
+ *      selections retain their block type and attrs, and mixed selections
+ *      preserve their structure.
  *
  *   3. For external clipboard text, retain Markdowner's text/plain-first
  *      policy: render real Markdown structure, otherwise insert verbatim text
@@ -242,11 +267,18 @@ export function handleWysiwygPlainTextPaste(
     return false;
   }
 
-  if (!forcePlainText && hasProseMirrorSliceMetadata(clipboardData)) {
+  const openCodeTextSlice =
+    !forcePlainText && isOpenProseMirrorCodeTextSlice(clipboardData);
+
+  if (
+    !forcePlainText &&
+    !openCodeTextSlice &&
+    hasProseMirrorSliceMetadata(clipboardData)
+  ) {
     return false;
   }
 
-  if (!forcePlainText && tryPasteAsMarkdown(editor, text)) {
+  if (!forcePlainText && !openCodeTextSlice && tryPasteAsMarkdown(editor, text)) {
     return true;
   }
 

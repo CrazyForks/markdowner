@@ -284,6 +284,19 @@ describe('WYSIWYG markdown paste (real editor)', () => {
     expect(target.getText()).toBe('before # heading after');
   });
 
+  it('pastes a partial code selection into an empty paragraph as literal text', () => {
+    const source = buildEditor('```markdown\n# heading\n- item\n```');
+    selectCodeText(source, 0, '# heading'.length);
+    const payload = copySelection(source);
+    const target = buildEditor();
+    target.commands.focus('start');
+
+    paste(target, payload);
+
+    expect(blockTypes(target)).toEqual(['paragraph']);
+    expect(target.getText()).toBe('# heading');
+  });
+
   it('pastes a complete code text selection into a paragraph without rendering markdown', () => {
     const source = buildEditor('```markdown\n# heading\n- item\n```');
     selectCodeText(source);

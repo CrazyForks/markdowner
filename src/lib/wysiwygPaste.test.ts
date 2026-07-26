@@ -222,6 +222,21 @@ describe('handleWysiwygPlainTextPaste', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it('handles an open ProseMirror code text slice as literal text outside code', () => {
+    const { view, dispatch } = makeView();
+    const handled = handleWysiwygPlainTextPaste(
+      view as any,
+      makeEvent({
+        'text/plain': '# heading',
+        'text/html':
+          '<pre data-pm-slice="1 1 []"><code class="language-md"># heading</code></pre>',
+      }),
+    );
+
+    expect(handled).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps forced plain-text paste ahead of structured clipboard HTML', () => {
     const { view, dispatch } = makeView();
     const handled = handleWysiwygPlainTextPaste(

@@ -24,6 +24,14 @@ lowlight.registerAlias({ ini: ['toml'] });
  */
 export const sharedLowlight = lowlight;
 
+function longestBacktickRun(text: string): number {
+  let longest = 0;
+  for (const match of text.matchAll(/`+/g)) {
+    longest = Math.max(longest, match[0].length);
+  }
+  return longest;
+}
+
 // Move keyboard focus to the language picker rendered by the NodeView at the
 // given document position. Returns true when the focus actually moved so the
 // caller can `preventDefault` the originating arrow keypress. The picker is
@@ -43,6 +51,12 @@ export function createCodeBlockExtension() {
   return CodeBlockLowlight.extend({
     addNodeView() {
       return ReactNodeViewRenderer(CodeBlockView);
+    },
+    renderMarkdown(node, helpers) {
+      const language = node.attrs?.language || '';
+      const body = node.content ? helpers.renderChildren(node.content) : '';
+      const fence = '`'.repeat(Math.max(3, longestBacktickRun(body) + 1));
+      return `${fence}${language}\n${body}\n${fence}`;
     },
     addKeyboardShortcuts() {
       return {
