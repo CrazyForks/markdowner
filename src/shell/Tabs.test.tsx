@@ -77,6 +77,34 @@ describe('Tabs drag reordering', () => {
     fireDragEventAt(target, 'dragOver', 280, transfer);
     fireDragEventAt(target, 'drop', 280, transfer);
 
+    expect(onReorderTab).toHaveBeenCalledOnce();
+    expect(onReorderTab).toHaveBeenCalledWith('a', 'c', true);
+  });
+
+  it('reorders as the pointer crosses a tab instead of waiting for drop', () => {
+    const onReorderTab = vi.fn();
+    render(
+      <Tabs
+        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md'), tabsItem('c', 'gamma.md')]}
+        activeTabId="a"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onReorderTab={onReorderTab}
+      />,
+    );
+
+    const source = screen.getByRole('tab', { name: /alpha\.md/i });
+    const target = screen.getByRole('tab', { name: /gamma\.md/i });
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
+      left: 200,
+      width: 100,
+    } as DOMRect);
+
+    const transfer = dataTransfer();
+    fireEvent.dragStart(source, { dataTransfer: transfer });
+    fireDragEventAt(target, 'dragOver', 280, transfer);
+
+    expect(onReorderTab).toHaveBeenCalledOnce();
     expect(onReorderTab).toHaveBeenCalledWith('a', 'c', true);
   });
 
@@ -123,6 +151,33 @@ describe('Tabs drag reordering', () => {
     const transfer = dataTransfer();
     fireEvent.dragStart(source, { dataTransfer: transfer });
     fireEvent.drop(source, { dataTransfer: transfer, clientX: 10 });
+
+    expect(onReorderTab).not.toHaveBeenCalled();
+  });
+
+  it('does not emit reorder churn while hovering the tab edge for the current slot', () => {
+    const onReorderTab = vi.fn();
+    render(
+      <Tabs
+        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md'), tabsItem('c', 'gamma.md')]}
+        activeTabId="a"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onReorderTab={onReorderTab}
+      />,
+    );
+
+    const source = screen.getByRole('tab', { name: /beta\.md/i });
+    const target = screen.getByRole('tab', { name: /gamma\.md/i });
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
+      left: 200,
+      width: 100,
+    } as DOMRect);
+
+    const transfer = dataTransfer();
+    fireEvent.dragStart(source, { dataTransfer: transfer });
+    fireDragEventAt(target, 'dragOver', 210, transfer);
+    fireDragEventAt(target, 'dragOver', 210, transfer);
 
     expect(onReorderTab).not.toHaveBeenCalled();
   });
@@ -182,6 +237,7 @@ describe('Tabs drag reordering', () => {
     fireDragEventAt(strip, 'dragOver', 480, transfer);
     fireDragEventAt(strip, 'drop', 480, transfer);
 
+    expect(onReorderTab).toHaveBeenCalledOnce();
     expect(onReorderTab).toHaveBeenCalledWith('a', null, true);
   });
 

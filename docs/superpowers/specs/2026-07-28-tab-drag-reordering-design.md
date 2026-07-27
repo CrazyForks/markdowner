@@ -12,6 +12,9 @@ Markdowner already marks each tab as HTML-draggable and moves it before or after
 - It does not scroll an overflowing tab strip while dragging near either edge, so distant tabs can be unreachable without ending the drag.
 - Drag identity lives only in React state. Drop handling should also have a synchronous source of truth so a fast drag is not dependent on a completed render.
 - Dragging can start from the close button because the whole tab is draggable.
+- Neighboring tabs do not move until the pointer is released, so the interaction
+  lacks the immediate positional feedback expected from editors such as Zed and
+  VS Code.
 - Component tests prove callback arguments, but no application-level test proves that the reordered document paths are persisted in the same order.
 - The current tests do not cover cleanup when a drag is cancelled or finishes outside a valid target.
 
@@ -21,7 +24,9 @@ Markdowner already marks each tab as HTML-draggable and moves it before or after
 - Preserve the current left-half/right-half rule for insertion before or after a tab.
 - Treat the trailing empty part of the tab strip as “move to end.”
 - Auto-scroll horizontally while the pointer remains near the left or right edge of an overflowing strip.
-- Reorder only when the pointer is released. Hovering previews the insertion point but does not continuously mutate tab state.
+- Reorder as soon as the pointer crosses a tab's insertion half so neighboring
+  tabs move during the drag. Repeated drag-over events for the same effective
+  slot must not churn state or persistence.
 - Keep the dragged tab active state unchanged. Reordering an inactive tab must not switch documents.
 - Allow document, Settings, and Export Preview tabs to participate in the visible in-memory order. Session persistence continues to store only path-backed document tabs, in their new relative order.
 - Do not initiate a tab drag from the close button.
@@ -31,11 +36,11 @@ Markdowner already marks each tab as HTML-draggable and moves it before or after
 
 When a drag begins, the tab strip records the source ID both synchronously and in render state. The source tab becomes partially transparent and the cursor indicates a move operation.
 
-While the pointer is over a tab, its left or right edge receives a clear insertion marker. While the pointer is over the trailing strip area, a marker appears at the end of the last tab. Moving back over the source tab or outside a valid destination clears the marker.
+While the pointer is over a tab, its left or right edge receives a clear insertion marker and the source moves into that effective slot immediately. The native drag image continues to follow the pointer while neighboring tabs shift around it. While the pointer is over the trailing strip area, the source moves to the end and a marker appears there. Moving back over the source tab or outside a valid destination clears the marker.
 
 When the pointer enters an edge zone of an overflowing strip, a request-animation-frame loop scrolls in that direction. Scroll speed increases with proximity to the edge so a user can reach distant tabs in one drag. Leaving the edge zone, dropping, cancelling, window blur, or component unmount stops the loop.
 
-Dropping over a valid destination calls the reorder callback exactly once. Dropping the source onto its current effective position is a no-op. Drag end always clears transient state.
+Each effective destination calls the reorder callback at most once while it is current. Dropping confirms the latest live destination without emitting a duplicate reorder; it remains a fallback if a platform delivers a drop without a preceding drag-over. Moving over the source's current effective position is a no-op. Drag end always clears transient state.
 
 ## Component and State Boundaries
 
@@ -43,6 +48,7 @@ Dropping over a valid destination calls the reorder callback exactly once. Dropp
 
 - dragged tab ID
 - current insertion destination
+- latest live reorder destination
 - edge-scroll direction and animation frame
 
 Refs hold values that must be read synchronously by native drag events. React state drives opacity and insertion-marker rendering.
@@ -77,6 +83,8 @@ Automated tests must prove:
 - unknown IDs, self-drops, and already-final move-to-end requests are no-ops;
 - tab drag start publishes the internal transfer type and excludes the close button;
 - left-half and right-half drops choose the correct insertion edge;
+- crossing a target half reorders before drop and repeated events for the same
+  effective slot do not emit duplicate updates;
 - trailing-strip drops move a tab to the end;
 - edge dragging scrolls an overflowing strip and stops after drag end;
 - drag cancellation clears the visual insertion state;
@@ -90,7 +98,8 @@ Verification also requires the focused tests, full Vitest suite, TypeScript chec
 In the installed application:
 
 1. Open at least six distinct Markdown documents and narrow the window until the tab strip overflows.
-2. Drag a visible inactive tab before and after another tab; confirm the editor does not switch.
+2. Drag a visible inactive tab before and after another tab; confirm neighboring
+   tabs move before release and the editor does not switch.
 3. Drag a tab into the trailing empty area; confirm it becomes last.
 4. Drag near each strip edge; confirm the strip scrolls and a distant destination can be reached without releasing.
 5. Start a drag and cancel it; confirm no marker or dimmed tab remains.
@@ -103,5 +112,6 @@ In the installed application:
 - Reordering tabs from the Explorer's Open Editors list
 - Persisting the relative position of transient Settings or Export Preview tabs
 - Touch-specific gestures
-- Animated live tab displacement while hovering
+- Custom spring or FLIP animation beyond the native drag image and immediate
+  neighbor displacement
 - Changes to keyboard shortcuts or keybinding settings

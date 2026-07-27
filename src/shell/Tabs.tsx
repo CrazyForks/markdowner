@@ -8,6 +8,7 @@ import {
 } from 'react';
 import { FileDown, Settings as SettingsIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { reorderTabByDrag } from '@/lib/tabs';
 
 export const TAB_DRAG_DATA_TYPE = 'application/x-markdowner-tab';
 const EDGE_SCROLL_ZONE_PX = 48;
@@ -55,6 +56,7 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
   const draggingIdRef = useRef<string | null>(null);
+  const lastLiveDropRef = useRef<string | null>(null);
   const edgeScrollSpeedRef = useRef(0);
   const edgeScrollFrameRef = useRef<number | null>(null);
 
@@ -128,10 +130,27 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
 
   const clearDragState = useCallback(() => {
     draggingIdRef.current = null;
+    lastLiveDropRef.current = null;
     setDraggingId(null);
     setDropIndicator(null);
     stopEdgeScroll();
   }, [stopEdgeScroll]);
+
+  const requestLiveReorder = useCallback(
+    (sourceId: string, targetId: string | null, placeAfter: boolean) => {
+      if (!onReorderTab) return;
+      const dropKey = `${sourceId}\u0000${targetId ?? ''}\u0000${placeAfter ? 'after' : 'before'}`;
+      if (lastLiveDropRef.current === dropKey) return;
+
+      lastLiveDropRef.current = dropKey;
+      const reordered = reorderTabByDrag(items, sourceId, targetId, placeAfter);
+      const orderChanged = reordered.some((item, index) => item.id !== items[index]?.id);
+      if (orderChanged) {
+        onReorderTab(sourceId, targetId, placeAfter);
+      }
+    },
+    [items, onReorderTab],
+  );
 
   useEffect(() => {
     window.addEventListener('blur', clearDragState);
@@ -161,6 +180,7 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
         updateEdgeScroll(event.clientX);
         if (!closestTabElement(event.target)) {
           setDropIndicator({ id: null, after: true });
+          requestLiveReorder(sourceId, null, true);
         }
       }}
       onDragLeave={(event) => {
@@ -173,7 +193,7 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
         const sourceId = draggingIdRef.current;
         if (!onReorderTab || !sourceId || closestTabElement(event.target)) return;
         event.preventDefault();
-        onReorderTab(sourceId, null, true);
+        requestLiveReorder(sourceId, null, true);
         clearDragState();
       }}
       className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border bg-background"
@@ -210,6 +230,7 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
               // type prevents an internal id from being dropped into editors.
               event.dataTransfer.setData(TAB_DRAG_DATA_TYPE, item.id);
               draggingIdRef.current = item.id;
+              lastLiveDropRef.current = null;
               setDraggingId(item.id);
             }}
             onDragOver={(event) => {
@@ -226,13 +247,14 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
               setDropIndicator((prev) =>
                 prev?.id === item.id && prev.after === after ? prev : { id: item.id, after },
               );
+              requestLiveReorder(sourceId, item.id, after);
             }}
             onDrop={(event) => {
               const sourceId = draggingIdRef.current;
               if (!onReorderTab || !sourceId || sourceId === item.id) return;
               event.preventDefault();
               event.stopPropagation();
-              onReorderTab(sourceId, item.id, isAfterDrop(event));
+              requestLiveReorder(sourceId, item.id, isAfterDrop(event));
               clearDragState();
             }}
             onDragEnd={clearDragState}
