@@ -86,4 +86,22 @@ describe('reorderTabByDrag', () => {
       'd',
     ]);
   });
+
+  it('moves a tab to the end when the drop target is null', () => {
+    expect(reorderTabByDrag(tabs, 'b', null, true).map((tab) => tab.id)).toEqual([
+      'a',
+      'c',
+      'd',
+      'b',
+    ]);
+  });
+
+  it('keeps the order when the final tab is moved to the end', () => {
+    expect(reorderTabByDrag(tabs, 'd', null, true).map((tab) => tab.id)).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+    ]);
+  });
 });

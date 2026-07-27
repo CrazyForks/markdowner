@@ -1,6 +1,7 @@
 import {
   act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -99,6 +100,33 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 const LINE_WRAPPING_SENTINEL = '__line_wrapping__';
 const CORE_FLOW_TIMEOUT_MS = 15_000;
+
+function dataTransfer() {
+  const values = new Map<string, string>();
+  return {
+    effectAllowed: '',
+    dropEffect: '',
+    get types() {
+      return [...values.keys()];
+    },
+    setData: vi.fn((type: string, value: string) => {
+      values.set(type, value);
+    }),
+    getData: vi.fn((type: string) => values.get(type) ?? ''),
+  };
+}
+
+function fireDragEventAt(
+  node: Element,
+  type: 'dragOver' | 'drop',
+  clientX: number,
+  transfer: ReturnType<typeof dataTransfer>,
+) {
+  const event = createEvent[type](node);
+  Object.defineProperty(event, 'clientX', { value: clientX });
+  Object.defineProperty(event, 'dataTransfer', { value: transfer });
+  fireEvent(node, event);
+}
 
 vi.mock('@uiw/react-codemirror', () => ({
   default: ({
@@ -508,6 +536,64 @@ describe('App core Markdown editing flow', () => {
         expect.objectContaining({
           openTabs: [restoredPath],
           activeTabPath: restoredPath,
+        }),
+      );
+    });
+  });
+
+  it('persists a mouse-reordered tab sequence without switching the active document', async () => {
+    const alphaPath = '/tmp/project/alpha.md';
+    const betaPath = '/tmp/project/beta.md';
+    const gammaPath = '/tmp/project/gamma.md';
+    loadOpenTabsMock.mockResolvedValue({
+      openTabs: [alphaPath, betaPath, gammaPath],
+      activeTabPath: alphaPath,
+      cursorPositions: {},
+    });
+    openDocumentMock.mockImplementation((path: string) =>
+      Promise.resolve(
+        baseSnapshot({
+          activeDocumentName:
+            path === alphaPath
+              ? 'alpha.md'
+              : path === betaPath
+                ? 'beta.md'
+                : 'gamma.md',
+          activeDocumentPath: path,
+          activeDocumentSource:
+            path === alphaPath ? '# Alpha' : path === betaPath ? '# Beta' : '# Gamma',
+          mode: 'Wysiwyg',
+        }),
+      ),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    const alpha = await screen.findByRole('tab', { name: /alpha\.md/i });
+    const beta = await screen.findByRole('tab', { name: /beta\.md/i });
+    await screen.findByRole('tab', { name: /gamma\.md/i });
+    await waitFor(() => expect(alpha).toHaveAttribute('aria-selected', 'true'));
+    saveOpenTabsMock.mockClear();
+
+    const strip = screen.getByRole('tablist', { name: /open documents/i });
+    const transfer = dataTransfer();
+    fireEvent.dragStart(beta, { dataTransfer: transfer });
+    fireDragEventAt(strip, 'dragOver', 640, transfer);
+    fireDragEventAt(strip, 'drop', 640, transfer);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      expect.stringContaining('alpha.md'),
+      expect.stringContaining('gamma.md'),
+      expect.stringContaining('beta.md'),
+    ]);
+    expect(alpha).toHaveAttribute('aria-selected', 'true');
+    expect(beta).toHaveAttribute('aria-selected', 'false');
+    await waitFor(() => {
+      expect(saveOpenTabsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          openTabs: [alphaPath, gammaPath, betaPath],
+          activeTabPath: alphaPath,
         }),
       );
     });
