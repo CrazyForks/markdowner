@@ -21,36 +21,3 @@ export function moveTab<T extends { id: string }>(
   next.splice(target, 0, moved);
   return next;
 }
-
-/**
- * Moves the dragged tab next to the drop target — before or after it,
- * depending on which half of the target the pointer was over when released.
- * A null target represents the trailing end of the tab strip.
- *
- * Returns a fresh copy even when the drop is a no-op (unknown ids, dropping
- * a tab onto itself), so callers can hand the result straight to setState.
- */
-export function reorderTabByDrag<T extends { id: string }>(
-  tabs: readonly T[],
-  sourceId: string,
-  targetId: string | null,
-  placeAfter: boolean,
-): T[] {
-  const next = tabs.slice();
-  if (sourceId === targetId) return next;
-  const sourceIndex = next.findIndex((tab) => tab.id === sourceId);
-  if (sourceIndex < 0) return next;
-
-  if (targetId === null) {
-    const [moved] = next.splice(sourceIndex, 1);
-    next.push(moved);
-    return next;
-  }
-
-  const targetIndex = next.findIndex((tab) => tab.id === targetId);
-  if (targetIndex < 0) return next;
-  const [moved] = next.splice(sourceIndex, 1);
-  const insertAt = next.findIndex((tab) => tab.id === targetId) + (placeAfter ? 1 : 0);
-  next.splice(insertAt, 0, moved);
-  return next;
-}

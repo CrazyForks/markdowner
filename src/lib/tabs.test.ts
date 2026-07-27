@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { moveTab, reorderTabByDrag } from './tabs';
+import { moveTab } from './tabs';
 
 describe('moveTab', () => {
   const tabs = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
@@ -33,75 +33,5 @@ describe('moveTab', () => {
     const single = [{ id: 'only' }];
     expect(moveTab(single, 'only', 1)).toEqual(single);
     expect(moveTab(single, 'only', -1)).toEqual(single);
-  });
-});
-
-describe('reorderTabByDrag', () => {
-  const tabs = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
-
-  it('drops a tab before the target', () => {
-    expect(reorderTabByDrag(tabs, 'd', 'b', false).map((t) => t.id)).toEqual([
-      'a',
-      'd',
-      'b',
-      'c',
-    ]);
-  });
-
-  it('drops a tab after the target', () => {
-    expect(reorderTabByDrag(tabs, 'a', 'c', true).map((t) => t.id)).toEqual([
-      'b',
-      'c',
-      'a',
-      'd',
-    ]);
-  });
-
-  it('moves a tab leftwards across the strip', () => {
-    expect(reorderTabByDrag(tabs, 'c', 'a', false).map((t) => t.id)).toEqual([
-      'c',
-      'a',
-      'b',
-      'd',
-    ]);
-  });
-
-  it('returns a fresh copy when dropping a tab onto itself', () => {
-    const result = reorderTabByDrag(tabs, 'b', 'b', true);
-    expect(result.map((t) => t.id)).toEqual(['a', 'b', 'c', 'd']);
-    expect(result).not.toBe(tabs);
-  });
-
-  it('returns a fresh copy when either id is unknown', () => {
-    expect(reorderTabByDrag(tabs, 'missing', 'b', false).map((t) => t.id)).toEqual([
-      'a',
-      'b',
-      'c',
-      'd',
-    ]);
-    expect(reorderTabByDrag(tabs, 'b', 'missing', false).map((t) => t.id)).toEqual([
-      'a',
-      'b',
-      'c',
-      'd',
-    ]);
-  });
-
-  it('moves a tab to the end when the drop target is null', () => {
-    expect(reorderTabByDrag(tabs, 'b', null, true).map((tab) => tab.id)).toEqual([
-      'a',
-      'c',
-      'd',
-      'b',
-    ]);
-  });
-
-  it('keeps the order when the final tab is moved to the end', () => {
-    expect(reorderTabByDrag(tabs, 'd', null, true).map((tab) => tab.id)).toEqual([
-      'a',
-      'b',
-      'c',
-      'd',
-    ]);
   });
 });

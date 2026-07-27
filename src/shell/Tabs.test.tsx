@@ -1,47 +1,78 @@
-import {
-  act,
-  cleanup,
-  createEvent,
-  fireEvent,
-  render,
-  screen,
-} from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { TAB_DRAG_DATA_TYPE, Tabs, type TabsItem } from './Tabs';
+import { Tabs, type TabsItem } from './Tabs';
+
+const TAB_WIDTH = 100;
 
 function tabsItem(id: string, name: string): TabsItem {
   return { id, kind: 'document', name, isDirty: false, missing: false, shortcutLabel: null };
 }
 
-// jsdom has no DataTransfer — provide the minimal surface the handlers use.
-function dataTransfer() {
-  const values = new Map<string, string>();
-  return {
-    effectAllowed: '',
-    dropEffect: '',
-    get types() {
-      return [...values.keys()];
-    },
-    setData: vi.fn((type: string, value: string) => {
-      values.set(type, value);
-    }),
-    getData: vi.fn((type: string) => values.get(type) ?? ''),
-  };
+function renderTabs(
+  ids: string[],
+  handlers: {
+    onSelectTab?: () => void;
+    onCloseTab?: () => void;
+    onReorderTab?: ((sourceId: string, index: number) => void) | undefined;
+  } = {},
+) {
+  const { onReorderTab = vi.fn() } = handlers;
+  render(
+    <Tabs
+      items={ids.map((id) => tabsItem(id, `${id}.md`))}
+      activeTabId={ids[0] ?? null}
+      onSelectTab={handlers.onSelectTab ?? vi.fn()}
+      onCloseTab={handlers.onCloseTab ?? vi.fn()}
+      onReorderTab={onReorderTab}
+    />,
+  );
+  return onReorderTab;
 }
 
-// jsdom lacks DragEvent, so fireEvent drops clientX from drag events. Build
-// the event manually and pin the fields the component reads.
-function fireDragEventAt(
-  node: Element,
-  type: 'dragOver' | 'dragLeave' | 'drop',
-  clientX: number,
-  transfer: ReturnType<typeof dataTransfer>,
-) {
-  const event = createEvent[type](node);
-  Object.defineProperty(event, 'clientX', { value: clientX });
-  Object.defineProperty(event, 'dataTransfer', { value: transfer });
-  fireEvent(node, event);
+/**
+ * jsdom lays everything out at zero, so pin the geometry the drag reads: equal
+ * tabs of `TAB_WIDTH` packed from content x=0 inside a 400px strip.
+ */
+function layoutStrip() {
+  const strip = screen.getByRole('tablist', { name: /open documents/i }) as HTMLDivElement;
+  vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    right: 400,
+    width: 400,
+  } as DOMRect);
+  screen.getAllByRole('tab').forEach((tab, index) => {
+    vi.spyOn(tab, 'getBoundingClientRect').mockReturnValue({
+      left: index * TAB_WIDTH,
+      right: (index + 1) * TAB_WIDTH,
+      width: TAB_WIDTH,
+    } as DOMRect);
+  });
+  return strip;
+}
+
+function tab(id: string) {
+  return screen.getByRole('tab', { name: new RegExp(`${id}\\.md`, 'i') });
+}
+
+/** Presses the middle of the tab at `index` and reports its centre x. */
+function pressTab(index: number, id: string) {
+  const clientX = index * TAB_WIDTH + TAB_WIDTH / 2;
+  fireEvent.pointerDown(tab(id), {
+    button: 0,
+    pointerId: 1,
+    pointerType: 'mouse',
+    clientX,
+  });
+  return clientX;
+}
+
+function movePointer(clientX: number) {
+  fireEvent.pointerMove(window, { pointerId: 1, clientX });
+}
+
+function releasePointer() {
+  fireEvent.pointerUp(window, { pointerId: 1 });
 }
 
 describe('Tabs drag reordering', () => {
@@ -50,214 +81,238 @@ describe('Tabs drag reordering', () => {
     vi.restoreAllMocks();
   });
 
-  it('reorders by dragging a tab onto another tab half', () => {
-    const onReorderTab = vi.fn();
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md'), tabsItem('c', 'gamma.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={onReorderTab}
-      />,
-    );
+  it('moves a tab forward once it is dragged half over its neighbour', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
 
-    const source = screen.getByRole('tab', { name: /alpha\.md/i });
-    const target = screen.getByRole('tab', { name: /gamma\.md/i });
-    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
-      left: 200,
-      width: 100,
-    } as DOMRect);
-
-    const transfer = dataTransfer();
-    fireEvent.dragStart(source, { dataTransfer: transfer });
-    expect(transfer.setData).toHaveBeenCalledWith(TAB_DRAG_DATA_TYPE, 'a');
-
-    // Pointer on the right half of the target → insert after it.
-    fireDragEventAt(target, 'dragOver', 280, transfer);
-    fireDragEventAt(target, 'drop', 280, transfer);
+    pressTab(0, 'a');
+    movePointer(160);
+    releasePointer();
 
     expect(onReorderTab).toHaveBeenCalledOnce();
-    expect(onReorderTab).toHaveBeenCalledWith('a', 'c', true);
+    expect(onReorderTab).toHaveBeenCalledWith('a', 1);
   });
 
-  it('reorders as the pointer crosses a tab instead of waiting for drop', () => {
-    const onReorderTab = vi.fn();
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md'), tabsItem('c', 'gamma.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={onReorderTab}
-      />,
-    );
+  it('moves a tab backward to the first slot', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
 
-    const source = screen.getByRole('tab', { name: /alpha\.md/i });
-    const target = screen.getByRole('tab', { name: /gamma\.md/i });
-    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
-      left: 200,
-      width: 100,
-    } as DOMRect);
+    pressTab(2, 'c');
+    movePointer(60);
+    releasePointer();
 
-    const transfer = dataTransfer();
-    fireEvent.dragStart(source, { dataTransfer: transfer });
-    fireDragEventAt(target, 'dragOver', 280, transfer);
+    expect(onReorderTab).toHaveBeenCalledWith('c', 0);
+  });
+
+  it('moves a tab to the end when dragged past the final tab', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
+
+    pressTab(0, 'a');
+    movePointer(600);
+    releasePointer();
+
+    expect(onReorderTab).toHaveBeenCalledWith('a', 2);
+  });
+
+  it('slides the displaced neighbour aside while the drag is still in flight', () => {
+    renderTabs(['a', 'b', 'c']);
+    layoutStrip();
+
+    pressTab(0, 'a');
+    movePointer(160);
+
+    // The dragged tab tracks the pointer with no transition of its own.
+    expect(tab('a')).toHaveAttribute('data-tab-dragging');
+    expect(tab('a').style.transform).toBe('translateX(110px)');
+    expect(tab('a').style.transition).toBe('');
+    // Its neighbour animates out of the way by exactly one tab width.
+    expect(tab('b').style.transform).toBe('translateX(-100px)');
+    expect(tab('b').style.transition).toBe('transform 130ms ease-out');
+    // Untouched tabs stay put.
+    expect(tab('c').style.transform).toBe('');
+  });
+
+  it('commits a single reorder no matter how far the pointer wandered', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
+
+    pressTab(0, 'a');
+    movePointer(160);
+    movePointer(280);
+    movePointer(220);
+    movePointer(160);
+    releasePointer();
 
     expect(onReorderTab).toHaveBeenCalledOnce();
-    expect(onReorderTab).toHaveBeenCalledWith('a', 'c', true);
+    expect(onReorderTab).toHaveBeenCalledWith('a', 1);
   });
 
-  it('inserts before the target when dropped on its left half', () => {
-    const onReorderTab = vi.fn();
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={onReorderTab}
-      />,
-    );
+  it('does not reorder before the dragged tab is half over its neighbour', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
 
-    const source = screen.getByRole('tab', { name: /beta\.md/i });
-    const target = screen.getByRole('tab', { name: /alpha\.md/i });
-    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
-      left: 0,
-      width: 100,
-    } as DOMRect);
+    pressTab(0, 'a');
+    movePointer(90);
 
-    const transfer = dataTransfer();
-    fireEvent.dragStart(source, { dataTransfer: transfer });
-    fireDragEventAt(target, 'dragOver', 10, transfer);
-    fireDragEventAt(target, 'drop', 10, transfer);
+    expect(tab('a').style.transform).toBe('translateX(40px)');
+    expect(tab('b').style.transform).toBe('');
 
-    expect(onReorderTab).toHaveBeenCalledWith('b', 'a', false);
-  });
-
-  it('ignores drops onto the dragged tab itself', () => {
-    const onReorderTab = vi.fn();
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={onReorderTab}
-      />,
-    );
-
-    const source = screen.getByRole('tab', { name: /alpha\.md/i });
-    const transfer = dataTransfer();
-    fireEvent.dragStart(source, { dataTransfer: transfer });
-    fireEvent.drop(source, { dataTransfer: transfer, clientX: 10 });
-
+    releasePointer();
     expect(onReorderTab).not.toHaveBeenCalled();
   });
 
-  it('does not emit reorder churn while hovering the tab edge for the current slot', () => {
-    const onReorderTab = vi.fn();
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md'), tabsItem('c', 'gamma.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={onReorderTab}
-      />,
-    );
+  it('treats a press that barely moves as a click rather than a drag', () => {
+    const onSelectTab = vi.fn();
+    const onReorderTab = renderTabs(['a', 'b', 'c'], { onSelectTab });
+    layoutStrip();
 
-    const source = screen.getByRole('tab', { name: /beta\.md/i });
-    const target = screen.getByRole('tab', { name: /gamma\.md/i });
-    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
-      left: 200,
-      width: 100,
-    } as DOMRect);
+    pressTab(0, 'a');
+    movePointer(52);
+    releasePointer();
+    fireEvent.click(tab('a'));
 
-    const transfer = dataTransfer();
-    fireEvent.dragStart(source, { dataTransfer: transfer });
-    fireDragEventAt(target, 'dragOver', 210, transfer);
-    fireDragEventAt(target, 'dragOver', 210, transfer);
+    expect(onReorderTab).not.toHaveBeenCalled();
+    expect(tab('a')).not.toHaveAttribute('data-tab-dragging');
+    expect(onSelectTab).toHaveBeenCalledWith('a');
+  });
 
+  it('does not switch documents when a tab is dragged', () => {
+    const onSelectTab = vi.fn();
+    renderTabs(['a', 'b', 'c'], { onSelectTab });
+    layoutStrip();
+
+    pressTab(1, 'b');
+    movePointer(280);
+    releasePointer();
+    fireEvent.click(tab('b'));
+
+    expect(onSelectTab).not.toHaveBeenCalled();
+  });
+
+  it('selects a tab on a plain click', () => {
+    const onSelectTab = vi.fn();
+    renderTabs(['a', 'b', 'c'], { onSelectTab });
+
+    fireEvent.click(tab('b'));
+
+    expect(onSelectTab).toHaveBeenCalledWith('b');
+  });
+
+  it('cancels a drag on Escape without reordering or leaving transforms behind', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
+
+    pressTab(0, 'a');
+    movePointer(160);
+    expect(tab('b').style.transform).toBe('translateX(-100px)');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(onReorderTab).not.toHaveBeenCalled();
+    expect(tab('a')).not.toHaveAttribute('data-tab-dragging');
+    expect(tab('a').style.transform).toBe('');
+    expect(tab('b').style.transform).toBe('');
+
+    // The cancelled pointer must not commit anything when it is finally released.
+    releasePointer();
     expect(onReorderTab).not.toHaveBeenCalled();
   });
 
-  it('keeps tabs non-draggable when no reorder handler is provided', () => {
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-      />,
-    );
+  it('cancels a drag when the window loses focus', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
 
-    expect(screen.getByRole('tab', { name: /alpha\.md/i })).toHaveAttribute(
-      'draggable',
-      'false',
-    );
+    pressTab(0, 'a');
+    movePointer(160);
+    fireEvent.blur(window);
+
+    expect(onReorderTab).not.toHaveBeenCalled();
+    expect(tab('a').style.transform).toBe('');
   });
 
-  it('publishes an internal drag type without exposing the tab id as plain text', () => {
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={vi.fn()}
-      />,
-    );
+  it('cancels a drag when the pointer is cancelled', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
 
-    const transfer = dataTransfer();
-    fireEvent.dragStart(screen.getByRole('tab', { name: /alpha\.md/i }), {
-      dataTransfer: transfer,
+    pressTab(0, 'a');
+    movePointer(160);
+    fireEvent.pointerCancel(window, { pointerId: 1 });
+
+    expect(onReorderTab).not.toHaveBeenCalled();
+    expect(tab('a').style.transform).toBe('');
+  });
+
+  it('does not start a drag from the close button', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
+
+    fireEvent.pointerDown(screen.getAllByRole('button', { name: /close tab/i })[0], {
+      button: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 90,
     });
+    movePointer(280);
+    releasePointer();
 
-    expect(transfer.setData).toHaveBeenCalledWith(TAB_DRAG_DATA_TYPE, 'a');
-    expect(transfer.getData('text/plain')).toBe('');
+    expect(onReorderTab).not.toHaveBeenCalled();
   });
 
-  it('moves a tab to the end when dropped on the trailing strip area', () => {
-    const onReorderTab = vi.fn();
+  it('ignores non-primary buttons and touch contacts', () => {
+    const onReorderTab = renderTabs(['a', 'b', 'c']);
+    layoutStrip();
+
+    fireEvent.pointerDown(tab('a'), {
+      button: 2,
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 50,
+    });
+    movePointer(280);
+    releasePointer();
+
+    fireEvent.pointerDown(tab('a'), {
+      button: 0,
+      pointerId: 2,
+      pointerType: 'touch',
+      clientX: 50,
+    });
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: 280 });
+    fireEvent.pointerUp(window, { pointerId: 2 });
+
+    expect(onReorderTab).not.toHaveBeenCalled();
+  });
+
+  it('leaves tabs undraggable when no reorder handler is provided', () => {
     render(
       <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md')]}
+        items={[tabsItem('a', 'a.md'), tabsItem('b', 'b.md')]}
         activeTabId="a"
         onSelectTab={vi.fn()}
         onCloseTab={vi.fn()}
-        onReorderTab={onReorderTab}
       />,
     );
+    layoutStrip();
 
-    const source = screen.getByRole('tab', { name: /alpha\.md/i });
-    const strip = screen.getByRole('tablist', { name: /open documents/i });
-    const transfer = dataTransfer();
-    fireEvent.dragStart(source, { dataTransfer: transfer });
-    fireDragEventAt(strip, 'dragOver', 480, transfer);
-    fireDragEventAt(strip, 'drop', 480, transfer);
+    pressTab(0, 'a');
+    movePointer(280);
 
-    expect(onReorderTab).toHaveBeenCalledOnce();
-    expect(onReorderTab).toHaveBeenCalledWith('a', null, true);
+    expect(tab('a')).not.toHaveClass('cursor-grab');
+    expect(tab('a')).not.toHaveAttribute('data-tab-dragging');
+    expect(tab('a').style.transform).toBe('');
   });
 
-  it('does not start a tab drag from its close button', () => {
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={vi.fn()}
-      />,
-    );
+  it('cannot reorder a single-tab strip', () => {
+    const onReorderTab = renderTabs(['a']);
+    layoutStrip();
 
-    const transfer = dataTransfer();
-    const close = screen.getAllByRole('button', { name: /close tab/i })[0];
-    expect(close).toHaveAttribute('draggable', 'false');
-    fireEvent.dragStart(close, { dataTransfer: transfer });
+    pressTab(0, 'a');
+    movePointer(280);
+    releasePointer();
 
-    expect(transfer.setData).not.toHaveBeenCalled();
+    expect(onReorderTab).not.toHaveBeenCalled();
+    expect(tab('a').style.transform).toBe('');
   });
 
   it('scrolls an overflowing strip near either edge and stops at drag end', () => {
@@ -274,25 +329,8 @@ describe('Tabs drag reordering', () => {
       .spyOn(window, 'cancelAnimationFrame')
       .mockImplementation(() => undefined);
 
-    render(
-      <Tabs
-        items={[
-          tabsItem('a', 'alpha.md'),
-          tabsItem('b', 'beta.md'),
-          tabsItem('c', 'gamma.md'),
-        ]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={vi.fn()}
-      />,
-    );
-
-    const source = screen.getByRole('tab', { name: /alpha\.md/i });
-    const target = screen.getByRole('tab', { name: /gamma\.md/i });
-    const strip = screen.getByRole('tablist', {
-      name: /open documents/i,
-    }) as HTMLDivElement;
+    renderTabs(['a', 'b', 'c']);
+    const strip = layoutStrip();
     Object.defineProperties(strip, {
       clientWidth: { configurable: true, value: 300 },
       scrollWidth: { configurable: true, value: 900 },
@@ -304,50 +342,39 @@ describe('Tabs drag reordering', () => {
       width: 300,
     } as DOMRect);
 
-    const transfer = dataTransfer();
-    fireEvent.dragStart(source, { dataTransfer: transfer });
-    fireDragEventAt(target, 'dragOver', 4, transfer);
+    pressTab(1, 'b');
+    movePointer(4);
     expect(requestFrame).toHaveBeenCalled();
 
-    const initialScrollLeft = strip.scrollLeft;
+    const beforeLeftScroll = strip.scrollLeft;
     act(() => runFrame(16));
-    expect(strip.scrollLeft).toBeLessThan(initialScrollLeft);
+    expect(strip.scrollLeft).toBeLessThan(beforeLeftScroll);
 
-    const afterLeftScroll = strip.scrollLeft;
-    fireDragEventAt(target, 'dragOver', 296, transfer);
+    const beforeRightScroll = strip.scrollLeft;
+    movePointer(296);
     act(() => runFrame(32));
-    expect(strip.scrollLeft).toBeGreaterThan(afterLeftScroll);
+    expect(strip.scrollLeft).toBeGreaterThan(beforeRightScroll);
 
-    fireEvent.dragEnd(source, { dataTransfer: transfer });
+    releasePointer();
     expect(cancelFrame).toHaveBeenCalledWith(41);
   });
 
-  it('clears its insertion marker when a drag leaves the strip', () => {
-    render(
-      <Tabs
-        items={[tabsItem('a', 'alpha.md'), tabsItem('b', 'beta.md')]}
-        activeTabId="a"
-        onSelectTab={vi.fn()}
-        onCloseTab={vi.fn()}
-        onReorderTab={vi.fn()}
-      />,
-    );
+  it('does not scroll a strip that fits its tabs', () => {
+    const requestFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation(() => 41);
 
-    const source = screen.getByRole('tab', { name: /alpha\.md/i });
-    const target = screen.getByRole('tab', { name: /beta\.md/i });
-    const strip = screen.getByRole('tablist', { name: /open documents/i });
-    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({
-      left: 100,
-      width: 100,
-    } as DOMRect);
+    renderTabs(['a', 'b', 'c']);
+    const strip = layoutStrip();
+    Object.defineProperties(strip, {
+      clientWidth: { configurable: true, value: 400 },
+      scrollWidth: { configurable: true, value: 300 },
+    });
 
-    const transfer = dataTransfer();
-    fireEvent.dragStart(source, { dataTransfer: transfer });
-    fireDragEventAt(target, 'dragOver', 110, transfer);
-    expect(target).toHaveAttribute('data-drop-position', 'before');
+    pressTab(1, 'b');
+    movePointer(4);
 
-    fireDragEventAt(strip, 'dragLeave', -1, transfer);
-    expect(target).not.toHaveAttribute('data-drop-position');
+    expect(requestFrame).not.toHaveBeenCalled();
   });
 
   it('renders the Export Preview application tab with its own icon', () => {

@@ -243,7 +243,8 @@ import {
 } from './lib/settings';
 import { syncAnalytics } from './lib/analytics';
 import { resolveShellBindings } from './lib/keymap';
-import { moveTab, reorderTabByDrag } from './lib/tabs';
+import { moveTabToIndex } from './lib/tabDragReorder';
+import { moveTab } from './lib/tabs';
 import { resolveTerminalWorkingDirectory } from './lib/terminalModel';
 import {
   clampTerminalHeight,
@@ -6187,8 +6188,8 @@ export default function App() {
           activeTabId={activeTabId}
           onSelectTab={(id) => void switchToTab(id)}
           onCloseTab={(id) => void handleCloseTab(id)}
-          onReorderTab={(sourceId, targetId, placeAfter) =>
-            setTabs((prev) => reorderTabByDrag(prev, sourceId, targetId, placeAfter))
+          onReorderTab={(sourceId, index) =>
+            setTabs((prev) => moveTabToIndex(prev, sourceId, index))
           }
         />
       {isSettingsTabActive ? (

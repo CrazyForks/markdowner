@@ -1,18 +1,17 @@
-import {
-  DragEvent,
-  MouseEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
 } from 'react';
 import { FileDown, Settings as SettingsIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { reorderTabByDrag } from '@/lib/tabs';
+import { planTabDragPlacement, type TabSlot } from '@/lib/tabDragReorder';
 
-export const TAB_DRAG_DATA_TYPE = 'application/x-markdowner-tab';
+/** Pointer travel that tells a click on a tab apart from a drag of it. */
+const DRAG_THRESHOLD_PX = 4;
 const EDGE_SCROLL_ZONE_PX = 48;
 const EDGE_SCROLL_MAX_STEP_PX = 18;
+const TAB_SLIDE_MS = 130;
 
 export type TabsItemKind = 'document' | 'settings' | 'export';
 
@@ -30,17 +29,24 @@ interface TabsProps {
   activeTabId: string | null;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
-  onReorderTab?: (
-    sourceId: string,
-    targetId: string | null,
-    placeAfter: boolean,
-  ) => void;
+  /** Moves `sourceId` to `index` when a drag is released on a new slot. */
+  onReorderTab?: (sourceId: string, index: number) => void;
 }
 
-type DropIndicator = { id: string | null; after: boolean };
+/** A pointer held on a tab that has not yet travelled far enough to drag it. */
+interface ArmedDrag {
+  id: string;
+  pointerId: number;
+  startClientX: number;
+}
 
-function closestTabElement(target: EventTarget | null): Element | null {
-  return target instanceof Element ? target.closest('[data-tab-id]') : null;
+/** A drag in flight. `slots` and `offsets` are parallel to the rendered tabs. */
+interface ActiveDrag extends ArmedDrag {
+  slots: TabSlot[];
+  sourceIndex: number;
+  grabOffsetX: number;
+  index: number;
+  offsets: number[];
 }
 
 function blocksTabDrag(target: EventTarget | null): boolean {
@@ -50,15 +56,28 @@ function blocksTabDrag(target: EventTarget | null): boolean {
 }
 
 export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab }: TabsProps) {
-  // Id of the tab being dragged; null while no drag is in flight. The drop
-  // indicator tracks which edge of the hovered tab the drag would insert at.
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
+  // A drag never reorders `items` while it is in flight: it only paints CSS
+  // transforms, so the tab under the pointer keeps its DOM node and the
+  // neighbours it displaces can animate out of the way.
+  //
+  // `drag` drives that painting. `dragRef` mirrors it because the window pointer
+  // handlers must read the live placement without waiting for a render.
+  const [drag, setDrag] = useState<ActiveDrag | null>(null);
+  const [isTrackingPointer, setIsTrackingPointer] = useState(false);
+  const dragRef = useRef<ActiveDrag | null>(null);
+  const armedRef = useRef<ArmedDrag | null>(null);
+  const draggedRef = useRef(false);
+  const pointerXRef = useRef(0);
   const tablistRef = useRef<HTMLDivElement>(null);
-  const draggingIdRef = useRef<string | null>(null);
-  const lastLiveDropRef = useRef<string | null>(null);
   const edgeScrollSpeedRef = useRef(0);
   const edgeScrollFrameRef = useRef<number | null>(null);
+  const isDragging = drag !== null;
+
+  /** Viewport x of the strip's content origin, so x moves with `scrollLeft`. */
+  const contentOriginX = useCallback(() => {
+    const strip = tablistRef.current;
+    return strip ? strip.getBoundingClientRect().left - strip.scrollLeft : 0;
+  }, []);
 
   const stopEdgeScroll = useCallback(() => {
     edgeScrollSpeedRef.current = 0;
@@ -67,6 +86,29 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
       edgeScrollFrameRef.current = null;
     }
   }, []);
+
+  const paintDrag = useCallback(
+    (clientX: number) => {
+      const active = dragRef.current;
+      if (!active) return;
+
+      const { index, offsets } = planTabDragPlacement(
+        active.slots,
+        active.sourceIndex,
+        clientX - contentOriginX(),
+        active.grabOffsetX,
+      );
+      const unchanged =
+        index === active.index &&
+        offsets.every((offset, slot) => offset === active.offsets[slot]);
+      if (unchanged) return;
+
+      const next = { ...active, index, offsets };
+      dragRef.current = next;
+      setDrag(next);
+    },
+    [contentOriginX],
+  );
 
   const runEdgeScroll = useCallback(() => {
     const strip = tablistRef.current;
@@ -82,8 +124,11 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
       stopEdgeScroll();
       return;
     }
+    // Scrolling moved the content under a stationary pointer, so the slot the
+    // drag is aiming at has to be recomputed on every frame.
+    paintDrag(pointerXRef.current);
     edgeScrollFrameRef.current = window.requestAnimationFrame(runEdgeScroll);
-  }, [stopEdgeScroll]);
+  }, [paintDrag, stopEdgeScroll]);
 
   const updateEdgeScroll = useCallback(
     (clientX: number) => {
@@ -98,24 +143,12 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
       const rightDepth = EDGE_SCROLL_ZONE_PX - (rect.right - clientX);
       let speed = 0;
       if (leftDepth > 0 && strip.scrollLeft > 0) {
-        speed = -Math.max(
-          1,
-          Math.ceil(
-            Math.min(1, leftDepth / EDGE_SCROLL_ZONE_PX) *
-              EDGE_SCROLL_MAX_STEP_PX,
-          ),
-        );
+        speed = -edgeScrollStep(leftDepth);
       } else if (
         rightDepth > 0 &&
         strip.scrollLeft + strip.clientWidth < strip.scrollWidth
       ) {
-        speed = Math.max(
-          1,
-          Math.ceil(
-            Math.min(1, rightDepth / EDGE_SCROLL_ZONE_PX) *
-              EDGE_SCROLL_MAX_STEP_PX,
-          ),
-        );
+        speed = edgeScrollStep(rightDepth);
       }
 
       edgeScrollSpeedRef.current = speed;
@@ -128,137 +161,189 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
     [runEdgeScroll, stopEdgeScroll],
   );
 
-  const clearDragState = useCallback(() => {
-    draggingIdRef.current = null;
-    lastLiveDropRef.current = null;
-    setDraggingId(null);
-    setDropIndicator(null);
-    stopEdgeScroll();
-  }, [stopEdgeScroll]);
+  const commitDrag = useEffectEvent((sourceId: string, index: number) => {
+    onReorderTab?.(sourceId, index);
+  });
 
-  const requestLiveReorder = useCallback(
-    (sourceId: string, targetId: string | null, placeAfter: boolean) => {
-      if (!onReorderTab) return;
-      const dropKey = `${sourceId}\u0000${targetId ?? ''}\u0000${placeAfter ? 'after' : 'before'}`;
-      if (lastLiveDropRef.current === dropKey) return;
+  const finishDrag = useCallback(
+    (commit: boolean) => {
+      const active = dragRef.current;
+      armedRef.current = null;
+      dragRef.current = null;
+      stopEdgeScroll();
+      setIsTrackingPointer(false);
+      setDrag(null);
 
-      lastLiveDropRef.current = dropKey;
-      const reordered = reorderTabByDrag(items, sourceId, targetId, placeAfter);
-      const orderChanged = reordered.some((item, index) => item.id !== items[index]?.id);
-      if (orderChanged) {
-        onReorderTab(sourceId, targetId, placeAfter);
+      // Reordering and dropping the transforms land in the same render, so the
+      // displaced tabs are already sitting where the new order puts them.
+      if (active && commit && active.index !== active.sourceIndex) {
+        commitDrag(active.id, active.index);
       }
     },
-    [items, onReorderTab],
+    [stopEdgeScroll],
+  );
+
+  const startDrag = useCallback(
+    (clientX: number): boolean => {
+      const armed = armedRef.current;
+      const strip = tablistRef.current;
+      if (!armed || !strip) return false;
+
+      // Measured once: transforms do not affect layout, so these stay valid for
+      // the whole drag.
+      const origin = contentOriginX();
+      const slots = Array.from(
+        strip.querySelectorAll<HTMLElement>('[data-tab-id]'),
+      ).map((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          id: node.dataset.tabId ?? '',
+          left: rect.left - origin,
+          width: rect.width,
+        };
+      });
+      const sourceIndex = slots.findIndex((slot) => slot.id === armed.id);
+      if (slots.length < 2 || sourceIndex < 0) return false;
+
+      const active: ActiveDrag = {
+        ...armed,
+        slots,
+        sourceIndex,
+        grabOffsetX: armed.startClientX - origin - slots[sourceIndex].left,
+        index: sourceIndex,
+        offsets: slots.map(() => 0),
+      };
+      dragRef.current = active;
+      draggedRef.current = true;
+      setDrag(active);
+      paintDrag(clientX);
+      return true;
+    },
+    [contentOriginX, paintDrag],
   );
 
   useEffect(() => {
-    window.addEventListener('blur', clearDragState);
-    return () => {
-      window.removeEventListener('blur', clearDragState);
-      stopEdgeScroll();
+    if (!isTrackingPointer) return;
+
+    const handleMove = (event: PointerEvent) => {
+      const armed = armedRef.current;
+      if (!armed || event.pointerId !== armed.pointerId) return;
+      pointerXRef.current = event.clientX;
+
+      if (!dragRef.current) {
+        if (Math.abs(event.clientX - armed.startClientX) < DRAG_THRESHOLD_PX) return;
+        if (!startDrag(event.clientX)) {
+          finishDrag(false);
+          return;
+        }
+      } else {
+        paintDrag(event.clientX);
+      }
+      // Also checked on the move that starts the drag, so a gesture beginning in
+      // an edge zone scrolls right away.
+      updateEdgeScroll(event.clientX);
     };
-  }, [clearDragState, stopEdgeScroll]);
+    const commit = () => finishDrag(true);
+    const cancel = () => finishDrag(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cancel();
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', commit);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', cancel);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', commit);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', cancel);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [finishDrag, isTrackingPointer, paintDrag, startDrag, updateEdgeScroll]);
+
+  useEffect(() => {
+    if (!isDragging) return;
+    const { body } = document;
+    const previousCursor = body.style.cursor;
+    const previousUserSelect = body.style.userSelect;
+    body.style.cursor = 'grabbing';
+    body.style.userSelect = 'none';
+    return () => {
+      body.style.cursor = previousCursor;
+      body.style.userSelect = previousUserSelect;
+    };
+  }, [isDragging]);
+
+  const renderedIds = items.map((item) => item.id).join('\n');
+  useEffect(() => {
+    const active = dragRef.current;
+    // A tab opening or closing mid-drag invalidates the measured geometry.
+    if (active && active.slots.map((slot) => slot.id).join('\n') !== renderedIds) {
+      finishDrag(false);
+    }
+  }, [finishDrag, renderedIds]);
+
+  useEffect(() => () => stopEdgeScroll(), [stopEdgeScroll]);
 
   if (items.length === 0) return null;
-
-  const isAfterDrop = (event: DragEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return event.clientX > rect.left + rect.width / 2;
-  };
 
   return (
     <div
       ref={tablistRef}
       role="tablist"
       aria-label="Open documents"
-      onDragOver={(event) => {
-        const sourceId = draggingIdRef.current;
-        if (!onReorderTab || !sourceId) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
-        updateEdgeScroll(event.clientX);
-        if (!closestTabElement(event.target)) {
-          setDropIndicator({ id: null, after: true });
-          requestLiveReorder(sourceId, null, true);
-        }
-      }}
-      onDragLeave={(event) => {
-        const next = event.relatedTarget;
-        if (next instanceof Node && event.currentTarget.contains(next)) return;
-        setDropIndicator(null);
-        stopEdgeScroll();
-      }}
-      onDrop={(event) => {
-        const sourceId = draggingIdRef.current;
-        if (!onReorderTab || !sourceId || closestTabElement(event.target)) return;
-        event.preventDefault();
-        requestLiveReorder(sourceId, null, true);
-        clearDragState();
-      }}
       className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border bg-background"
     >
-      {items.map((item) => {
+      {items.map((item, index) => {
         const isActive = item.id === activeTabId;
+        const isDragged = drag?.id === item.id;
+        const offset = drag?.offsets[index] ?? 0;
         const baseTooltip = item.shortcutLabel
           ? `${item.name} (${item.shortcutLabel})`
           : item.name;
         const tooltip = onReorderTab
           ? `${baseTooltip} — Drag to reorder`
           : baseTooltip;
-        const indicator = dropIndicator?.id === item.id ? dropIndicator : null;
         return (
           <div
             key={item.id}
             data-tab-id={item.id}
-            data-drop-position={
-              indicator ? (indicator.after ? 'after' : 'before') : undefined
-            }
+            data-tab-dragging={isDragged ? '' : undefined}
             role="tab"
             aria-selected={isActive}
             tabIndex={isActive ? 0 : -1}
             title={tooltip}
-            draggable={onReorderTab !== undefined}
-            onDragStart={(event) => {
-              if (!onReorderTab) return;
-              if (blocksTabDrag(event.target)) {
-                event.preventDefault();
+            style={{
+              transform: offset === 0 ? undefined : `translateX(${offset}px)`,
+              transition:
+                isDragging && !isDragged
+                  ? `transform ${TAB_SLIDE_MS}ms ease-out`
+                  : undefined,
+            }}
+            onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
+              draggedRef.current = false;
+              if (!onReorderTab || event.button !== 0 || event.pointerType === 'touch') {
                 return;
               }
-              event.dataTransfer.effectAllowed = 'move';
-              // WebKit needs data set for native dragging to start. A private
-              // type prevents an internal id from being dropped into editors.
-              event.dataTransfer.setData(TAB_DRAG_DATA_TYPE, item.id);
-              draggingIdRef.current = item.id;
-              lastLiveDropRef.current = null;
-              setDraggingId(item.id);
+              if (blocksTabDrag(event.target)) return;
+              armedRef.current = {
+                id: item.id,
+                pointerId: event.pointerId,
+                startClientX: event.clientX,
+              };
+              pointerXRef.current = event.clientX;
+              setIsTrackingPointer(true);
             }}
-            onDragOver={(event) => {
-              const sourceId = draggingIdRef.current;
-              if (!onReorderTab || !sourceId) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = 'move';
-              updateEdgeScroll(event.clientX);
-              if (sourceId === item.id) {
-                setDropIndicator(null);
+            onClick={() => {
+              // The click that closes a drag gesture must not switch documents.
+              if (draggedRef.current) {
+                draggedRef.current = false;
                 return;
               }
-              const after = isAfterDrop(event);
-              setDropIndicator((prev) =>
-                prev?.id === item.id && prev.after === after ? prev : { id: item.id, after },
-              );
-              requestLiveReorder(sourceId, item.id, after);
+              onSelectTab(item.id);
             }}
-            onDrop={(event) => {
-              const sourceId = draggingIdRef.current;
-              if (!onReorderTab || !sourceId || sourceId === item.id) return;
-              event.preventDefault();
-              event.stopPropagation();
-              requestLiveReorder(sourceId, item.id, isAfterDrop(event));
-              clearDragState();
-            }}
-            onDragEnd={clearDragState}
-            onClick={() => onSelectTab(item.id)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
@@ -266,13 +351,12 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
               }
             }}
             className={cn(
-              'group relative flex max-w-[220px] shrink-0 cursor-grab select-none items-center gap-1.5 border-r border-border px-3 text-sm transition-colors hover:bg-accent/40 active:cursor-grabbing',
+              'group relative flex max-w-[220px] shrink-0 select-none items-center gap-1.5 border-r border-border px-3 text-sm',
+              onReorderTab && 'cursor-grab',
+              !isDragging && 'transition-colors hover:bg-accent/40',
               isActive && 'bg-accent text-accent-foreground',
-              draggingId === item.id && 'opacity-50',
-              indicator &&
-                (indicator.after
-                  ? 'shadow-[inset_-2px_0_0_var(--ring)]'
-                  : 'shadow-[inset_2px_0_0_var(--ring)]'),
+              isDragged && !isActive && 'bg-background',
+              isDragged && 'z-10 cursor-grabbing shadow-md',
             )}
           >
             {item.kind === 'settings' ? (
@@ -301,13 +385,8 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
             <button
               type="button"
               aria-label="Close tab"
-              draggable={false}
               data-no-tab-drag
-              onDragStart={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              onClick={(event: MouseEvent) => {
+              onClick={(event: ReactMouseEvent) => {
                 event.stopPropagation();
                 onCloseTab(item.id);
               }}
@@ -321,15 +400,12 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
           </div>
         );
       })}
-      <div
-        aria-hidden="true"
-        data-tab-drop-end
-        data-drop-position={dropIndicator?.id === null ? 'end' : undefined}
-        className={cn(
-          'h-full min-w-0 flex-1',
-          dropIndicator?.id === null && 'border-l-2 border-ring',
-        )}
-      />
     </div>
   );
+}
+
+/** Edge-scroll speed: faster the deeper the pointer sits in the edge zone. */
+function edgeScrollStep(depth: number): number {
+  const ratio = Math.min(1, depth / EDGE_SCROLL_ZONE_PX);
+  return Math.max(1, Math.ceil(ratio * EDGE_SCROLL_MAX_STEP_PX));
 }

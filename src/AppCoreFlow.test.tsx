@@ -1,7 +1,6 @@
 import {
   act,
   cleanup,
-  createEvent,
   fireEvent,
   render,
   screen,
@@ -101,31 +100,38 @@ vi.mock('@tauri-apps/api/core', () => ({
 const LINE_WRAPPING_SENTINEL = '__line_wrapping__';
 const CORE_FLOW_TIMEOUT_MS = 15_000;
 
-function dataTransfer() {
-  const values = new Map<string, string>();
-  return {
-    effectAllowed: '',
-    dropEffect: '',
-    get types() {
-      return [...values.keys()];
-    },
-    setData: vi.fn((type: string, value: string) => {
-      values.set(type, value);
-    }),
-    getData: vi.fn((type: string) => values.get(type) ?? ''),
-  };
+const TAB_WIDTH = 100;
+
+/**
+ * Pins the tab strip geometry a pointer drag reads, which jsdom otherwise
+ * reports as zero: equal tabs of `TAB_WIDTH` packed from content x=0.
+ */
+function layoutTabStrip() {
+  const strip = screen.getByRole('tablist', { name: /open documents/i });
+  vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    right: 400,
+    width: 400,
+  } as DOMRect);
+  screen.getAllByRole('tab').forEach((node, index) => {
+    vi.spyOn(node, 'getBoundingClientRect').mockReturnValue({
+      left: index * TAB_WIDTH,
+      right: (index + 1) * TAB_WIDTH,
+      width: TAB_WIDTH,
+    } as DOMRect);
+  });
 }
 
-function fireDragEventAt(
-  node: Element,
-  type: 'dragOver' | 'drop',
-  clientX: number,
-  transfer: ReturnType<typeof dataTransfer>,
-) {
-  const event = createEvent[type](node);
-  Object.defineProperty(event, 'clientX', { value: clientX });
-  Object.defineProperty(event, 'dataTransfer', { value: transfer });
-  fireEvent(node, event);
+/** Drags the tab at `fromIndex` so its centre lands on `toClientX`. */
+function dragTabTo(node: Element, fromIndex: number, toClientX: number) {
+  fireEvent.pointerDown(node, {
+    button: 0,
+    pointerId: 1,
+    pointerType: 'mouse',
+    clientX: fromIndex * TAB_WIDTH + TAB_WIDTH / 2,
+  });
+  fireEvent.pointerMove(window, { pointerId: 1, clientX: toClientX });
+  fireEvent.pointerUp(window, { pointerId: 1 });
 }
 
 vi.mock('@uiw/react-codemirror', () => ({
@@ -576,11 +582,9 @@ describe('App core Markdown editing flow', () => {
     await waitFor(() => expect(alpha).toHaveAttribute('aria-selected', 'true'));
     saveOpenTabsMock.mockClear();
 
-    const strip = screen.getByRole('tablist', { name: /open documents/i });
-    const transfer = dataTransfer();
-    fireEvent.dragStart(beta, { dataTransfer: transfer });
-    fireDragEventAt(strip, 'dragOver', 640, transfer);
-    fireDragEventAt(strip, 'drop', 640, transfer);
+    layoutTabStrip();
+    // Drag beta past gamma's midpoint so it lands in the trailing slot.
+    dragTabTo(beta, 1, 400);
 
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       expect.stringContaining('alpha.md'),
