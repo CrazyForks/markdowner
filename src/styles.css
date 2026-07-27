@@ -275,6 +275,10 @@ img.ProseMirror-separator {
   .markdown-surface pre code {
     @apply bg-transparent p-0;
   }
+  .editor-pane-wysiwyg .notion-editor-content .ProseMirror :not(pre) > code {
+    font-size: inherit;
+    line-height: inherit;
+  }
   .markdown-surface table {
     @apply w-full border-collapse my-4;
   }

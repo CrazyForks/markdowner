@@ -44,6 +44,17 @@ describe('editor word wrap stylesheet', () => {
   });
 });
 
+describe('WYSIWYG inline code typography stylesheet', () => {
+  it('inherits the surrounding text size and line height', () => {
+    const inlineCodeRule = ruleBody(
+      '.editor-pane-wysiwyg .notion-editor-content .ProseMirror :not(pre) > code',
+    );
+
+    expect(inlineCodeRule).toContain('font-size: inherit;');
+    expect(inlineCodeRule).toContain('line-height: inherit;');
+  });
+});
+
 describe('WYSIWYG code block wrapping stylesheet', () => {
   it('keeps ordinary and Mermaid source code unwrapped when the WYSIWYG toggle is off', () => {
     const selectors = [
