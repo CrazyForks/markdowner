@@ -24,6 +24,7 @@ The app is also designed to work well as the editor that coding agents and comma
 - **Writing ergonomics**: find and replace, minimap, word wrap controls, wrap guide, focus mode, typewriter mode, table editing, code blocks, checklists, and image/link support.
 - **Safer file writes**: atomic saves, dirty-close confirmation, read-only file handling, and external-change detection with reload/keep-local flows.
 - **Customizable reading and editing**: built-in light/dark themes, system-theme following, imported CSS themes, editor font controls, table density, and code-block theme settings.
+- **HTML and PDF export**: preview and export the current document or workspace with configurable paper, margins, typography, colors, page furniture, and code-block styling.
 - **Agent-friendly CLI integration**: install the `mdner` command and set `EDITOR` / `VISUAL` so terminal tools can open Markdowner directly.
 - **Release-aware app**: update checks read GitHub Releases, and the public release workflow builds a universal macOS DMG.
 
@@ -206,13 +207,12 @@ docs/                        Architecture and Markdown coverage notes
 
 ## Current Status
 
-Markdowner is usable today as a macOS desktop Markdown editor, with the core writing, navigation, settings, local build, and release paths in place.
+Markdowner is usable today as a macOS desktop Markdown editor, with the core writing, navigation, settings, HTML/PDF export, local build, and release paths in place.
 
 Still planned:
 
 - Developer ID signing and notarization
 - Windows build, test, and release validation
-- HTML/PDF/print export
 - richer image asset workflows
 - automated desktop E2E, screenshot regression, and accessibility gates
 
