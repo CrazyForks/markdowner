@@ -248,16 +248,24 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') cancel();
     };
+    // WebKit begins a document text selection the moment the press turns into a
+    // drag, which paints a growing selection across the editor while the tab
+    // moves. The body `user-select` override lands a render too late to stop it.
+    const blockSelection = (event: Event) => event.preventDefault();
 
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', commit);
-    window.addEventListener('pointercancel', cancel);
+    // Capture phase on the document: a bubble-phase handler elsewhere in the app
+    // can stopPropagation() a move and strand the drag mid-gesture.
+    document.addEventListener('pointermove', handleMove, true);
+    document.addEventListener('pointerup', commit, true);
+    document.addEventListener('pointercancel', cancel, true);
+    document.addEventListener('selectstart', blockSelection);
     window.addEventListener('blur', cancel);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', commit);
-      window.removeEventListener('pointercancel', cancel);
+      document.removeEventListener('pointermove', handleMove, true);
+      document.removeEventListener('pointerup', commit, true);
+      document.removeEventListener('pointercancel', cancel, true);
+      document.removeEventListener('selectstart', blockSelection);
       window.removeEventListener('blur', cancel);
       window.removeEventListener('keydown', handleKeyDown);
     };

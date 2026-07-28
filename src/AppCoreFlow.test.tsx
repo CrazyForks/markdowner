@@ -130,8 +130,8 @@ function dragTabTo(node: Element, fromIndex: number, toClientX: number) {
     pointerType: 'mouse',
     clientX: fromIndex * TAB_WIDTH + TAB_WIDTH / 2,
   });
-  fireEvent.pointerMove(window, { pointerId: 1, clientX: toClientX });
-  fireEvent.pointerUp(window, { pointerId: 1 });
+  fireEvent.pointerMove(document, { pointerId: 1, clientX: toClientX });
+  fireEvent.pointerUp(document, { pointerId: 1 });
 }
 
 vi.mock('@uiw/react-codemirror', () => ({

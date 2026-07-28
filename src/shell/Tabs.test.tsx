@@ -68,11 +68,11 @@ function pressTab(index: number, id: string) {
 }
 
 function movePointer(clientX: number) {
-  fireEvent.pointerMove(window, { pointerId: 1, clientX });
+  fireEvent.pointerMove(document, { pointerId: 1, clientX });
 }
 
 function releasePointer() {
-  fireEvent.pointerUp(window, { pointerId: 1 });
+  fireEvent.pointerUp(document, { pointerId: 1 });
 }
 
 describe('Tabs drag reordering', () => {
@@ -190,6 +190,26 @@ describe('Tabs drag reordering', () => {
     expect(onSelectTab).not.toHaveBeenCalled();
   });
 
+  it('blocks the text selection WebKit starts when a press becomes a drag', () => {
+    renderTabs(['a', 'b', 'c']);
+    layoutStrip();
+
+    const idle = new Event('selectstart', { bubbles: true, cancelable: true });
+    document.dispatchEvent(idle);
+    expect(idle.defaultPrevented).toBe(false);
+
+    pressTab(0, 'a');
+    movePointer(160);
+    const during = new Event('selectstart', { bubbles: true, cancelable: true });
+    document.dispatchEvent(during);
+    expect(during.defaultPrevented).toBe(true);
+
+    releasePointer();
+    const after = new Event('selectstart', { bubbles: true, cancelable: true });
+    document.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+
   it('selects a tab on a plain click', () => {
     const onSelectTab = vi.fn();
     renderTabs(['a', 'b', 'c'], { onSelectTab });
@@ -237,7 +257,7 @@ describe('Tabs drag reordering', () => {
 
     pressTab(0, 'a');
     movePointer(160);
-    fireEvent.pointerCancel(window, { pointerId: 1 });
+    fireEvent.pointerCancel(document, { pointerId: 1 });
 
     expect(onReorderTab).not.toHaveBeenCalled();
     expect(tab('a').style.transform).toBe('');
@@ -278,8 +298,8 @@ describe('Tabs drag reordering', () => {
       pointerType: 'touch',
       clientX: 50,
     });
-    fireEvent.pointerMove(window, { pointerId: 2, clientX: 280 });
-    fireEvent.pointerUp(window, { pointerId: 2 });
+    fireEvent.pointerMove(document, { pointerId: 2, clientX: 280 });
+    fireEvent.pointerUp(document, { pointerId: 2 });
 
     expect(onReorderTab).not.toHaveBeenCalled();
   });
