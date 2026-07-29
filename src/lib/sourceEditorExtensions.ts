@@ -7,7 +7,9 @@ import {
   type DecorationSet,
 } from '@uiw/react-codemirror';
 
+import { createSourceInlineCodeExtension } from './sourceInlineCode';
 import { createSourceLinkClickExtension } from './sourceLinkClick';
+import { createSourceSkillCompletionExtension } from './sourceSkillCompletion';
 
 export type SourceFindHighlightSpec = {
   matches: ReadonlyArray<{ start: number; end: number }>;
@@ -82,14 +84,18 @@ interface SourceEditorExtensionOptions {
   editorLineWrap: boolean;
   focusModeEnabled: boolean;
   typewriterModeEnabled: boolean;
+  skillNames?: ReadonlySet<string>;
   onViewportChange: (scrollElement: HTMLElement) => void;
   onTypewriterChange: (view: EditorView) => void;
 }
+
+const EMPTY_SKILL_NAMES = new Set<string>();
 
 export function buildSourceEditorExtensions({
   editorLineWrap,
   focusModeEnabled,
   typewriterModeEnabled,
+  skillNames = EMPTY_SKILL_NAMES,
   onViewportChange,
   onTypewriterChange,
 }: SourceEditorExtensionOptions): unknown[] {
@@ -97,6 +103,8 @@ export function buildSourceEditorExtensions({
     markdown(),
     sourceFindHighlightField,
     createSourceLinkClickExtension(),
+    createSourceInlineCodeExtension(),
+    createSourceSkillCompletionExtension(skillNames),
     ...(editorLineWrap ? [EditorView.lineWrapping] : []),
     ...(focusModeEnabled ? [sourceFocusModeExtension] : []),
     ...(typewriterModeEnabled ? [sourceTypewriterModeExtension] : []),

@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => {
   return {
     markdown: vi.fn(() => 'markdown-extension'),
     createSourceLinkClickExtension: vi.fn(() => 'source-link-click-extension'),
+    createSourceInlineCodeExtension: vi.fn(() => 'source-inline-code-extension'),
+    createSourceSkillCompletionExtension: vi.fn(
+      () => 'source-skill-completion-extension',
+    ),
     lineWrapping: 'line-wrapping-extension',
     theme: vi.fn(() => `theme-extension-${++themeIndex}`),
     updateListenerOf: vi.fn((listener: unknown) => ({
@@ -50,6 +54,15 @@ vi.mock('./sourceLinkClick', () => ({
   createSourceLinkClickExtension: mocks.createSourceLinkClickExtension,
 }));
 
+vi.mock('./sourceInlineCode', () => ({
+  createSourceInlineCodeExtension: mocks.createSourceInlineCodeExtension,
+}));
+
+vi.mock('./sourceSkillCompletion', () => ({
+  createSourceSkillCompletionExtension:
+    mocks.createSourceSkillCompletionExtension,
+}));
+
 import {
   buildSourceEditorExtensions,
   sourceFocusModeExtension,
@@ -65,16 +78,23 @@ describe('buildSourceEditorExtensions', () => {
       editorLineWrap: true,
       focusModeEnabled: true,
       typewriterModeEnabled: true,
+      skillNames: new Set(['goal']),
       onViewportChange,
       onTypewriterChange,
     });
 
     expect(mocks.markdown).toHaveBeenCalledTimes(1);
     expect(mocks.createSourceLinkClickExtension).toHaveBeenCalledWith();
+    expect(mocks.createSourceInlineCodeExtension).toHaveBeenCalledWith();
+    expect(mocks.createSourceSkillCompletionExtension).toHaveBeenCalledWith(
+      new Set(['goal']),
+    );
     expect(extensions).toEqual([
       'markdown-extension',
       'find-highlight-field',
       'source-link-click-extension',
+      'source-inline-code-extension',
+      'source-skill-completion-extension',
       mocks.lineWrapping,
       sourceFocusModeExtension,
       sourceTypewriterModeExtension,
@@ -92,6 +112,7 @@ describe('buildSourceEditorExtensions', () => {
       editorLineWrap: false,
       focusModeEnabled: false,
       typewriterModeEnabled: false,
+      skillNames: new Set(),
       onViewportChange,
       onTypewriterChange,
     });
@@ -109,6 +130,8 @@ describe('buildSourceEditorExtensions', () => {
       'markdown-extension',
       'find-highlight-field',
       'source-link-click-extension',
+      'source-inline-code-extension',
+      'source-skill-completion-extension',
       expect.objectContaining({ kind: 'update-listener' }),
     ]);
 
