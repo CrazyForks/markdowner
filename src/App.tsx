@@ -245,6 +245,11 @@ import {
   resolveOutlinePanelSizing,
   saveSettings,
 } from './lib/settings';
+import {
+  applyInlineStylePalette,
+  resolveInlineStylePalette,
+  resolveInlineStyleTone,
+} from './lib/inlineStylePalette';
 import { syncAnalytics } from './lib/analytics';
 import { resolveShellBindings } from './lib/keymap';
 import { loadSkillTokenNames } from './lib/skillTokens';
@@ -530,6 +535,9 @@ export default function App() {
   const [manualUpdateCheckInfo, setManualUpdateCheckInfo] = useState<UpdateInfo | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [systemThemeKind, setSystemThemeKind] = useState<
+    Exclude<ThemeKind, 'CustomCss'>
+  >(() => resolveOsTheme());
   const [skillTokenNames, setSkillTokenNames] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -3188,12 +3196,14 @@ export default function App() {
     }
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleOsThemeChange = async () => {
+      const nextSystemThemeKind = resolveOsTheme();
+      setSystemThemeKind(nextSystemThemeKind);
       if (!settings.themeFollowSystem) {
         return;
       }
       const requestId = nextThemeRequest();
       try {
-        const next = await setTheme(resolveOsTheme());
+        const next = await setTheme(nextSystemThemeKind);
         applyThemeSnapshotIfCurrent(requestId, next);
       } catch (error) {
         if (isThemeRequestStale(requestId)) return;
@@ -3210,6 +3220,19 @@ export default function App() {
     applyThemeSelection(snapshot.theme.kind);
     applyImportedStylesheet(snapshot);
   }, [snapshot]);
+
+  const inlineStyleTone = resolveInlineStyleTone(
+    snapshot.theme.kind,
+    systemThemeKind,
+  );
+  const inlineStylePalette = useMemo(
+    () => resolveInlineStylePalette(settings, inlineStyleTone),
+    [inlineStyleTone, settings],
+  );
+
+  useEffect(() => {
+    applyInlineStylePalette(document.documentElement, inlineStylePalette);
+  }, [inlineStylePalette]);
 
   // A live command-palette preview overrides the saved theme. Either way the
   // value is resolved here (not when the preview is set), so the light/dark sync
@@ -3538,6 +3561,7 @@ export default function App() {
         editorLineWrap: settings.editorLineWrap,
         focusModeEnabled: settings.focusModeEnabled,
         typewriterModeEnabled: settings.typewriterModeEnabled,
+        skillNames: skillTokenNames,
         onViewportChange: handleSourceEditorViewportChange,
         onTypewriterChange: handleSourceEditorTypewriterChange,
       }).concat(
@@ -6326,7 +6350,11 @@ export default function App() {
         tableDensity={settings.tableDensity}
         tableViewMode={settings.tableViewMode}
         editorContent={
-          <WysiwygEditorChrome editor={editor} enabled={currentMode === 'Wysiwyg'} />
+          <WysiwygEditorChrome
+            editor={editor}
+            enabled={currentMode === 'Wysiwyg'}
+            skillNames={skillTokenNames}
+          />
         }
         sourceEditor={
           <SourceEditorPane
@@ -6345,6 +6373,8 @@ export default function App() {
           <MarkdownPreviewPane
             source={previewSource}
             activeDocumentPath={snapshot.activeDocumentPath}
+            skillNames={skillTokenNames}
+            highlightSkillTokens={settings.highlightSkillTokens}
           />
         }
       />

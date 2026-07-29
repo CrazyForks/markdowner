@@ -7,6 +7,7 @@ import {
   normalizeInlineStyleColor,
   resetInlineStyleTone,
   resolveInlineStylePalette,
+  resolveInlineStyleTone,
 } from './inlineStylePalette';
 
 describe('inline style palettes', () => {
@@ -84,5 +85,12 @@ describe('inline style palettes', () => {
     expect(
       document.documentElement.style.getPropertyValue('--inline-code-background-color'),
     ).toBe(palette.inlineCodeBackgroundColor);
+  });
+
+  it('resolves custom themes through the current system theme', () => {
+    expect(resolveInlineStyleTone('BuiltInLight', 'BuiltInDark')).toBe('light');
+    expect(resolveInlineStyleTone('BuiltInDark', 'BuiltInLight')).toBe('dark');
+    expect(resolveInlineStyleTone('CustomCss', 'BuiltInDark')).toBe('dark');
+    expect(resolveInlineStyleTone('CustomCss', 'BuiltInLight')).toBe('light');
   });
 });

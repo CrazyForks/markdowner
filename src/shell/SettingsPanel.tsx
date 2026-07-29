@@ -57,6 +57,8 @@ import {
 } from '@/lib/settings';
 import { openExternalUrlInNewWindow } from '@/lib/desktop';
 import type { UpdateInfo } from '@/lib/updateCheck';
+import type { InlineStyleTone } from '@/lib/inlineStylePalette';
+import { InlineStyleColorSettings } from './InlineStyleColorSettings';
 import { PdfPaperControls } from './PdfPaperControls';
 
 export type { Settings } from '@/lib/settings';
@@ -70,6 +72,8 @@ export interface SettingsPanelProps {
   currentTheme: ThemeChoice;
   /** Switches between system tracking and an explicit light/dark theme. */
   onThemeChange: (theme: ThemeChoice) => void;
+  /** Effective app tone used when the color editor first opens. */
+  inlineStyleTone?: InlineStyleTone;
   updateInfo?: UpdateInfo | null;
   updateActionLabel?: string;
   updateBusy?: boolean;
@@ -99,6 +103,7 @@ export function SettingsPanel({
   onSettingsChange,
   currentTheme,
   onThemeChange,
+  inlineStyleTone = currentTheme === 'dark' ? 'dark' : 'light',
   updateInfo = null,
   updateActionLabel = 'View release',
   updateBusy = false,
@@ -1012,6 +1017,12 @@ export function SettingsPanel({
               onCheckedChange={(checked) => handleSettingChange('highlightSkillTokens', checked)}
             />
           </div>
+
+          <InlineStyleColorSettings
+            settings={settings}
+            onSettingsChange={onSettingsChange}
+            defaultTone={inlineStyleTone}
+          />
 
           <div className={inputFieldClass}>
             <Label htmlFor="wrap-column" className="flex flex-col items-start gap-0.5 text-left text-sm">

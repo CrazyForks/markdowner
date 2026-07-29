@@ -269,6 +269,15 @@ vi.mock('./lib/sourceSkillHighlight', () => ({
   createSourceSkillHighlightExtension: sourceSkillHighlightMock.create,
 }));
 
+const sourceSkillCompletionMock = vi.hoisted(() => ({
+  extension: '__skill_completion__',
+  create: vi.fn(() => '__skill_completion__'),
+}));
+
+vi.mock('./lib/sourceSkillCompletion', () => ({
+  createSourceSkillCompletionExtension: sourceSkillCompletionMock.create,
+}));
+
 vi.mock('@tiptap/react', () => ({
   EditorContent: ({ editor }: { editor: any }) => (
     <div
@@ -306,6 +315,11 @@ vi.mock('@uiw/react-codemirror', () => ({
       }
       data-skill-highlight={
         Array.isArray(extensions) && extensions.includes(sourceSkillHighlightMock.extension)
+          ? 'true'
+          : 'false'
+      }
+      data-skill-completion={
+        Array.isArray(extensions) && extensions.includes(sourceSkillCompletionMock.extension)
           ? 'true'
           : 'false'
       }
@@ -8625,7 +8639,11 @@ describe('App recent documents', () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('list_skill_names');
       expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'true');
+      expect(sourceEditor).toHaveAttribute('data-skill-completion', 'true');
       expect(sourceSkillHighlightMock.create).toHaveBeenCalledWith(
+        new Set(['goal', 'git-commit']),
+      );
+      expect(sourceSkillCompletionMock.create).toHaveBeenCalledWith(
         new Set(['goal', 'git-commit']),
       );
       expect(
@@ -8666,6 +8684,10 @@ describe('App recent documents', () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('list_skill_names');
       expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'false');
+      expect(sourceEditor).toHaveAttribute('data-skill-completion', 'true');
+      expect(sourceSkillCompletionMock.create).toHaveBeenCalledWith(
+        new Set(['goal']),
+      );
     });
   }, 10_000);
 
@@ -8809,6 +8831,71 @@ describe('App recent documents', () => {
       expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'false');
     });
   }, 10_000);
+
+  it('persists inline style colors and applies the active theme palette immediately', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          skillTokenDarkTextColor: '#112233',
+          skillTokenDarkBackgroundColor: '#445566',
+          inlineCodeDarkTextColor: '#778899',
+          inlineCodeDarkBackgroundColor: '#AABBCC',
+        };
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'colors.md',
+        activeDocumentPath: '/tmp/project/colors.md',
+        activeDocumentSource: 'Run /goal and `code`',
+        mode: 'Editor',
+        theme: {
+          kind: 'BuiltInDark',
+          stylesheet: null,
+          stylesheetPath: null,
+        },
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue(
+          '--skill-token-text-color',
+        ),
+      ).toBe('#112233');
+      expect(
+        document.documentElement.style.getPropertyValue(
+          '--inline-code-background-color',
+        ),
+      ).toBe('#AABBCC');
+    });
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+    const dialog = await screen.findByTestId('settings-panel');
+    fireEvent.change(
+      within(dialog).getByLabelText('Skill Token Dark Text'),
+      { target: { value: '#123456' } },
+    );
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: expect.objectContaining({
+          skillTokenDarkTextColor: '#123456',
+        }),
+      });
+      expect(
+        document.documentElement.style.getPropertyValue(
+          '--skill-token-text-color',
+        ),
+      ).toBe('#123456');
+    });
+  }, 20_000);
 
   it('persists Word Break Keep All changes from the Settings dialog through save_settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {

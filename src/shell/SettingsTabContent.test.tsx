@@ -11,6 +11,7 @@ type SettingsPanelMockProps = {
   onSettingsChange: (settings: Settings) => void;
   currentTheme: ThemeChoice;
   onThemeChange: (theme: ThemeChoice) => void;
+  inlineStyleTone: 'light' | 'dark';
 };
 
 vi.mock('./SettingsPanel', () => ({
@@ -19,10 +20,12 @@ vi.mock('./SettingsPanel', () => ({
     onSettingsChange,
     currentTheme,
     onThemeChange,
+    inlineStyleTone,
   }: SettingsPanelMockProps) => (
     <section
       data-testid="settings-panel"
       data-current-theme={currentTheme}
+      data-inline-style-tone={inlineStyleTone}
       data-font-size={String(settings.editorFontSize)}
     >
       <button
@@ -93,6 +96,21 @@ describe('SettingsTabContent', () => {
     });
     expect(screen.getByTestId('settings-panel')).toHaveAttribute(
       'data-current-theme',
+      'light',
+    );
+  });
+
+  it('passes the effective built-in tone to inline style controls', () => {
+    renderSettingsTab({ themeKind: 'BuiltInDark' });
+    expect(screen.getByTestId('settings-panel')).toHaveAttribute(
+      'data-inline-style-tone',
+      'dark',
+    );
+
+    cleanup();
+    renderSettingsTab({ themeKind: 'BuiltInLight' });
+    expect(screen.getByTestId('settings-panel')).toHaveAttribute(
+      'data-inline-style-tone',
       'light',
     );
   });

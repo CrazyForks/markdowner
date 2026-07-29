@@ -2,6 +2,8 @@ import type { ThemeKind } from '@/lib/desktop';
 import type { DefaultMdHandlerStatus } from '@/lib/defaultApp';
 import type { Settings } from '@/lib/settings';
 import type { UpdateInfo } from '@/lib/updateCheck';
+import { resolveInlineStyleTone } from '@/lib/inlineStylePalette';
+import { resolveOsTheme } from '@/lib/themeScope';
 
 import { SettingsPanel, type ThemeChoice } from './SettingsPanel';
 
@@ -55,6 +57,7 @@ export function SettingsTabContent({
       onSettingsChange={onSettingsChange}
       currentTheme={currentTheme}
       onThemeChange={handleThemeChange}
+      inlineStyleTone={resolveInlineStyleTone(themeKind, resolveOsTheme())}
       updateInfo={updateInfo}
       updateActionLabel={updateActionLabel}
       updateBusy={updateBusy}

@@ -135,6 +135,19 @@ describe('SettingsPanel update section', () => {
     });
   });
 
+  it('renders theme-specific skill-token and inline-code color controls', () => {
+    renderPanel({ inlineStyleTone: 'dark' });
+
+    expect(screen.getByTestId('inline-style-color-settings')).toHaveAttribute(
+      'data-tone',
+      'dark',
+    );
+    expect(screen.getByText('Skill Token')).toBeInTheDocument();
+    expect(screen.getByText('Inline Code')).toBeInTheDocument();
+    expect(screen.getByLabelText('Skill Token Dark Text')).toBeInTheDocument();
+    expect(screen.getByLabelText('Inline Code Dark Background')).toBeInTheDocument();
+  });
+
   it('shows the diagnostics log path and opens the log file', async () => {
     renderPanel();
 

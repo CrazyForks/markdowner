@@ -1,4 +1,5 @@
 import type { Settings } from './settings';
+import type { ThemeKind } from './desktop';
 
 export type InlineStyleTone = 'light' | 'dark';
 
@@ -25,6 +26,15 @@ export type InlineStyleColorSettings = {
 };
 
 const HEX_COLOR = /^#[0-9A-F]{6}$/i;
+
+export function resolveInlineStyleTone(
+  themeKind: ThemeKind,
+  systemThemeKind: Exclude<ThemeKind, 'CustomCss'>,
+): InlineStyleTone {
+  const resolvedThemeKind =
+    themeKind === 'CustomCss' ? systemThemeKind : themeKind;
+  return resolvedThemeKind === 'BuiltInDark' ? 'dark' : 'light';
+}
 
 export function normalizeInlineStyleColor(value: unknown, fallback: string): string {
   return typeof value === 'string' && HEX_COLOR.test(value)

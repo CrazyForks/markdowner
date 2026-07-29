@@ -21,7 +21,7 @@ export function applyThemeSelection(themeKind: ThemeKind, doc: Document = docume
   doc.documentElement.dataset.theme = themeKind;
 }
 
-export function resolveOsTheme(): ThemeKind {
+export function resolveOsTheme(): Exclude<ThemeKind, 'CustomCss'> {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return 'BuiltInDark';
   }
