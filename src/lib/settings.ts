@@ -77,6 +77,11 @@ export interface Settings {
   editorWordBreakKeepAll: boolean;
   /** Wrap editable code blocks in WYSIWYG mode only. */
   wysiwygCodeBlockWrap: boolean;
+  /**
+   * Highlight known Claude Code / Codex skill tokens (`/name`, `$name`)
+   * like inline code in both editors.
+   */
+  highlightSkillTokens: boolean;
   outlineFontSize: number;
   outlineRowSpacing: number;
   defaultMode: 'Editor' | 'Wysiwyg' | 'SplitView';
@@ -208,6 +213,7 @@ export const DEFAULT_SETTINGS: Settings = {
   editorShowWrapLine: true,
   editorWordBreakKeepAll: true,
   wysiwygCodeBlockWrap: false,
+  highlightSkillTokens: true,
   outlineFontSize: 12,
   outlineRowSpacing: 0,
   defaultMode: 'Wysiwyg',
@@ -416,6 +422,9 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   }
   if (typeof merged.wysiwygCodeBlockWrap !== 'boolean') {
     merged.wysiwygCodeBlockWrap = DEFAULT_SETTINGS.wysiwygCodeBlockWrap;
+  }
+  if (typeof merged.highlightSkillTokens !== 'boolean') {
+    merged.highlightSkillTokens = DEFAULT_SETTINGS.highlightSkillTokens;
   }
   if (typeof merged.focusModeEnabled !== 'boolean') {
     merged.focusModeEnabled = DEFAULT_SETTINGS.focusModeEnabled;

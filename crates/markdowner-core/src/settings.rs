@@ -12,6 +12,14 @@ where
     Ok(value.as_bool().unwrap_or(false))
 }
 
+fn deserialize_bool_or_true<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_bool().unwrap_or(true))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -26,6 +34,10 @@ pub struct Settings {
     pub editor_word_break_keep_all: bool,
     #[serde(deserialize_with = "deserialize_bool_or_false")]
     pub wysiwyg_code_block_wrap: bool,
+    /// Highlight known Claude Code / Codex skill tokens (`/name`, `$name`)
+    /// like inline code in both editors.
+    #[serde(deserialize_with = "deserialize_bool_or_true")]
+    pub highlight_skill_tokens: bool,
     pub outline_font_size: u32,
     pub outline_row_spacing: u32,
     pub default_mode: EditorMode,
@@ -75,6 +87,7 @@ impl Default for Settings {
             editor_show_wrap_line: true,
             editor_word_break_keep_all: true,
             wysiwyg_code_block_wrap: false,
+            highlight_skill_tokens: true,
             outline_font_size: 12,
             outline_row_spacing: 0,
             default_mode: EditorMode::Wysiwyg,
@@ -254,6 +267,36 @@ mod tests {
             serde_json::from_str(malformed).expect("malformed wrap value should still parse");
 
         assert!(!parsed.wysiwyg_code_block_wrap);
+        assert!(parsed.auto_save);
+        assert_eq!(parsed.editor_font_size, 18);
+    }
+
+    #[test]
+    fn highlight_skill_tokens_defaults_on_and_round_trips() {
+        let legacy = r#"{"autoSave":true,"editorLineWrap":true}"#;
+        let parsed: Settings = serde_json::from_str(legacy).expect("legacy settings parse");
+        assert!(
+            parsed.highlight_skill_tokens,
+            "missing highlightSkillTokens should default to true"
+        );
+
+        for expected in [true, false] {
+            let json = serde_json::json!({ "highlightSkillTokens": expected });
+            let parsed: Settings = serde_json::from_value(json).expect("highlight setting parse");
+            assert_eq!(parsed.highlight_skill_tokens, expected);
+            let value = serde_json::to_value(parsed).expect("serialize settings");
+            assert_eq!(value["highlightSkillTokens"], expected);
+        }
+    }
+
+    #[test]
+    fn highlight_skill_tokens_malformed_value_defaults_field_only() {
+        let malformed =
+            r#"{"autoSave":true,"editorFontSize":18,"highlightSkillTokens":"false"}"#;
+        let parsed: Settings =
+            serde_json::from_str(malformed).expect("malformed highlight value should still parse");
+
+        assert!(parsed.highlight_skill_tokens);
         assert!(parsed.auto_save);
         assert_eq!(parsed.editor_font_size, 18);
     }

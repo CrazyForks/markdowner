@@ -393,3 +393,34 @@ describe('WYSIWYG code block wrap setting', () => {
     ).toEqual(['wysiwygCodeBlockWrap']);
   });
 });
+
+describe('skill token highlight setting', () => {
+  it('defaults to on', () => {
+    expect(DEFAULT_SETTINGS.highlightSkillTokens).toBe(true);
+  });
+
+  it('normalizes malformed values before saving and preserves booleans', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValueOnce({ highlightSkillTokens: 'false' });
+    const malformed = await loadSettings();
+    expect(malformed.highlightSkillTokens).toBe(true);
+
+    invokeMock.mockResolvedValueOnce(undefined);
+    await saveSettings(malformed);
+    expect(invokeMock).toHaveBeenLastCalledWith('save_settings', {
+      settings: expect.objectContaining({ highlightSkillTokens: true }),
+    });
+
+    invokeMock.mockResolvedValueOnce({ highlightSkillTokens: false });
+    expect((await loadSettings()).highlightSkillTokens).toBe(false);
+  });
+
+  it('tracks the preference as a changed setting', () => {
+    expect(
+      getChangedSettingsKeys(DEFAULT_SETTINGS, {
+        ...DEFAULT_SETTINGS,
+        highlightSkillTokens: false,
+      }),
+    ).toEqual(['highlightSkillTokens']);
+  });
+});
