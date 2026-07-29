@@ -84,4 +84,43 @@ describe('MarkdownPreviewPane', () => {
       'https://img.shields.io/badge/license-MIT-2ea44f',
     );
   });
+
+  it('highlights known skill tokens outside inline and fenced code', () => {
+    const { container } = render(
+      <MarkdownPreviewPane
+        source={[
+          'Run /goal and `$git-commit`.',
+          '',
+          '```sh',
+          '/goal',
+          '```',
+          '',
+          'Then $git-commit.',
+        ].join('\n')}
+        skillNames={new Set(['goal', 'git-commit'])}
+        highlightSkillTokens
+      />,
+    );
+
+    const tokens = container.querySelectorAll('.preview-skill-token');
+    expect(tokens).toHaveLength(2);
+    expect([...tokens].map((token) => token.textContent)).toEqual([
+      '/goal',
+      '$git-commit',
+    ]);
+    expect(container.querySelector('code .preview-skill-token')).toBeNull();
+    expect(container.querySelector('pre .preview-skill-token')).toBeNull();
+  });
+
+  it('omits preview token spans when skill highlighting is disabled', () => {
+    const { container } = render(
+      <MarkdownPreviewPane
+        source="Run /goal"
+        skillNames={new Set(['goal'])}
+        highlightSkillTokens={false}
+      />,
+    );
+
+    expect(container.querySelector('.preview-skill-token')).toBeNull();
+  });
 });

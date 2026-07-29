@@ -55,6 +55,47 @@ describe('WYSIWYG inline code typography stylesheet', () => {
   });
 });
 
+describe('shared inline style color stylesheet', () => {
+  it('defines neutral root fallbacks for skill tokens and inline code', () => {
+    const rootRule = ruleBody(':root');
+
+    expect(rootRule).toContain('--skill-token-text-color: #18181b;');
+    expect(rootRule).toContain('--skill-token-background-color: #f4f4f5;');
+    expect(rootRule).toContain('--inline-code-text-color: #18181b;');
+    expect(rootRule).toContain('--inline-code-background-color: #f4f4f5;');
+  });
+
+  it('uses shared variables for skill tokens in every rendered surface', () => {
+    for (const selector of [
+      '.cm-skill-token',
+      '.wysiwyg-skill-token',
+      '.preview-skill-token',
+    ]) {
+      const rule = ruleBody(selector);
+      expect(rule).toContain('color: var(--skill-token-text-color);');
+      expect(rule).toContain(
+        'background-color: var(--skill-token-background-color);',
+      );
+    }
+  });
+
+  it('uses shared variables for source and rendered inline code', () => {
+    for (const selector of [
+      '.cm-inline-code',
+      '.markdown-surface :not(pre) > code',
+    ]) {
+      const rule = ruleBody(selector);
+      expect(rule).toContain('color: var(--inline-code-text-color);');
+      expect(rule).toContain(
+        'background-color: var(--inline-code-background-color);',
+      );
+    }
+    expect(ruleBody('.markdown-surface pre code')).toContain(
+      'background-color: transparent;',
+    );
+  });
+});
+
 describe('WYSIWYG code block wrapping stylesheet', () => {
   it('keeps ordinary and Mermaid source code unwrapped when the WYSIWYG toggle is off', () => {
     const selectors = [
