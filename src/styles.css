@@ -854,6 +854,20 @@ section[data-mode='Wysiwyg'] {
   padding: 0;
   list-style: none;
 }
+.slash-command-group-label {
+  padding: 8px 10px 4px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.slash-command-group-label:not(:first-child) {
+  margin-top: 5px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
 .slash-command-item {
   display: flex;
   width: 100%;

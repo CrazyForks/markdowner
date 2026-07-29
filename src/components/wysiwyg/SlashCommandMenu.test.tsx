@@ -511,4 +511,50 @@ describe('SlashCommandMenu', () => {
     expect(await screen.findByRole('menuitem', { name: /table/i })).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: /heading 1/i })).toBeNull();
   });
+
+  it('groups block commands and installed skills for a line-start slash', async () => {
+    const editor = createSlashEditor();
+
+    render(
+      <SlashCommandMenu
+        editor={editor}
+        skillNames={new Set(['goal', 'git-commit'])}
+      />,
+    );
+
+    act(() => {
+      editor.emit('update');
+    });
+
+    expect(await screen.findByText('Blocks')).toBeInTheDocument();
+    expect(screen.getByText('Skills')).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: /\/goal.*installed skill/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('replaces the slash query when an installed skill is chosen', async () => {
+    const chain: any = {
+      focus: vi.fn().mockReturnThis(),
+      deleteRange: vi.fn().mockReturnThis(),
+      insertContent: vi.fn().mockReturnThis(),
+      run: vi.fn().mockReturnValue(true),
+    };
+    const editor = createSlashEditor();
+    editor.chain = vi.fn().mockReturnValue(chain);
+
+    render(<SlashCommandMenu editor={editor} skillNames={new Set(['goal'])} />);
+
+    act(() => {
+      editor.emit('update');
+    });
+
+    fireEvent.click(
+      await screen.findByRole('menuitem', { name: /\/goal.*installed skill/i }),
+    );
+
+    expect(chain.deleteRange).toHaveBeenCalledWith({ from: 1, to: 2 });
+    expect(chain.insertContent).toHaveBeenCalledWith('/goal');
+    expect(chain.run).toHaveBeenCalledTimes(1);
+  });
 });

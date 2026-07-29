@@ -10,8 +10,34 @@ vi.mock('@tiptap/react', () => ({
 }));
 
 vi.mock('@/components/wysiwyg/SlashCommandMenu', () => ({
-  SlashCommandMenu: ({ enabled }: { enabled?: boolean }) => (
-    <div data-testid="slash-command-menu" data-enabled={String(Boolean(enabled))} />
+  SlashCommandMenu: ({
+    enabled,
+    skillNames,
+  }: {
+    enabled?: boolean;
+    skillNames?: ReadonlySet<string>;
+  }) => (
+    <div
+      data-testid="slash-command-menu"
+      data-enabled={String(Boolean(enabled))}
+      data-skill-count={skillNames?.size ?? 0}
+    />
+  ),
+}));
+
+vi.mock('@/components/wysiwyg/SkillTokenMenu', () => ({
+  SkillTokenMenu: ({
+    enabled,
+    skillNames,
+  }: {
+    enabled?: boolean;
+    skillNames?: ReadonlySet<string>;
+  }) => (
+    <div
+      data-testid="skill-token-menu"
+      data-enabled={String(Boolean(enabled))}
+      data-skill-count={skillNames?.size ?? 0}
+    />
   ),
 }));
 
@@ -41,10 +67,19 @@ describe('WysiwygEditorChrome', () => {
   it('keeps the Tiptap editor content mounted and enables WYSIWYG floating chrome', () => {
     const editor = { id: 'editor' } as never;
 
-    render(<WysiwygEditorChrome editor={editor} enabled />);
+    render(
+      <WysiwygEditorChrome
+        editor={editor}
+        enabled
+        skillNames={new Set(['goal', 'git-commit'])}
+      />,
+    );
 
     expect(screen.getByTestId('editor-content')).toHaveAttribute('data-editor-attached', 'true');
     expect(screen.getByTestId('slash-command-menu')).toHaveAttribute('data-enabled', 'true');
+    expect(screen.getByTestId('slash-command-menu')).toHaveAttribute('data-skill-count', '2');
+    expect(screen.getByTestId('skill-token-menu')).toHaveAttribute('data-enabled', 'true');
+    expect(screen.getByTestId('skill-token-menu')).toHaveAttribute('data-skill-count', '2');
     expect(screen.getByTestId('selection-toolbar')).toHaveAttribute('data-enabled', 'true');
     expect(screen.getByTestId('link-popup')).toHaveAttribute('data-enabled', 'true');
     expect(screen.getByTestId('table-toolbar')).toHaveAttribute('data-enabled', 'true');
@@ -55,6 +90,7 @@ describe('WysiwygEditorChrome', () => {
 
     expect(screen.getByTestId('editor-content')).toHaveAttribute('data-editor-attached', 'false');
     expect(screen.getByTestId('slash-command-menu')).toHaveAttribute('data-enabled', 'false');
+    expect(screen.getByTestId('skill-token-menu')).toHaveAttribute('data-enabled', 'false');
     expect(screen.getByTestId('selection-toolbar')).toHaveAttribute('data-enabled', 'false');
     expect(screen.getByTestId('link-popup')).toHaveAttribute('data-enabled', 'false');
     expect(screen.getByTestId('table-toolbar')).toHaveAttribute('data-enabled', 'false');

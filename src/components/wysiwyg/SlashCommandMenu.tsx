@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/react';
@@ -18,6 +18,7 @@ import {
   Minus,
   Pilcrow,
   Quote,
+  Sparkles,
   Table as TableIcon,
   Type,
 } from 'lucide-react';
@@ -28,10 +29,11 @@ import { cn } from '@/lib/utils';
 import { importImageAsset } from '@/lib/desktop';
 import { publishEditorEvent, subscribeEditorEvent } from '@/lib/editorEvents';
 import { IMAGE_FILE_EXTENSIONS } from '@/lib/fileDialogOptions';
+import { buildSkillSuggestions } from '@/lib/skillSuggestions';
 
 import { filterSlashItems } from './slashItemFilter';
 
-type SlashItemKind = 'block' | 'prompt-image' | 'pick-image';
+type SlashItemKind = 'block' | 'prompt-image' | 'pick-image' | 'skill-token';
 
 type SlashItem = {
   id: string;
@@ -40,6 +42,7 @@ type SlashItem = {
   keywords: string[];
   icon: typeof Type;
   kind?: SlashItemKind;
+  token?: string;
   /**
    * Whether the item reformats existing content (heading, list, quote, …) as
    * opposed to inserting something new (table, image, divider, link). Only
@@ -285,6 +288,7 @@ interface Props {
   editor: Editor | null;
   /** When false, the menu listeners are detached entirely (e.g. non-Wysiwyg mode). */
   enabled?: boolean;
+  skillNames?: ReadonlySet<string>;
 }
 
 /**
@@ -294,7 +298,13 @@ interface Props {
  * (or after whitespace) and offers a filtered list of block-level insertions
  * such as headings, lists, code blocks, and tables.
  */
-export function SlashCommandMenu({ editor, enabled = true }: Props) {
+const EMPTY_SKILL_NAMES = new Set<string>();
+
+export function SlashCommandMenu({
+  editor,
+  enabled = true,
+  skillNames = EMPTY_SKILL_NAMES,
+}: Props) {
   const [menu, setMenu] = useState<MenuState>({ open: false });
   const [activeIndex, setActiveIndex] = useState(0);
   const [placement, setPlacement] = useState<Placement>('below');
@@ -307,16 +317,32 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
   const filteredItems = useMemo(() => {
     // The Turn-into menu only offers reformat targets — inserting a table or
     // divider over the user's selection makes no sense there.
-    const items =
+    const blockItems =
       menu.open && menu.mode === 'convert'
         ? SLASH_ITEMS.filter((item) => item.convertible)
         : SLASH_ITEMS;
-    if (!menu.open) return items;
+    if (!menu.open) return blockItems;
     // Combobox-style ranked fuzzy matching, language-agnostic in both
     // directions (English ↔ Korean keywords, wrong-IME input) — the same
     // behavior as the command palette.
-    return filterSlashItems(items, menu.query);
-  }, [menu]);
+    const filteredBlocks = filterSlashItems(blockItems, menu.query);
+    if (menu.mode === 'convert') return filteredBlocks;
+
+    const skills: SlashItem[] = buildSkillSuggestions(
+      '/',
+      menu.query,
+      skillNames,
+    ).map(({ name, token }) => ({
+      id: `skill:${name}`,
+      title: token,
+      description: 'Installed skill',
+      keywords: [name, 'skill'],
+      icon: Sparkles,
+      kind: 'skill-token',
+      token,
+    }));
+    return [...filteredBlocks, ...skills];
+  }, [menu, skillNames]);
 
   // Re-ranking puts the best match first — follow the highlight along, like
   // the command palette does on every query change.
@@ -706,6 +732,17 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
 
   const runItem = (item: SlashItem | undefined) => {
     if (!item || !editor || !menu.open) return;
+    if (item.kind === 'skill-token' && item.token) {
+      const { from, to } = menu;
+      setMenu({ open: false });
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from, to })
+        .insertContent(item.token)
+        .run();
+      return;
+    }
     if (item.kind === 'pick-image') {
       const { from, to } = menu;
       setMenu({ open: false });
@@ -759,7 +796,7 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
     <div
       ref={menuRef}
       role="menu"
-      aria-label={menu.mode === 'convert' ? 'Turn into' : 'Insert block'}
+      aria-label={menu.mode === 'convert' ? 'Turn into' : 'Insert block or skill'}
       data-testid="slash-command-menu"
       data-placement={placement}
       data-stage={menu.stage}
@@ -827,37 +864,50 @@ export function SlashCommandMenu({ editor, enabled = true }: Props) {
           </div>
         </form>
       ) : filteredItems.length === 0 ? (
-        <div className="slash-command-empty">No blocks match &ldquo;{menu.query}&rdquo;</div>
+        <div className="slash-command-empty">
+          No blocks or skills match &ldquo;{menu.query}&rdquo;
+        </div>
       ) : (
         <ul className="slash-command-list" role="presentation">
           {filteredItems.map((item, index) => {
             const Icon = item.icon;
             const isActive = index === Math.min(activeIndex, filteredItems.length - 1);
+            const isSkill = item.kind === 'skill-token';
+            const previousItem = filteredItems[index - 1];
+            const beginsSection =
+              skillNames.size > 0 &&
+              (index === 0 || (previousItem?.kind === 'skill-token') !== isSkill);
             return (
-              <li
-                key={item.id}
-                role="presentation"
-                ref={(node) => {
-                  itemRefs.current[index] = node;
-                }}
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={cn('slash-command-item', isActive && 'is-active')}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => runItem(item)}
-                  data-active={isActive ? 'true' : undefined}
+              <Fragment key={item.id}>
+                {beginsSection ? (
+                  <li className="slash-command-group-label" role="presentation">
+                    {isSkill ? 'Skills' : 'Blocks'}
+                  </li>
+                ) : null}
+                <li
+                  role="presentation"
+                  ref={(node) => {
+                    itemRefs.current[index] = node;
+                  }}
                 >
-                  <span className="slash-command-icon" aria-hidden="true">
-                    <Icon className="size-4" />
-                  </span>
-                  <span className="slash-command-text">
-                    <span className="slash-command-title">{item.title}</span>
-                    <span className="slash-command-description">{item.description}</span>
-                  </span>
-                </button>
-              </li>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={cn('slash-command-item', isActive && 'is-active')}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onClick={() => runItem(item)}
+                    data-active={isActive ? 'true' : undefined}
+                  >
+                    <span className="slash-command-icon" aria-hidden="true">
+                      <Icon className="size-4" />
+                    </span>
+                    <span className="slash-command-text">
+                      <span className="slash-command-title">{item.title}</span>
+                      <span className="slash-command-description">{item.description}</span>
+                    </span>
+                  </button>
+                </li>
+              </Fragment>
             );
           })}
         </ul>
