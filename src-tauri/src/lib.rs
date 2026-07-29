@@ -30,6 +30,7 @@ mod export_file;
 mod link_actions;
 mod pdf_export;
 mod shell_managed_block;
+mod skill_registry;
 mod terminal;
 mod updater;
 mod workspace_search;
@@ -565,7 +566,7 @@ fn shell_config_path_for_shell(home_dir: &Path, shell: Option<&str>) -> PathBuf 
     }
 }
 
-fn user_home_dir() -> Result<PathBuf, String> {
+pub(crate) fn user_home_dir() -> Result<PathBuf, String> {
     env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
@@ -2171,6 +2172,7 @@ pub fn run() {
             install_cli_binary,
             uninstall_cli_binary,
             workspace_search::search_workspace,
+            skill_registry::list_skill_names,
             diagnostics_status,
             open_diagnostics_log,
             record_diagnostics_event,
