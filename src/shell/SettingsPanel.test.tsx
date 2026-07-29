@@ -117,6 +117,24 @@ describe('SettingsPanel update section', () => {
     });
   });
 
+  it('renders and toggles installed skill-token highlighting', () => {
+    const onSettingsChange = vi.fn();
+    renderPanel({ onSettingsChange });
+
+    expect(
+      screen.getByText('Style installed Claude Code and Codex skills like /goal and $git-commit.'),
+    ).toBeInTheDocument();
+    const highlightSwitch = screen.getByLabelText(/skill token highlighting/i);
+    expect(highlightSwitch).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(highlightSwitch);
+
+    expect(onSettingsChange).toHaveBeenCalledWith({
+      ...DEFAULT_SETTINGS,
+      highlightSkillTokens: false,
+    });
+  });
+
   it('shows the diagnostics log path and opens the log file', async () => {
     renderPanel();
 

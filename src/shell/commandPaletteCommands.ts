@@ -314,6 +314,18 @@ export function buildCommandPaletteCommands(
         }),
     },
     {
+      id: 'preferences.toggleSkillTokenHighlighting',
+      category: 'Preferences',
+      label: settings.highlightSkillTokens
+        ? 'Disable Skill Token Highlighting'
+        : 'Enable Skill Token Highlighting',
+      run: () =>
+        actions.updateSettings({
+          ...settings,
+          highlightSkillTokens: !settings.highlightSkillTokens,
+        }),
+    },
+    {
       id: 'preferences.toggleWordBreakKeepAll',
       category: 'Preferences',
       label: settings.editorWordBreakKeepAll

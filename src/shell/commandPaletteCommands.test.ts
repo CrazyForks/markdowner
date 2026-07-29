@@ -114,6 +114,7 @@ describe('buildCommandPaletteCommands', () => {
       'preferences.toggleTypewriterMode',
       'preferences.toggleWordWrap',
       'preferences.toggleWysiwygCodeBlockWrap',
+      'preferences.toggleSkillTokenHighlighting',
       'preferences.toggleWordBreakKeepAll',
       'preferences.toggleTableViewMode',
       'preferences.toggleAutoSave',
@@ -264,6 +265,7 @@ describe('buildCommandPaletteCommands', () => {
       autoSave: true,
       editorLineWrap: false,
       wysiwygCodeBlockWrap: false,
+      highlightSkillTokens: true,
       editorWordBreakKeepAll: true,
       focusModeEnabled: true,
       typewriterModeEnabled: false,
@@ -289,6 +291,10 @@ describe('buildCommandPaletteCommands', () => {
       commands.find((command) => command.id === 'preferences.toggleWysiwygCodeBlockWrap')
         ?.shortcut,
     ).toBeUndefined();
+    expect(
+      commands.find((command) => command.id === 'preferences.toggleSkillTokenHighlighting')
+        ?.label,
+    ).toBe('Disable Skill Token Highlighting');
     expect(commands.find((command) => command.id === 'preferences.toggleWordBreakKeepAll')?.label)
       .toBe('Disable Word Break Keep All');
     expect(commands.find((command) => command.id === 'preferences.toggleAutoSave')?.label)
@@ -306,6 +312,14 @@ describe('buildCommandPaletteCommands', () => {
     expect(updateSettings).toHaveBeenCalledWith({
       ...current,
       wysiwygCodeBlockWrap: true,
+    });
+
+    commands
+      .find((command) => command.id === 'preferences.toggleSkillTokenHighlighting')
+      ?.run?.();
+    expect(updateSettings).toHaveBeenCalledWith({
+      ...current,
+      highlightSkillTokens: false,
     });
 
     commands.find((command) => command.id === 'preferences.toggleWordBreakKeepAll')?.run?.();
@@ -330,6 +344,21 @@ describe('buildCommandPaletteCommands', () => {
     expect(
       commands.find((command) => command.id === 'preferences.toggleWysiwygCodeBlockWrap')?.label,
     ).toBe('Disable WYSIWYG Code Block Wrap');
+  });
+
+  it('labels disabled skill-token highlighting by the inverse action', () => {
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings({ highlightSkillTokens: false }),
+      actions: actions(),
+    });
+
+    expect(
+      commands.find((command) => command.id === 'preferences.toggleSkillTokenHighlighting')
+        ?.label,
+    ).toBe('Enable Skill Token Highlighting');
   });
 
   it('labels the word-break keep-all toggle by the next action', () => {

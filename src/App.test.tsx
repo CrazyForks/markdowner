@@ -7623,6 +7623,53 @@ describe('App recent documents', () => {
     });
   });
 
+  it('toggles Skill Token Highlighting from the Command Palette and persists it', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return { highlightSkillTokens: true };
+      }
+      if (command === 'list_skill_names') {
+        return ['goal'];
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'skills.md',
+        activeDocumentPath: '/tmp/project/skills.md',
+        activeDocumentSource: 'Run /goal',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'true');
+    });
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(dialog).getByRole('textbox', { name: /command palette search/i });
+    fireEvent.change(input, { target: { value: 'skill token' } });
+
+    const toggleOption = await within(dialog).findByRole('option', {
+      name: /disable skill token highlighting/i,
+    });
+    fireEvent.click(toggleOption);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: expect.objectContaining({ highlightSkillTokens: false }),
+      });
+      expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'false');
+    });
+  }, 10_000);
+
   it('toggles Word Break Keep All from the Command Palette and persists it through save_settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
@@ -8721,6 +8768,47 @@ describe('App recent documents', () => {
       expect(wysiwygSurface).toHaveAttribute('data-code-block-wrap', 'on');
     });
   });
+
+  it('persists Skill Token Highlighting changes from Settings and updates the editor', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return { highlightSkillTokens: true };
+      }
+      if (command === 'list_skill_names') {
+        return ['goal'];
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'skills.md',
+        activeDocumentPath: '/tmp/project/skills.md',
+        activeDocumentSource: 'Run /goal',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'true');
+    });
+
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+
+    const dialog = await screen.findByTestId('settings-panel');
+    fireEvent.click(within(dialog).getByLabelText(/skill token highlighting/i));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
+        settings: expect.objectContaining({ highlightSkillTokens: false }),
+      });
+      expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'false');
+    });
+  }, 10_000);
 
   it('persists Word Break Keep All changes from the Settings dialog through save_settings', async () => {
     invokeMock.mockImplementation(async (command: string) => {

@@ -999,6 +999,20 @@ export function SettingsPanel({
             />
           </div>
 
+          <div className={switchFieldClass}>
+            <Label htmlFor="skill-token-highlighting" className="flex flex-col items-start gap-0.5 text-left text-sm">
+              <span>Skill Token Highlighting</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                Style installed Claude Code and Codex skills like /goal and $git-commit.
+              </span>
+            </Label>
+            <Switch
+              id="skill-token-highlighting"
+              checked={settings.highlightSkillTokens}
+              onCheckedChange={(checked) => handleSettingChange('highlightSkillTokens', checked)}
+            />
+          </div>
+
           <div className={inputFieldClass}>
             <Label htmlFor="wrap-column" className="flex flex-col items-start gap-0.5 text-left text-sm">
               <span>Wrap Column</span>
