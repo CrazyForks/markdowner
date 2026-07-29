@@ -260,6 +260,15 @@ const tiptapMockState = vi.hoisted(() => ({
   lastOptions: null as any,
 }));
 
+const sourceSkillHighlightMock = vi.hoisted(() => ({
+  extension: '__skill_highlight__',
+  create: vi.fn(() => '__skill_highlight__'),
+}));
+
+vi.mock('./lib/sourceSkillHighlight', () => ({
+  createSourceSkillHighlightExtension: sourceSkillHighlightMock.create,
+}));
+
 vi.mock('@tiptap/react', () => ({
   EditorContent: ({ editor }: { editor: any }) => (
     <div
@@ -292,6 +301,11 @@ vi.mock('@uiw/react-codemirror', () => ({
       onChange={(event) => onChange(event.target.value)}
       data-line-wrap={
         Array.isArray(extensions) && extensions.includes(LINE_WRAPPING_SENTINEL)
+          ? 'true'
+          : 'false'
+      }
+      data-skill-highlight={
+        Array.isArray(extensions) && extensions.includes(sourceSkillHighlightMock.extension)
           ? 'true'
           : 'false'
       }
@@ -655,6 +669,7 @@ describe('App recent documents', () => {
     hasActiveDocumentExternalChangesMock.mockReset();
     reloadActiveDocumentFromDiskMock.mockReset();
     invokeMock.mockReset();
+    sourceSkillHighlightMock.create.mockClear();
     tiptapMockState.editor = null;
     tiptapMockState.lastOptions = null;
     closeRequestedHandler = undefined;
@@ -8532,6 +8547,80 @@ describe('App recent documents', () => {
       expect(sourceEditor.getAttribute('data-line-wrap')).toBe('true');
     });
   });
+
+  it('loads installed skill names and wires source skill-token highlighting', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          editorLineWrap: true,
+          highlightSkillTokens: true,
+        };
+      }
+      if (command === 'list_skill_names') {
+        return ['goal', 'git-commit'];
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: 'Run /goal then $git-commit',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('list_skill_names');
+      expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'true');
+      expect(sourceSkillHighlightMock.create).toHaveBeenCalledWith(
+        new Set(['goal', 'git-commit']),
+      );
+      expect(
+        tiptapMockState.lastOptions.extensions.some(
+          (extension: { name?: string }) => extension?.name === 'wysiwygSkillHighlight',
+        ),
+      ).toBe(true);
+    });
+  }, 10_000);
+
+  it('omits source skill-token highlighting when the preference is disabled', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          editorLineWrap: true,
+          highlightSkillTokens: false,
+        };
+      }
+      if (command === 'list_skill_names') {
+        return ['goal'];
+      }
+      return undefined;
+    });
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: 'Run /goal',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByLabelText('Source editor');
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('list_skill_names');
+      expect(sourceEditor).toHaveAttribute('data-skill-highlight', 'false');
+    });
+  }, 10_000);
 
   it('omits line wrapping from the source editor when editorLineWrap is disabled', async () => {
     invokeMock.mockImplementation(async (command: string) => {

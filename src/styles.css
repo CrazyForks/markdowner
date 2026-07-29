@@ -717,6 +717,20 @@ section[data-mode='Wysiwyg'] {
   outline-offset: 0;
 }
 
+/* Installed Claude Code / Codex skill tokens use the same visual language as
+   inline code without changing the document model. The small outer shadow
+   supplies horizontal breathing room without altering CodeMirror or
+   ProseMirror text geometry, so selections and IME positions stay stable. */
+.cm-skill-token,
+.wysiwyg-skill-token {
+  border-radius: 0.25em;
+  background-color: var(--muted);
+  box-shadow: 0 0 0 0.14em var(--muted);
+  color: var(--foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92em;
+}
+
 /* Pipe the Settings line-height into CodeMirror. The library ships `.cm-content`
    with its own line-height, so the inline `line-height` on the editor surface
    doesn't reach it — we forward the value via a CSS custom property instead. */

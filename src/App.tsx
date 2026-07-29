@@ -170,6 +170,10 @@ import {
   setWysiwygFindHighlight,
 } from './lib/wysiwygFindHighlight';
 import {
+  WysiwygSkillHighlight,
+  setWysiwygSkillHighlight,
+} from './lib/wysiwygSkillHighlight';
+import {
   CLEARED_EXTERNAL_CHANGE_STATE,
   externalChangeDetectedState,
   externalChangeVerificationErrorState,
@@ -243,6 +247,7 @@ import {
 } from './lib/settings';
 import { syncAnalytics } from './lib/analytics';
 import { resolveShellBindings } from './lib/keymap';
+import { loadSkillTokenNames } from './lib/skillTokens';
 import { moveTabToIndex } from './lib/tabDragReorder';
 import { moveTab } from './lib/tabs';
 import { resolveTerminalWorkingDirectory } from './lib/terminalModel';
@@ -306,6 +311,7 @@ import {
   sourceFindHighlightField,
 } from './lib/sourceEditorExtensions';
 import { resolveSourceSurfaceMouseDown } from './lib/sourceEditorInteractions';
+import { createSourceSkillHighlightExtension } from './lib/sourceSkillHighlight';
 import { shouldFocusStartupEditor } from './lib/startupEditorFocus';
 import { parseNativeMenuCommand } from './lib/nativeMenuCommand';
 import {
@@ -524,6 +530,9 @@ export default function App() {
   const [manualUpdateCheckInfo, setManualUpdateCheckInfo] = useState<UpdateInfo | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [skillTokenNames, setSkillTokenNames] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [exportRequest, setExportRequest] = useState<ExportPreviewRequest | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportStyle, setExportStyle] = useState<ExportStyle>(() => loadExportStyle());
@@ -1861,6 +1870,7 @@ export default function App() {
       // the markdown bracket-paren syntax.
       MarkdownLinkInputRule,
       WysiwygFindHighlight,
+      WysiwygSkillHighlight,
       Markdown.configure({
         markedOptions: {
           gfm: true,
@@ -2345,6 +2355,13 @@ export default function App() {
     editorInstanceRef.current = editor;
   }, [editor]);
 
+  useEffect(() => {
+    setWysiwygSkillHighlight(editor, {
+      enabled: settings.highlightSkillTokens,
+      skillNames: skillTokenNames,
+    });
+  }, [editor, settings.highlightSkillTokens, skillTokenNames]);
+
   // Follow markdown links clicked in the WYSIWYG surface. Capture phase beats
   // both WebKit's native anchor navigation and ProseMirror's flaky handleClick.
   useEffect(() => {
@@ -2765,6 +2782,12 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+
+    void loadSkillTokenNames().then((names) => {
+      if (!cancelled) {
+        setSkillTokenNames(new Set(names));
+      }
+    });
 
     loadSettings()
       .then(async (loadedSettings) => {
@@ -3517,13 +3540,19 @@ export default function App() {
         typewriterModeEnabled: settings.typewriterModeEnabled,
         onViewportChange: handleSourceEditorViewportChange,
         onTypewriterChange: handleSourceEditorTypewriterChange,
-      }),
+      }).concat(
+        settings.highlightSkillTokens
+          ? [createSourceSkillHighlightExtension(skillTokenNames)]
+          : [],
+      ),
     [
       handleSourceEditorTypewriterChange,
       handleSourceEditorViewportChange,
       settings.editorLineWrap,
       settings.focusModeEnabled,
+      settings.highlightSkillTokens,
       settings.typewriterModeEnabled,
+      skillTokenNames,
     ],
   );
 
