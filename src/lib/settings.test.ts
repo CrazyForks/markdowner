@@ -424,3 +424,48 @@ describe('skill token highlight setting', () => {
     ).toEqual(['highlightSkillTokens']);
   });
 });
+
+describe('inline style color settings', () => {
+  it('defaults light and dark skill-token and inline-code palettes', () => {
+    expect(DEFAULT_SETTINGS).toMatchObject({
+      skillTokenLightTextColor: '#18181B',
+      skillTokenLightBackgroundColor: '#F4F4F5',
+      skillTokenDarkTextColor: '#FAFAFA',
+      skillTokenDarkBackgroundColor: '#27272A',
+      inlineCodeLightTextColor: '#18181B',
+      inlineCodeLightBackgroundColor: '#F4F4F5',
+      inlineCodeDarkTextColor: '#FAFAFA',
+      inlineCodeDarkBackgroundColor: '#27272A',
+    });
+  });
+
+  it('normalizes malformed persisted colors field by field', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      skillTokenLightTextColor: 'orange',
+      skillTokenLightBackgroundColor: '#aabbcc',
+      inlineCodeDarkTextColor: '#123456',
+      inlineCodeDarkBackgroundColor: '#fff',
+    });
+
+    await expect(loadSettings()).resolves.toMatchObject({
+      skillTokenLightTextColor: '#18181B',
+      skillTokenLightBackgroundColor: '#AABBCC',
+      inlineCodeDarkTextColor: '#123456',
+      inlineCodeDarkBackgroundColor: '#27272A',
+    });
+  });
+
+  it('tracks each color as an independent setting change', () => {
+    expect(
+      getChangedSettingsKeys(DEFAULT_SETTINGS, {
+        ...DEFAULT_SETTINGS,
+        skillTokenDarkTextColor: '#00FF00',
+        inlineCodeLightBackgroundColor: '#010203',
+      }),
+    ).toEqual([
+      'skillTokenDarkTextColor',
+      'inlineCodeLightBackgroundColor',
+    ]);
+  });
+});

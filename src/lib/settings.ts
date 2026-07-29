@@ -1,6 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ThemeKind } from './desktop';
 import {
+  INLINE_STYLE_COLOR_DEFAULTS,
+  normalizeInlineStyleColor,
+  type InlineStyleColorSettings,
+} from './inlineStylePalette';
+import {
   DEFAULT_PDF_PAPER,
   normalizePdfPaper,
   type PdfPaperOrientation,
@@ -63,7 +68,7 @@ export const CODE_BLOCK_THEMES: ReadonlyArray<{ value: CodeBlockTheme; label: st
   { value: 'monokai-dark', label: 'Monokai Dark' },
 ];
 
-export interface Settings {
+export interface Settings extends InlineStyleColorSettings {
   autoSave: boolean;
   editorFontSize: number;
   editorLineHeight: number;
@@ -214,6 +219,7 @@ export const DEFAULT_SETTINGS: Settings = {
   editorWordBreakKeepAll: true,
   wysiwygCodeBlockWrap: false,
   highlightSkillTokens: true,
+  ...INLINE_STYLE_COLOR_DEFAULTS,
   outlineFontSize: 12,
   outlineRowSpacing: 0,
   defaultMode: 'Wysiwyg',
@@ -426,6 +432,38 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   if (typeof merged.highlightSkillTokens !== 'boolean') {
     merged.highlightSkillTokens = DEFAULT_SETTINGS.highlightSkillTokens;
   }
+  merged.skillTokenLightTextColor = normalizeInlineStyleColor(
+    merged.skillTokenLightTextColor,
+    DEFAULT_SETTINGS.skillTokenLightTextColor,
+  );
+  merged.skillTokenLightBackgroundColor = normalizeInlineStyleColor(
+    merged.skillTokenLightBackgroundColor,
+    DEFAULT_SETTINGS.skillTokenLightBackgroundColor,
+  );
+  merged.skillTokenDarkTextColor = normalizeInlineStyleColor(
+    merged.skillTokenDarkTextColor,
+    DEFAULT_SETTINGS.skillTokenDarkTextColor,
+  );
+  merged.skillTokenDarkBackgroundColor = normalizeInlineStyleColor(
+    merged.skillTokenDarkBackgroundColor,
+    DEFAULT_SETTINGS.skillTokenDarkBackgroundColor,
+  );
+  merged.inlineCodeLightTextColor = normalizeInlineStyleColor(
+    merged.inlineCodeLightTextColor,
+    DEFAULT_SETTINGS.inlineCodeLightTextColor,
+  );
+  merged.inlineCodeLightBackgroundColor = normalizeInlineStyleColor(
+    merged.inlineCodeLightBackgroundColor,
+    DEFAULT_SETTINGS.inlineCodeLightBackgroundColor,
+  );
+  merged.inlineCodeDarkTextColor = normalizeInlineStyleColor(
+    merged.inlineCodeDarkTextColor,
+    DEFAULT_SETTINGS.inlineCodeDarkTextColor,
+  );
+  merged.inlineCodeDarkBackgroundColor = normalizeInlineStyleColor(
+    merged.inlineCodeDarkBackgroundColor,
+    DEFAULT_SETTINGS.inlineCodeDarkBackgroundColor,
+  );
   if (typeof merged.focusModeEnabled !== 'boolean') {
     merged.focusModeEnabled = DEFAULT_SETTINGS.focusModeEnabled;
   }

@@ -20,6 +20,35 @@ where
     Ok(value.as_bool().unwrap_or(true))
 }
 
+fn normalize_hex_color(value: serde_json::Value, fallback: &str) -> String {
+    value
+        .as_str()
+        .filter(|candidate| {
+            candidate.len() == 7
+                && candidate.starts_with('#')
+                && candidate[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+        .map(str::to_ascii_uppercase)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+macro_rules! hex_color_deserializer {
+    ($name:ident, $fallback:literal) => {
+        fn $name<'de, D>(deserializer: D) -> Result<String, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let value = serde_json::Value::deserialize(deserializer)?;
+            Ok(normalize_hex_color(value, $fallback))
+        }
+    };
+}
+
+hex_color_deserializer!(deserialize_zinc_950, "#18181B");
+hex_color_deserializer!(deserialize_zinc_100, "#F4F4F5");
+hex_color_deserializer!(deserialize_zinc_50, "#FAFAFA");
+hex_color_deserializer!(deserialize_zinc_800, "#27272A");
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -38,6 +67,22 @@ pub struct Settings {
     /// like inline code in both editors.
     #[serde(deserialize_with = "deserialize_bool_or_true")]
     pub highlight_skill_tokens: bool,
+    #[serde(deserialize_with = "deserialize_zinc_950")]
+    pub skill_token_light_text_color: String,
+    #[serde(deserialize_with = "deserialize_zinc_100")]
+    pub skill_token_light_background_color: String,
+    #[serde(deserialize_with = "deserialize_zinc_50")]
+    pub skill_token_dark_text_color: String,
+    #[serde(deserialize_with = "deserialize_zinc_800")]
+    pub skill_token_dark_background_color: String,
+    #[serde(deserialize_with = "deserialize_zinc_950")]
+    pub inline_code_light_text_color: String,
+    #[serde(deserialize_with = "deserialize_zinc_100")]
+    pub inline_code_light_background_color: String,
+    #[serde(deserialize_with = "deserialize_zinc_50")]
+    pub inline_code_dark_text_color: String,
+    #[serde(deserialize_with = "deserialize_zinc_800")]
+    pub inline_code_dark_background_color: String,
     pub outline_font_size: u32,
     pub outline_row_spacing: u32,
     pub default_mode: EditorMode,
@@ -88,6 +133,14 @@ impl Default for Settings {
             editor_word_break_keep_all: true,
             wysiwyg_code_block_wrap: false,
             highlight_skill_tokens: true,
+            skill_token_light_text_color: "#18181B".to_string(),
+            skill_token_light_background_color: "#F4F4F5".to_string(),
+            skill_token_dark_text_color: "#FAFAFA".to_string(),
+            skill_token_dark_background_color: "#27272A".to_string(),
+            inline_code_light_text_color: "#18181B".to_string(),
+            inline_code_light_background_color: "#F4F4F5".to_string(),
+            inline_code_dark_text_color: "#FAFAFA".to_string(),
+            inline_code_dark_background_color: "#27272A".to_string(),
             outline_font_size: 12,
             outline_row_spacing: 0,
             default_mode: EditorMode::Wysiwyg,
@@ -299,6 +352,38 @@ mod tests {
         assert!(parsed.highlight_skill_tokens);
         assert!(parsed.auto_save);
         assert_eq!(parsed.editor_font_size, 18);
+    }
+
+    #[test]
+    fn inline_style_colors_default_validate_and_round_trip() {
+        let parsed: Settings = serde_json::from_str("{}").expect("settings parse");
+        assert_eq!(parsed.skill_token_light_text_color, "#18181B");
+        assert_eq!(parsed.skill_token_light_background_color, "#F4F4F5");
+        assert_eq!(parsed.skill_token_dark_text_color, "#FAFAFA");
+        assert_eq!(parsed.skill_token_dark_background_color, "#27272A");
+        assert_eq!(parsed.inline_code_light_text_color, "#18181B");
+        assert_eq!(parsed.inline_code_light_background_color, "#F4F4F5");
+        assert_eq!(parsed.inline_code_dark_text_color, "#FAFAFA");
+        assert_eq!(parsed.inline_code_dark_background_color, "#27272A");
+
+        let malformed = serde_json::json!({
+            "autoSave": true,
+            "skillTokenLightTextColor": "orange",
+            "skillTokenLightBackgroundColor": "#aabbcc",
+            "inlineCodeDarkTextColor": "#123456",
+            "inlineCodeDarkBackgroundColor": "#fff"
+        });
+        let parsed: Settings =
+            serde_json::from_value(malformed).expect("malformed colors should default by field");
+        assert!(parsed.auto_save);
+        assert_eq!(parsed.skill_token_light_text_color, "#18181B");
+        assert_eq!(parsed.skill_token_light_background_color, "#AABBCC");
+        assert_eq!(parsed.inline_code_dark_text_color, "#123456");
+        assert_eq!(parsed.inline_code_dark_background_color, "#27272A");
+
+        let serialized = serde_json::to_value(parsed).expect("settings serialize");
+        assert_eq!(serialized["skillTokenLightBackgroundColor"], "#AABBCC");
+        assert_eq!(serialized["inlineCodeDarkTextColor"], "#123456");
     }
 
     #[test]
