@@ -100,6 +100,10 @@ vi.mock('@tauri-apps/api/core', () => ({
 const LINE_WRAPPING_SENTINEL = '__line_wrapping__';
 const CORE_FLOW_TIMEOUT_MS = 15_000;
 
+vi.mock('./lib/sourceSkillCompletion', () => ({
+  createSourceSkillCompletionExtension: () => '__skill_completion__',
+}));
+
 const TAB_WIDTH = 100;
 
 /**

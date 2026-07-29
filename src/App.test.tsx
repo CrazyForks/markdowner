@@ -12,33 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppSnapshot, EditorMode } from './lib/desktop';
 
-// Mirror of DEFAULT_IGNORE_LIST in src/lib/settings.ts. Inlined (not imported)
-// so this file's `@tauri-apps/api/core` mock isn't evaluated before its
-// hoisted `invokeMock` is initialized. Keep in sync with the source list.
-const DEFAULT_IGNORE_LIST = [
-  'node_modules',
-  'dist',
-  'build',
-  'out',
-  'target',
-  'vendor',
-  'wheels',
-  '.venv',
-  'venv',
-  '__pycache__',
-  '.mypy_cache',
-  '.pytest_cache',
-  '.ruff_cache',
-  '.direnv',
-  '.cache',
-  '.idea',
-  '.vscode',
-  '.next',
-  '.nuxt',
-  '.svelte-kit',
-  '.turbo',
-];
-
 const bootstrapMock = vi.fn();
 const activeDocumentDiskSourceMock = vi.fn();
 const importThemeMock = vi.fn();
@@ -7780,6 +7753,9 @@ describe('App recent documents', () => {
   });
 
   it('resets settings to defaults from the Command Palette and persists through save_settings', async () => {
+    const { DEFAULT_SETTINGS: expectedDefaultSettings } = await import(
+      './lib/settings'
+    );
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
         return {
@@ -7816,47 +7792,7 @@ describe('App recent documents', () => {
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('save_settings', {
-        settings: {
-          autoSave: false,
-          editorFontSize: 14,
-          editorLineHeight: 1.6,
-          editorFontFamily: '',
-          editorLineWrap: true,
-          editorWrapColumn: 120,
-          editorShowWrapLine: true,
-          editorWordBreakKeepAll: true,
-          wysiwygCodeBlockWrap: false,
-          highlightSkillTokens: true,
-          outlineFontSize: 12,
-          outlineRowSpacing: 0,
-          defaultMode: 'Wysiwyg',
-          focusModeEnabled: false,
-          typewriterModeEnabled: false,
-          assetFolder: 'assets',
-          themeFollowSystem: true,
-          pdfPaperSize: 'A4',
-          pdfPaperOrientation: 'portrait',
-          pdfPaperWidthMm: 210,
-          pdfPaperHeightMm: 297,
-          diagnosticsEnabled: true,
-          analyticsEnabled: true,
-          showMinimap: true,
-          tableDensity: 'compact',
-          tableViewMode: 'normal',
-          codeBlockHighlight: true,
-          codeBlockTheme: 'one-dark',
-          codeBlockThemeSync: true,
-          terminalFontFamily: '',
-          terminalFontSize: 13,
-          terminalDefaultPath: '',
-          terminalStartLocation: 'document',
-          updateCheckEnabled: true,
-          lastUpdateCheckAt: null,
-          dismissedUpdateVersion: null,
-          defaultAppPromptSeen: false,
-          keybindingOverrides: {},
-          ignoreList: [...DEFAULT_IGNORE_LIST],
-        },
+        settings: expectedDefaultSettings,
       });
     });
   });
@@ -9382,6 +9318,9 @@ describe('App recent documents', () => {
   });
 
   it('restores default values when "Reset to Defaults" is clicked in the Settings dialog', async () => {
+    const { DEFAULT_SETTINGS: expectedDefaultSettings } = await import(
+      './lib/settings'
+    );
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {
         return {
@@ -9408,47 +9347,7 @@ describe('App recent documents', () => {
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('save_settings', {
-        settings: {
-          autoSave: false,
-          editorFontSize: 14,
-          editorLineHeight: 1.6,
-          editorFontFamily: '',
-          editorLineWrap: true,
-          editorWrapColumn: 120,
-          editorShowWrapLine: true,
-          editorWordBreakKeepAll: true,
-          wysiwygCodeBlockWrap: false,
-          highlightSkillTokens: true,
-          outlineFontSize: 12,
-          outlineRowSpacing: 0,
-          defaultMode: 'Wysiwyg',
-          focusModeEnabled: false,
-          typewriterModeEnabled: false,
-          assetFolder: 'assets',
-          themeFollowSystem: true,
-          pdfPaperSize: 'A4',
-          pdfPaperOrientation: 'portrait',
-          pdfPaperWidthMm: 210,
-          pdfPaperHeightMm: 297,
-          diagnosticsEnabled: true,
-          analyticsEnabled: true,
-          showMinimap: true,
-          tableDensity: 'compact',
-          tableViewMode: 'normal',
-          codeBlockHighlight: true,
-          codeBlockTheme: 'one-dark',
-          codeBlockThemeSync: true,
-          terminalFontFamily: '',
-          terminalFontSize: 13,
-          terminalDefaultPath: '',
-          terminalStartLocation: 'document',
-          updateCheckEnabled: true,
-          lastUpdateCheckAt: null,
-          dismissedUpdateVersion: null,
-          defaultAppPromptSeen: false,
-          keybindingOverrides: {},
-          ignoreList: [...DEFAULT_IGNORE_LIST],
-        },
+        settings: expectedDefaultSettings,
       });
     });
 
