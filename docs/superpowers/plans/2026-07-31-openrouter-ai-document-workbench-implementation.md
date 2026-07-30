@@ -66,7 +66,7 @@ fn ai_settings_default_and_recover_malformed_fields_independently() {
     assert_eq!(parsed.ai_prd_model, "z-ai/glm-5.2");
     assert_eq!(parsed.ai_translation_model, "z-ai/glm-5.2");
     assert_eq!(parsed.ai_custom_prompt_model, "vendor/model");
-    assert_eq!(parsed.ai_translation_target_language, "ko");
+    assert_eq!(parsed.ai_translation_target_language, "en");
     assert!(parsed.ai_zdr_only);
     assert!(parsed.ai_cloud_disclosure_accepted);
     assert!(parsed.auto_save);
@@ -87,7 +87,7 @@ it('normalizes every AI preference independently', () => {
     aiPrdModel: 'z-ai/glm-5.2',
     aiTranslationModel: 'moonshotai/kimi-k3',
     aiCustomPromptModel: 'z-ai/glm-5.2',
-    aiTranslationTargetLanguage: 'ko',
+    aiTranslationTargetLanguage: 'en',
     aiZdrOnly: true,
     aiCloudDisclosureAccepted: true,
   });
