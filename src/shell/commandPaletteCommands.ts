@@ -41,6 +41,7 @@ export type CommandPaletteActions = {
   checkForUpdates: () => void;
   installLatestUpdate: () => void;
   openDocumentStats: () => void;
+  runAiOnSelection: () => void;
   setTheme: (themeKind: ThemeKind) => void;
   followSystemTheme: () => void;
   importTheme: () => void;
@@ -56,6 +57,7 @@ type BuildCommandPaletteCommandsInput = {
   hasActiveDocumentPath?: boolean;
   /** A workspace/project root folder is open. */
   hasWorkspaceRoot?: boolean;
+  hasActiveSelection?: boolean;
   terminalOpen?: boolean;
   updateAvailable?: boolean;
   updateChecking?: boolean;
@@ -75,6 +77,7 @@ export function buildCommandPaletteCommands(
     activeDocumentOpen,
     hasActiveDocumentPath = false,
     hasWorkspaceRoot = false,
+    hasActiveSelection = false,
     terminalOpen = false,
     updateAvailable = false,
     updateChecking = false,
@@ -231,6 +234,13 @@ export function buildCommandPaletteCommands(
       shortcut: option.shortcutSymbol,
       run: () => actions.setMode(option.mode),
     })),
+    {
+      id: 'ai.runSelection',
+      category: 'AI',
+      label: 'AI: Run on Selection…',
+      disabled: !activeDocumentOpen || !hasActiveSelection,
+      run: actions.runAiOnSelection,
+    },
     {
       id: 'navigation.back',
       category: 'Navigation',

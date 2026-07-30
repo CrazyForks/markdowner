@@ -180,6 +180,15 @@ export function wysiwygPositionAtSourceLine(
 export function wysiwygCursorMarkdownOffset(editor: TiptapEditor | null): number {
   if (!editor) return 0;
   const head = wysiwygSelectionHead(editor.state.selection);
+  return wysiwygMarkdownOffsetAtPosition(editor, head);
+}
+
+export function wysiwygMarkdownOffsetAtPosition(
+  editor: TiptapEditor | null,
+  position: number,
+): number {
+  if (!editor) return 0;
+  const head = position;
   if (head <= 0) return 0;
   try {
     const slice = editor.state.doc.cut(0, head);

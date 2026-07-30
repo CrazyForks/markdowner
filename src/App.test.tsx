@@ -457,6 +457,7 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
   const editor: any = {
     markdown,
     lastSelection: null,
+    insertContentAtMock: vi.fn(),
   };
   const mockSelectionAnchor = { parent: { type: { name: 'paragraph' } } };
 
@@ -594,6 +595,17 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
         editor.commands.setTextSelection(selection);
         return chain;
       }),
+      insertContentAt: vi.fn(
+        (
+          range: { from: number; to: number },
+          content: string,
+          _options?: unknown,
+        ) => {
+          editor.insertContentAtMock(range, content);
+          replaceRange(range.from, range.to, content);
+          return chain;
+        },
+      ),
     };
     return chain;
   });
@@ -1021,6 +1033,111 @@ describe('App recent documents', () => {
     await waitFor(() =>
       expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith(proposed),
     );
+  });
+
+  it('applies a WYSIWYG drag-selection prompt in one editor transaction', async () => {
+    const source = 'alpha beta';
+    const replacement = 'BETA';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    editor.state.selection = {
+      from: 6,
+      to: 10,
+      anchor: 6,
+      head: 10,
+      empty: false,
+      $from: { parent: { type: { name: 'paragraph' } } },
+    };
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'selection.md',
+        activeDocumentPath: '/tmp/project/selection.md',
+        activeDocumentSource: source,
+      }),
+    );
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return { aiCloudDisclosureAccepted: true };
+      }
+      return undefined;
+    });
+    aiRunMock.mockImplementation(async (request) => ({
+      requestId: request.requestId,
+      documentId: request.documentId,
+      task: 'custom',
+      model: request.model,
+      generationId: 'generation-selection',
+      result: {
+        sourceRevisionHash: 'revision-selection',
+        proposedMarkdown: 'alpha BETA',
+        validation: { passed: true, issues: [] },
+        operations: [
+          {
+            id: 'selection:replace',
+            kind: 'replace',
+            targetSegmentId: 'selection',
+            sourceRange: { start: 6, end: 10 },
+            originalMarkdown: 'beta',
+            proposedMarkdown: replacement,
+            findingIds: [],
+          },
+        ],
+        hunks: [],
+        summary: null,
+        findings: [],
+        assumptions: [],
+        detectedSourceLanguage: null,
+        targetLanguage: null,
+        warnings: [],
+      },
+      validationIssues: [],
+      rawDiagnostic: null,
+      usage: null,
+      retryAfterSeconds: null,
+    }));
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+    act(() => {
+      editor.commands.setTextSelection({ from: 6, to: 10 });
+      tiptapMockState.lastOptions?.onSelectionUpdate?.({ editor });
+    });
+    fireEvent.keyDown(window, {
+      key: 'p',
+      metaKey: true,
+      shiftKey: true,
+    });
+    const palette = await screen.findByRole('dialog', {
+      name: /command palette/i,
+    });
+    fireEvent.click(
+      await within(palette).findByRole('option', {
+        name: /AI: Run on Selection/i,
+      }),
+    );
+
+    fireEvent.change(
+      await screen.findByLabelText('Prompt for selected text'),
+      {
+        target: { value: 'Make this uppercase' },
+      },
+    );
+    const runButton = screen.getByRole('button', {
+      name: 'Run on selection',
+    });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    await waitFor(() =>
+      expect(editor.insertContentAtMock).toHaveBeenCalledWith(
+        { from: 6, to: 10 },
+        replacement,
+      ),
+    );
+    expect(editor.insertContentAtMock).toHaveBeenCalledTimes(1);
+    expect(editor.markdown).toBe('alpha BETA');
   });
 
   it('smoke-tests empty-state controls without runtime errors', async () => {

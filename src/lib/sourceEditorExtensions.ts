@@ -87,6 +87,7 @@ interface SourceEditorExtensionOptions {
   skillNames?: ReadonlySet<string>;
   onViewportChange: (scrollElement: HTMLElement) => void;
   onTypewriterChange: (view: EditorView) => void;
+  onSelectionChange?: (view: EditorView) => void;
 }
 
 const EMPTY_SKILL_NAMES = new Set<string>();
@@ -98,6 +99,7 @@ export function buildSourceEditorExtensions({
   skillNames = EMPTY_SKILL_NAMES,
   onViewportChange,
   onTypewriterChange,
+  onSelectionChange,
 }: SourceEditorExtensionOptions): unknown[] {
   return [
     markdown(),
@@ -114,6 +116,9 @@ export function buildSourceEditorExtensions({
       }
       if (update.selectionSet || update.docChanged || update.focusChanged) {
         onTypewriterChange(update.view);
+      }
+      if (update.selectionSet) {
+        onSelectionChange?.(update.view);
       }
     }),
   ];

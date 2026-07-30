@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SelectionToolbar } from './SelectionToolbar';
@@ -94,5 +101,21 @@ describe('SelectionToolbar', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByRole('toolbar', { name: /text formatting/i })).toBeNull();
+  });
+
+  it('opens AI for the exact ProseMirror text range', async () => {
+    const editor = createSelectionEditor();
+    const onAiSelection = vi.fn();
+
+    render(
+      <SelectionToolbar editor={editor} onAiSelection={onAiSelection} />,
+    );
+    act(() => {
+      editor.emit('selectionUpdate');
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'AI prompt' }));
+
+    expect(onAiSelection).toHaveBeenCalledWith({ from: 2, to: 6 });
   });
 });

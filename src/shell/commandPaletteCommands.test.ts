@@ -41,6 +41,7 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     checkForUpdates: vi.fn(),
     installLatestUpdate: vi.fn(),
     openDocumentStats: vi.fn(),
+    runAiOnSelection: vi.fn(),
     setTheme: vi.fn(),
     followSystemTheme: vi.fn(),
     importTheme: vi.fn(),
@@ -105,6 +106,7 @@ describe('buildCommandPaletteCommands', () => {
       'view.mode.Wysiwyg',
       'view.mode.Editor',
       'view.mode.SplitView',
+      'ai.runSelection',
       'navigation.back',
       'navigation.forward',
       'terminal.toggle',
@@ -154,6 +156,26 @@ describe('buildCommandPaletteCommands', () => {
     );
     expect(commands.find((command) => command.id === 'view.findInFile')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'app.documentStats')?.disabled).toBe(true);
+    expect(commands.find((command) => command.id === 'ai.runSelection')?.disabled).toBe(
+      true,
+    );
+  });
+
+  it('enables AI selection execution only when a non-empty selection exists', () => {
+    const runAiOnSelection = vi.fn();
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      hasActiveSelection: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: actions({ runAiOnSelection }),
+    });
+
+    const command = commands.find((candidate) => candidate.id === 'ai.runSelection');
+    expect(command?.disabled).toBe(false);
+    command?.run?.();
+    expect(runAiOnSelection).toHaveBeenCalledTimes(1);
   });
 
   it('disables workspace HTML and PDF export without a workspace root', () => {

@@ -10,12 +10,14 @@ interface WysiwygEditorChromeProps {
   editor: TiptapEditor | null;
   enabled: boolean;
   skillNames?: ReadonlySet<string>;
+  onAiSelection?: (selection: { from: number; to: number }) => void;
 }
 
 export function WysiwygEditorChrome({
   editor,
   enabled,
   skillNames,
+  onAiSelection,
 }: WysiwygEditorChromeProps) {
   return (
     <>
@@ -30,7 +32,11 @@ export function WysiwygEditorChrome({
         enabled={enabled}
         skillNames={skillNames}
       />
-      <SelectionToolbar editor={editor} enabled={enabled} />
+      <SelectionToolbar
+        editor={editor}
+        enabled={enabled}
+        onAiSelection={onAiSelection}
+      />
       <LinkPopup editor={editor} enabled={enabled} />
       <TableToolbar editor={editor} enabled={enabled} />
     </>

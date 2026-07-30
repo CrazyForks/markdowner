@@ -6,6 +6,7 @@ import {
   Code,
   Italic,
   Link as LinkIcon,
+  Sparkles,
   Strikethrough,
 } from 'lucide-react';
 
@@ -17,6 +18,7 @@ interface Props {
   editor: Editor | null;
   /** When false, listeners are detached and nothing is rendered. */
   enabled?: boolean;
+  onAiSelection?: (selection: { from: number; to: number }) => void;
 }
 
 type Position = { top: number; left: number };
@@ -39,7 +41,11 @@ function isCellSelection(selection: unknown): boolean {
  * Renders an inline formatting toolbar above the current text selection. Only
  * visible when a non-empty text selection is active inside the WYSIWYG editor.
  */
-export function SelectionToolbar({ editor, enabled = true }: Props) {
+export function SelectionToolbar({
+  editor,
+  enabled = true,
+  onAiSelection,
+}: Props) {
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState<Position>({ top: 0, left: 0 });
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -257,6 +263,22 @@ export function SelectionToolbar({ editor, enabled = true }: Props) {
       >
         <LinkIcon className="size-4" />
       </ToolbarButton>
+      {onAiSelection ? (
+        <>
+          <span aria-hidden className="selection-toolbar-separator" />
+          <ToolbarButton
+            label="AI prompt"
+            active={false}
+            onClick={() => {
+              if (!editor) return;
+              const { from, to } = editor.state.selection;
+              if (from !== to) onAiSelection({ from, to });
+            }}
+          >
+            <Sparkles className="size-4" />
+          </ToolbarButton>
+        </>
+      ) : null}
     </div>,
     portalTarget,
   );

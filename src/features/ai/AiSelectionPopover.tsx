@@ -1,0 +1,295 @@
+import { useEffect, useMemo, useState } from 'react';
+import { LoaderCircle, Sparkles, Square, X } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import {
+  aiCancel,
+  aiKeyStatus,
+  aiListModels,
+  aiRun,
+} from '@/lib/desktop';
+import type { Settings } from '@/lib/settings';
+
+import { orderModels } from './model';
+import type { AiSelectionSnapshot } from './selection';
+import type {
+  AiKeyStatus,
+  AiModel,
+  AiRunRequest,
+  AiRunResult,
+  AiStreamEvent,
+} from './types';
+
+export interface AiSelectionServices {
+  keyStatus: () => Promise<AiKeyStatus>;
+  listModels: () => Promise<AiModel[]>;
+  run: (
+    request: AiRunRequest,
+    onEvent: (event: AiStreamEvent) => void,
+  ) => Promise<AiRunResult>;
+  cancel: (requestId: string) => Promise<boolean>;
+}
+
+export interface AiSelectionPopoverProps {
+  snapshot: AiSelectionSnapshot;
+  settings: Settings;
+  onClose: () => void;
+  onResult: (
+    result: AiRunResult,
+    snapshot: AiSelectionSnapshot,
+    request: AiRunRequest,
+  ) => void;
+  services?: AiSelectionServices;
+}
+
+const DEFAULT_SERVICES: AiSelectionServices = {
+  keyStatus: aiKeyStatus,
+  listModels: aiListModels,
+  run: aiRun,
+  cancel: aiCancel,
+};
+
+export function AiSelectionPopover({
+  snapshot,
+  settings,
+  onClose,
+  onResult,
+  services = DEFAULT_SERVICES,
+}: AiSelectionPopoverProps) {
+  const [prompt, setPrompt] = useState('');
+  const [models, setModels] = useState<AiModel[]>([]);
+  const [model, setModel] = useState(settings.aiCustomPromptModel);
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [runningRequestId, setRunningRequestId] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    services
+      .keyStatus()
+      .then(async (keyStatus) => {
+        if (cancelled) return;
+        setConfigured(keyStatus.configured);
+        if (!keyStatus.configured) return;
+        const catalog = await services.listModels();
+        if (!cancelled) setModels(catalog);
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setConfigured(false);
+          setError(errorMessage(reason));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [services]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || runningRequestId) return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, runningRequestId]);
+
+  const modelOptions = useMemo(() => orderModels(models, 'custom'), [models]);
+  const selectedModel =
+    modelOptions.find((candidate) => candidate.id === model) ??
+    modelOptions[0] ??
+    null;
+  const canRun =
+    configured === true &&
+    settings.aiCloudDisclosureAccepted &&
+    prompt.trim().length > 0 &&
+    selectedModel?.enabled === true &&
+    !runningRequestId;
+
+  const handleRun = async () => {
+    if (!canRun || !selectedModel) return;
+    const requestId = createRequestId();
+    const request: AiRunRequest = {
+      requestId,
+      documentId: snapshot.documentId,
+      source: snapshot.source,
+      selection: snapshot.byteRange,
+      task: 'custom',
+      model: selectedModel.id,
+      targetLanguage: null,
+      instruction: prompt.trim(),
+      zdrOnly: settings.aiZdrOnly,
+      maxOutputTokens: 4_096,
+    };
+    setRunningRequestId(requestId);
+    setStatus('Sending the selected text to OpenRouter…');
+    setError('');
+    try {
+      const result = await services.run(request, (event) => {
+        if (event.requestId !== requestId) return;
+        if (event.type === 'progress') {
+          setStatus(
+            `Receiving replacement · ${event.receivedCharacters} characters`,
+          );
+        } else if (event.type === 'cancelled') {
+          setStatus(
+            'Request cancelled. The provider may still report partial usage.',
+          );
+        } else if (event.type === 'failed') {
+          setError(event.message);
+        }
+      });
+      onResult(result, snapshot, request);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setRunningRequestId(null);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!runningRequestId) return;
+    setStatus('Cancelling… partial provider usage may still be charged.');
+    try {
+      await services.cancel(runningRequestId);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  };
+
+  return (
+    <section
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="ai-selection-heading"
+      className="fixed bottom-12 left-1/2 z-[80] w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl"
+      data-testid="ai-selection-popover"
+    >
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h2
+            id="ai-selection-heading"
+            className="flex items-center gap-2 text-sm font-semibold"
+          >
+            <Sparkles className="size-4" />
+            Prompt selected text
+          </h2>
+          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+            {snapshot.selectedText}
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Close AI prompt"
+          disabled={Boolean(runningRequestId)}
+          onClick={onClose}
+        >
+          <X />
+        </Button>
+      </header>
+
+      <div className="mt-3 grid gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="ai-selection-prompt">Prompt for selected text</Label>
+          <textarea
+            id="ai-selection-prompt"
+            autoFocus
+            rows={3}
+            value={prompt}
+            disabled={Boolean(runningRequestId)}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="Describe how to transform only this selection…"
+            className="w-full resize-y rounded-md border border-input bg-background px-2 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="ai-selection-model">Model for this request</Label>
+          <select
+            id="ai-selection-model"
+            value={selectedModel?.id ?? model}
+            disabled={Boolean(runningRequestId)}
+            onChange={(event) => setModel(event.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {modelOptions.map((option) => (
+              <option
+                key={option.id}
+                value={option.id}
+                disabled={!option.enabled}
+              >
+                {option.name} · {option.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {configured === false ? (
+          <p className="text-xs text-destructive">
+            Add and verify an OpenRouter key in Settings first.
+          </p>
+        ) : null}
+        {!settings.aiCloudDisclosureAccepted ? (
+          <p className="text-xs text-amber-800 dark:text-amber-200">
+            Approve cloud AI processing in Settings before running.
+          </p>
+        ) : null}
+
+        <div className="flex items-center gap-2">
+          {runningRequestId ? (
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleCancel()}
+            >
+              <Square />
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              onClick={() => void handleRun()}
+              disabled={!canRun}
+            >
+              <Sparkles />
+              Run on selection
+            </Button>
+          )}
+          <span className="text-[11px] text-muted-foreground">
+            {settings.aiZdrOnly ? 'ZDR only' : 'Provider retention allowed'}
+          </span>
+        </div>
+
+        <p
+          aria-live="polite"
+          className={
+            error
+              ? 'min-h-4 text-xs text-destructive'
+              : 'min-h-4 text-xs text-muted-foreground'
+          }
+        >
+          {error || status}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function createRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `ai-selection-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function errorMessage(reason: unknown): string {
+  if (reason && typeof reason === 'object' && 'message' in reason) {
+    return String(reason.message);
+  }
+  return reason instanceof Error ? reason.message : String(reason);
+}

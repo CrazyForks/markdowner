@@ -105,6 +105,7 @@ describe('buildSourceEditorExtensions', () => {
   it('routes update listener events to App-owned callbacks', () => {
     const onViewportChange = vi.fn();
     const onTypewriterChange = vi.fn();
+    const onSelectionChange = vi.fn();
     const scrollDOM = document.createElement('div');
     const view = { scrollDOM };
 
@@ -115,6 +116,7 @@ describe('buildSourceEditorExtensions', () => {
       skillNames: new Set(),
       onViewportChange,
       onTypewriterChange,
+      onSelectionChange,
     });
     const updateListener = extensions[extensions.length - 1] as {
       listener: (update: {
@@ -145,9 +147,11 @@ describe('buildSourceEditorExtensions', () => {
 
     expect(onViewportChange).toHaveBeenCalledWith(scrollDOM);
     expect(onTypewriterChange).toHaveBeenCalledWith(view);
+    expect(onSelectionChange).toHaveBeenCalledWith(view);
 
     onViewportChange.mockClear();
     onTypewriterChange.mockClear();
+    onSelectionChange.mockClear();
 
     updateListener.listener({
       viewportChanged: false,
@@ -159,5 +163,6 @@ describe('buildSourceEditorExtensions', () => {
 
     expect(onViewportChange).not.toHaveBeenCalled();
     expect(onTypewriterChange).not.toHaveBeenCalled();
+    expect(onSelectionChange).not.toHaveBeenCalled();
   });
 });
