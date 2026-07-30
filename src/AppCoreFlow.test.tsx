@@ -75,10 +75,12 @@ vi.mock('./lib/desktop', () => ({
     maskedLabel: null,
   }),
   aiListModels: vi.fn().mockResolvedValue([]),
+  aiModelPricing: vi.fn(),
   aiRenderSelectedOperations: vi.fn(),
   aiRun: vi.fn(),
   aiSaveKey: vi.fn(),
   aiVerifyKey: vi.fn(),
+  openExternalUrlInNewWindow: vi.fn(),
 }));
 
 vi.mock('@/shell/TerminalPanel', () => ({

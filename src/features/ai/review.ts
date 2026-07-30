@@ -7,7 +7,9 @@ export interface AiReview {
   sourceDocumentName: string;
   sourceSnapshot: string;
   request: AiRunRequest;
-  runResult: AiRunResult;
+  status: 'running' | 'complete' | 'failed' | 'cancelled';
+  statusMessage: string | null;
+  runResult: AiRunResult | null;
   createdAt: number;
 }
 
@@ -31,8 +33,42 @@ export function createAiReview(
     sourceDocumentName,
     sourceSnapshot: request.source,
     request,
+    status: 'complete',
+    statusMessage: null,
     runResult,
     createdAt: now,
+  };
+}
+
+export function createPendingAiReview(
+  request: AiRunRequest,
+  sourceDocumentName = 'Untitled',
+  now = Date.now(),
+): AiReview {
+  return {
+    id: `ai-review:${request.requestId}`,
+    requestId: request.requestId,
+    sourceDocumentId: request.documentId,
+    sourceDocumentName,
+    sourceSnapshot: request.source,
+    request,
+    status: 'running',
+    statusMessage: 'AI request in progress…',
+    runResult: null,
+    createdAt: now,
+  };
+}
+
+export function settlePendingAiReview(
+  review: AiReview,
+  status: 'failed' | 'cancelled',
+  statusMessage: string,
+): AiReview {
+  return {
+    ...review,
+    status,
+    statusMessage,
+    runResult: null,
   };
 }
 

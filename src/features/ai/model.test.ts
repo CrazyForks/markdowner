@@ -6,6 +6,7 @@ import {
   detectDocumentLanguage,
   estimateAiRun,
   orderModels,
+  resolveUsageCost,
   resolveRunGate,
   searchLanguages,
   type AiModel,
@@ -68,6 +69,34 @@ describe('AI model policy', () => {
 });
 
 describe('AI estimates and run gates', () => {
+  it('keeps provider cost authoritative and calculates a missing cost from pricing', () => {
+    expect(
+      resolveUsageCost(
+        {
+          promptTokens: 100,
+          completionTokens: 20,
+          totalTokens: 120,
+          costUsd: 0.004,
+          costCalculated: true,
+        },
+        { prompt: 0.000001, completion: 0.000002, updatedAt: 'now' },
+      ),
+    ).toMatchObject({ costUsd: 0.004, costCalculated: false });
+
+    expect(
+      resolveUsageCost(
+        {
+          promptTokens: 100,
+          completionTokens: 20,
+          totalTokens: 120,
+          costUsd: null,
+          costCalculated: false,
+        },
+        { prompt: 0.000001, completion: 0.000002, updatedAt: 'now' },
+      ),
+    ).toMatchObject({ costUsd: 0.00014, costCalculated: true });
+  });
+
   it('calculates a safe maximum cost from prompt and completion prices', () => {
     const estimate = estimateAiRun({
       source: '한글과 English text',

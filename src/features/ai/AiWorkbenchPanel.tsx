@@ -9,7 +9,9 @@ import {
   aiCancel,
   aiKeyStatus,
   aiListModels,
+  aiModelPricing,
   aiRun,
+  openExternalUrlInNewWindow,
 } from '@/lib/desktop';
 import type { Settings } from '@/lib/settings';
 
@@ -17,6 +19,7 @@ import {
   detectDocumentLanguage,
   estimateAiRun,
   orderModels,
+  resolveUsageCost,
   resolveRunGate,
   searchLanguages,
 } from './model';
@@ -24,6 +27,8 @@ import type {
   AiByteRange,
   AiKeyStatus,
   AiModel,
+  AiModelOption,
+  AiModelPricing,
   AiRunRequest,
   AiRunResult,
   AiStreamEvent,
@@ -33,11 +38,16 @@ import type {
 export interface AiWorkbenchServices {
   keyStatus: () => Promise<AiKeyStatus>;
   listModels: () => Promise<AiModel[]>;
+  modelPricing?: (
+    modelId: string,
+    zdrOnly: boolean,
+  ) => Promise<AiModelPricing>;
   run: (
     request: AiRunRequest,
     onEvent: (event: AiStreamEvent) => void,
   ) => Promise<AiRunResult>;
   cancel: (requestId: string) => Promise<boolean>;
+  openActivity?: () => Promise<void>;
 }
 
 export interface AiWorkbenchPanelProps {
@@ -46,6 +56,9 @@ export interface AiWorkbenchPanelProps {
   selection: AiByteRange | null;
   settings: Settings;
   onSettingsChange: (settings: Settings) => void;
+  onOpenSettings?: () => void;
+  onStart?: (request: AiRunRequest) => void;
+  onFailure?: (request: AiRunRequest, reason: unknown) => void;
   onResult: (result: AiRunResult, request: AiRunRequest) => void;
   services?: AiWorkbenchServices;
 }
@@ -53,8 +66,11 @@ export interface AiWorkbenchPanelProps {
 const DEFAULT_SERVICES: AiWorkbenchServices = {
   keyStatus: aiKeyStatus,
   listModels: aiListModels,
+  modelPricing: aiModelPricing,
   run: aiRun,
   cancel: aiCancel,
+  openActivity: () =>
+    openExternalUrlInNewWindow('https://openrouter.ai/activity'),
 };
 
 const selectClass =
@@ -66,6 +82,9 @@ export function AiWorkbenchPanel({
   selection,
   settings,
   onSettingsChange,
+  onOpenSettings,
+  onStart,
+  onFailure,
   onResult,
   services = DEFAULT_SERVICES,
 }: AiWorkbenchPanelProps) {
@@ -73,6 +92,12 @@ export function AiWorkbenchPanel({
   const [scope, setScope] = useState<'document' | 'selection'>('document');
   const [models, setModels] = useState<AiModel[]>([]);
   const [model, setModel] = useState(settings.aiPrdModel);
+  const [modelQuery, setModelQuery] = useState('');
+  const [livePricing, setLivePricing] = useState<{
+    modelId: string;
+    pricing: AiModelPricing;
+  } | null>(null);
+  const [pricingLoading, setPricingLoading] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState(
     settings.aiTranslationTargetLanguage,
   );
@@ -84,6 +109,7 @@ export function AiWorkbenchPanel({
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState(false);
+  const [showActivityLink, setShowActivityLink] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,17 +164,78 @@ export function AiWorkbenchPanel({
   }, [scope, selection]);
 
   const modelOptions = useMemo(() => orderModels(models, task), [models, task]);
+  const visibleModelOptions = useMemo(
+    () => searchModels(modelOptions, modelQuery),
+    [modelOptions, modelQuery],
+  );
   const selectedModel =
-    modelOptions.find((candidate) => candidate.id === model) ?? modelOptions[0] ?? null;
+    modelOptions.find((candidate) => candidate.id === model) ?? null;
+  const selectedModelId = selectedModel?.id ?? null;
+  const configured = keyStatus?.configured === true;
+  const selectedModelUnavailable =
+    configured && !catalogLoading && selectedModel === null;
+  const selectedPricing =
+    selectedModel && services.modelPricing
+      ? livePricing?.modelId === selectedModel.id
+        ? livePricing.pricing
+        : {
+            prompt: null,
+            completion: null,
+            updatedAt: '',
+          }
+      : selectedModel?.pricing ?? null;
+  const pricedSelectedModel =
+    selectedModel && selectedPricing
+      ? { ...selectedModel, pricing: selectedPricing }
+      : selectedModel;
+
+  useEffect(() => {
+    if (!configured || !selectedModelId || !services.modelPricing) {
+      setLivePricing(null);
+      setPricingLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLivePricing(null);
+    setPricingLoading(true);
+    services
+      .modelPricing(selectedModelId, settings.aiZdrOnly)
+      .then((pricing) => {
+        if (!cancelled) {
+          setLivePricing({ modelId: selectedModelId, pricing });
+        }
+      })
+      .catch((reason) => {
+        if (cancelled) return;
+        setLivePricing({
+          modelId: selectedModelId,
+          pricing: {
+            prompt: null,
+            completion: null,
+            updatedAt: '',
+          },
+        });
+        setError(errorMessage(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setPricingLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [configured, selectedModelId, services, settings.aiZdrOnly]);
+
   const scopedSource =
     scope === 'selection' && selection
       ? sourceForByteRange(source, selection)
       : source;
-  const estimate = selectedModel
+  const estimate = pricedSelectedModel
     ? estimateAiRun({
         source: scopedSource,
         scope,
-        model: selectedModel,
+        model: pricedSelectedModel,
         maxOutputTokens: 4_096,
       })
     : null;
@@ -164,6 +251,12 @@ export function AiWorkbenchPanel({
   const languages = searchLanguages(languageQuery).slice(0, 12);
   const requiresInstruction = task === 'custom';
   const targetRequired = task === 'translation';
+  const taskDefaultModel =
+    task === 'prd'
+      ? settings.aiPrdModel
+      : task === 'translation'
+        ? settings.aiTranslationModel
+        : settings.aiCustomPromptModel;
   const detectedSourceLanguage = useMemo(
     () => (targetRequired ? detectDocumentLanguage(source) : null),
     [source, targetRequired],
@@ -176,10 +269,10 @@ export function AiWorkbenchPanel({
     targetRequired &&
     detectedSourceLanguage !== null &&
     detectedSourceLanguage === normalizedTargetLanguage;
-  const configured = keyStatus?.configured === true;
   const disclosureAccepted = settings.aiCloudDisclosureAccepted;
   const canRun =
     !runningRequestId &&
+    !pricingLoading &&
     configured &&
     disclosureAccepted &&
     source.length > 0 &&
@@ -203,20 +296,18 @@ export function AiWorkbenchPanel({
 
   const chooseModel = (modelId: string) => {
     setModel(modelId);
+    setModelQuery('');
     setConfirmed(false);
-    const currentDefault =
-      task === 'prd'
-        ? settings.aiPrdModel
-        : task === 'translation'
-          ? settings.aiTranslationModel
-          : settings.aiCustomPromptModel;
-    if (modelId === currentDefault) return;
+  };
+
+  const saveModelAsDefault = () => {
+    if (!selectedModel || selectedModel.id === taskDefaultModel) return;
     onSettingsChange(
       task === 'prd'
-        ? { ...settings, aiPrdModel: modelId }
+        ? { ...settings, aiPrdModel: selectedModel.id }
         : task === 'translation'
-          ? { ...settings, aiTranslationModel: modelId }
-          : { ...settings, aiCustomPromptModel: modelId },
+          ? { ...settings, aiTranslationModel: selectedModel.id }
+          : { ...settings, aiCustomPromptModel: selectedModel.id },
     );
   };
 
@@ -236,8 +327,10 @@ export function AiWorkbenchPanel({
       maxOutputTokens: 4_096,
     };
     setRunningRequestId(requestId);
+    setShowActivityLink(false);
     setError('');
     setStatus('Starting OpenRouter request…');
+    onStart?.(request);
     try {
       const result = await services.run(request, (event) => {
         if (event.requestId !== requestId) return;
@@ -245,6 +338,7 @@ export function AiWorkbenchPanel({
           setStatus(`Receiving structured result · ${event.receivedCharacters} characters`);
         } else if (event.type === 'cancelled') {
           setStatus('Request cancelled. The provider may still report partial usage.');
+          setShowActivityLink(true);
         } else if (event.type === 'failed') {
           setError(event.message);
         }
@@ -254,10 +348,29 @@ export function AiWorkbenchPanel({
           ? 'AI result is ready for review.'
           : 'The response failed local validation and is available for inspection.',
       );
-      onResult(result, request);
+      if (result.usage) setShowActivityLink(false);
+      onResult(
+        result.usage
+          ? {
+              ...result,
+              usage: resolveUsageCost(
+                result.usage,
+                selectedPricing ?? selectedModel.pricing,
+              ),
+            }
+          : result,
+        request,
+      );
     } catch (reason) {
-      setError(errorMessage(reason));
-      setStatus('');
+      onFailure?.(request, reason);
+      if (errorCode(reason) === 'cancelled') {
+        setError('');
+        setStatus('Request cancelled. Final usage is unavailable.');
+        setShowActivityLink(true);
+      } else {
+        setError(errorMessage(reason));
+        setStatus('');
+      }
     } finally {
       setRunningRequestId(null);
     }
@@ -268,6 +381,15 @@ export function AiWorkbenchPanel({
     setStatus('Cancelling… partial provider usage may still be charged.');
     try {
       await services.cancel(runningRequestId);
+      setShowActivityLink(true);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  };
+
+  const handleOpenActivity = async () => {
+    try {
+      await (services.openActivity ?? DEFAULT_SERVICES.openActivity)?.();
     } catch (reason) {
       setError(errorMessage(reason));
     }
@@ -300,6 +422,17 @@ export function AiWorkbenchPanel({
               Add a key in Settings → AI &amp; OpenRouter. Markdowner never sends a
               document automatically.
             </p>
+            {onOpenSettings ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-3"
+                onClick={onOpenSettings}
+              >
+                Open AI settings
+              </Button>
+            ) : null}
           </div>
         ) : null}
 
@@ -348,15 +481,44 @@ export function AiWorkbenchPanel({
               </span>
             ) : null}
           </div>
+          <Input
+            type="search"
+            aria-label="Search models"
+            value={modelQuery}
+            onChange={(event) => setModelQuery(event.target.value)}
+            placeholder="Search models by name or slug"
+            disabled={Boolean(runningRequestId)}
+          />
           <select
             id="ai-model"
             aria-label="AI model"
             className={selectClass}
-            value={selectedModel?.id ?? model}
+            value={
+              selectedModelUnavailable
+                ? model
+                : visibleModelOptions.some(
+                      (candidate) => candidate.id === selectedModel?.id,
+                    )
+                ? selectedModel?.id
+                : ''
+            }
             disabled={Boolean(runningRequestId)}
             onChange={(event) => chooseModel(event.target.value)}
           >
-            {modelOptions.map((option) => (
+            {selectedModelUnavailable ? (
+              <option value={model} disabled>
+                {model} · unavailable
+              </option>
+            ) : null}
+            {selectedModel &&
+            !visibleModelOptions.some(
+              (candidate) => candidate.id === selectedModel.id,
+            ) ? (
+              <option value="" disabled>
+                Choose a matching model
+              </option>
+            ) : null}
+            {visibleModelOptions.map((option) => (
               <option
                 key={option.id}
                 value={option.id}
@@ -366,9 +528,41 @@ export function AiWorkbenchPanel({
               </option>
             ))}
           </select>
+          {modelQuery && visibleModelOptions.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No text-output models match this search.
+            </p>
+          ) : null}
+          {pricingLoading ? (
+            <p className="text-[11px] text-muted-foreground">
+              Checking eligible endpoint pricing…
+            </p>
+          ) : null}
           {selectedModel?.disabledReason ? (
             <p className="text-xs text-destructive">{selectedModel.disabledReason}</p>
           ) : null}
+          {selectedModelUnavailable ? (
+            <p role="alert" className="text-xs text-destructive">
+              The saved model is unavailable or blocked. Choose another model
+              explicitly.
+            </p>
+          ) : null}
+          {selectedModel && selectedModel.id !== taskDefaultModel ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="w-fit"
+              disabled={Boolean(runningRequestId)}
+              onClick={saveModelAsDefault}
+            >
+              Save as {taskLabel(task)} default
+            </Button>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              Task default · change the selector for this request only.
+            </p>
+          )}
         </div>
 
         {targetRequired ? (
@@ -538,6 +732,17 @@ export function AiWorkbenchPanel({
         >
           {error || status}
         </p>
+        {showActivityLink ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="link"
+            className="h-auto w-fit px-0 text-xs"
+            onClick={() => void handleOpenActivity()}
+          >
+            OpenRouter Activity
+          </Button>
+        ) : null}
       </div>
     </section>
   );
@@ -558,13 +763,51 @@ function sourceForByteRange(source: string, range: AiByteRange): string {
 }
 
 function errorMessage(reason: unknown): string {
+  const retryAfterSeconds =
+    reason &&
+    typeof reason === 'object' &&
+    'retryAfterSeconds' in reason &&
+    typeof reason.retryAfterSeconds === 'number'
+      ? reason.retryAfterSeconds
+      : null;
+  let message: string;
   if (reason && typeof reason === 'object' && 'message' in reason) {
-    return String(reason.message);
+    message = String(reason.message);
+  } else {
+    message = reason instanceof Error ? reason.message : String(reason);
   }
-  return reason instanceof Error ? reason.message : String(reason);
+  return retryAfterSeconds === null
+    ? message
+    : `${message} Retry after ${retryAfterSeconds} seconds.`;
+}
+
+function errorCode(reason: unknown): string | null {
+  return reason &&
+    typeof reason === 'object' &&
+    'code' in reason &&
+    typeof reason.code === 'string'
+    ? reason.code
+    : null;
 }
 
 function languageName(code: string): string {
   if (typeof Intl.DisplayNames !== 'function') return code.toLocaleUpperCase();
   return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) ?? code;
+}
+
+function taskLabel(task: AiTask): string {
+  return task === 'prd' ? 'PRD' : task === 'translation' ? 'translation' : 'custom';
+}
+
+function searchModels(
+  models: readonly AiModelOption[],
+  query: string,
+): AiModelOption[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return [...models];
+  return models.filter((model) =>
+    [model.name, model.id, model.description ?? ''].some((value) =>
+      value.toLocaleLowerCase().includes(normalized),
+    ),
+  );
 }

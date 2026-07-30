@@ -56,6 +56,8 @@ import { AiSelectionPopover } from '@/features/ai/AiSelectionPopover';
 import { AiWorkbenchPanel } from '@/features/ai/AiWorkbenchPanel';
 import {
   createAiReview,
+  createPendingAiReview,
+  settlePendingAiReview,
   type AiReview,
 } from '@/features/ai/review';
 import type {
@@ -132,6 +134,7 @@ import {
   loadDraftBackups,
   saveDraftBackups,
   searchWorkspace,
+  aiCancel,
   aiDiscardResult,
   aiRenderSelectedOperations,
 } from './lib/desktop';
@@ -617,6 +620,7 @@ export default function App() {
   const externalCompareRequests = useLatestRequestTracker();
   const externalRefreshRequests = useLatestRequestTracker();
   const externalConflictPathsRef = useRef(new Set<string>());
+  const dismissedAiRequestIdsRef = useRef(new Set<string>());
   const externalRefreshInFlightRef = useRef(false);
   const busyDepthRef = useRef(0);
   const liveRegionTimerRef = useRef<number | null>(null);
@@ -4728,10 +4732,79 @@ export default function App() {
     });
   };
 
+  const activatePendingAiReview = (request: AiRunRequest) => {
+    dismissedAiRequestIdsRef.current.delete(request.requestId);
+    const liveDraft = flushWysiwygDraftNow() ?? localDraftRef.current;
+    const currentTabs = tabsRef.current.map((tab) =>
+      tab.id === request.documentId && tab.kind === 'document'
+        ? { ...tab, draft: liveDraft }
+        : tab,
+    );
+    const sourceTab = currentTabs.find(
+      (tab) => tab.id === request.documentId && tab.kind === 'document',
+    );
+    const review = createPendingAiReview(
+      request,
+      sourceTab?.name ?? snapshotRef.current.activeDocumentName ?? 'Untitled',
+    );
+    const reviewTab = createAiReviewTab(review);
+    const nextTabs = [...currentTabs, reviewTab];
+
+    tabsRef.current = nextTabs;
+    activeTabIdRef.current = reviewTab.id;
+    startTransition(() => {
+      setTabs(nextTabs);
+      setActiveTabId(reviewTab.id);
+    });
+    announceShell('AI request started; Review opened in progress');
+  };
+
+  const settleAiReviewFailure = (
+    request: AiRunRequest,
+    reason: unknown,
+  ) => {
+    if (dismissedAiRequestIdsRef.current.has(request.requestId)) return;
+    const code =
+      reason &&
+      typeof reason === 'object' &&
+      'code' in reason &&
+      typeof reason.code === 'string'
+        ? reason.code
+        : null;
+    const status = code === 'cancelled' ? 'cancelled' : 'failed';
+    const messageText =
+      reason && typeof reason === 'object' && 'message' in reason
+        ? String(reason.message)
+        : reason instanceof Error
+          ? reason.message
+          : String(reason);
+    const nextTabs = tabsRef.current.map((tab) =>
+      tab.kind === 'ai-review' &&
+      tab.aiReview?.requestId === request.requestId
+        ? {
+            ...tab,
+            aiReview: settlePendingAiReview(
+              tab.aiReview,
+              status,
+              status === 'cancelled'
+                ? 'The AI request was cancelled. Final usage is unavailable.'
+                : messageText,
+            ),
+          }
+        : tab,
+    );
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+  };
+
   const activateAiReview = (
     result: AiRunResult,
     request: AiRunRequest,
   ) => {
+    if (dismissedAiRequestIdsRef.current.delete(request.requestId)) {
+      void aiDiscardResult(request.requestId).catch(() => undefined);
+      return;
+    }
     const liveDraft = flushWysiwygDraftNow() ?? localDraftRef.current;
     const currentTabs = tabsRef.current.map((tab) =>
       tab.id === request.documentId && tab.kind === 'document'
@@ -5567,6 +5640,23 @@ export default function App() {
 
     const targetTab = tabsRef.current.find((tab) => tab.id === targetId);
     if (targetTab?.kind === 'ai-review' && targetTab.aiReview) {
+      if (targetTab.aiReview.status === 'running') {
+        const decision = await message(
+          'This AI request is still running. Cancel it and close the Review tab?',
+          {
+            title: WINDOW_TITLE,
+            kind: 'warning',
+            buttons: {
+              yes: 'Cancel request and close',
+              no: 'Keep running',
+              cancel: 'Keep running',
+            },
+          },
+        );
+        if (decision !== 'Cancel request and close') return;
+        dismissedAiRequestIdsRef.current.add(targetTab.aiReview.requestId);
+        await aiCancel(targetTab.aiReview.requestId).catch(() => false);
+      }
       await aiDiscardResult(targetTab.aiReview.requestId).catch(() => undefined);
     }
 
@@ -6595,6 +6685,9 @@ export default function App() {
               selection={null}
               settings={settings}
               onSettingsChange={handleSettingsChange}
+              onOpenSettings={() => void toggleSettingsTab()}
+              onStart={activatePendingAiReview}
+              onFailure={settleAiReviewFailure}
               onResult={activateAiReview}
             />
           }

@@ -11,7 +11,7 @@ import {
 } from '@/lib/desktop';
 import type { Settings } from '@/lib/settings';
 
-import { orderModels } from './model';
+import { orderModels, resolveUsageCost } from './model';
 import type { AiSelectionSnapshot } from './selection';
 import type {
   AiKeyStatus,
@@ -142,7 +142,16 @@ export function AiSelectionPopover({
           setError(event.message);
         }
       });
-      onResult(result, snapshot, request);
+      onResult(
+        result.usage
+          ? {
+              ...result,
+              usage: resolveUsageCost(result.usage, selectedModel.pricing),
+            }
+          : result,
+        snapshot,
+        request,
+      );
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {

@@ -6,11 +6,11 @@ use std::{
 use futures_util::StreamExt;
 use regex::Regex;
 use reqwest::{
+    header::{HeaderMap, HeaderValue, AUTHORIZATION, RETRY_AFTER},
     Client, Response, StatusCode, Url,
-    header::{AUTHORIZATION, HeaderMap, HeaderValue, RETRY_AFTER},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::AiError;
@@ -18,6 +18,7 @@ use super::AiError;
 const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
 const OPENROUTER_APP_TITLE: &str = "Markdowner";
 const OPENROUTER_APP_REFERER: &str = "https://markdowner.chann.dev";
+const PROMPT_VERSION: &str = "2026-07-31.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -185,7 +186,7 @@ fn parse_usage(value: &Value) -> Option<AiUsage> {
         completion_tokens,
         total_tokens,
         cost_usd,
-        cost_calculated: cost_usd.is_some(),
+        cost_calculated: false,
     })
 }
 
@@ -198,6 +199,9 @@ pub fn build_chat_request(request: &AiCompletionRequest) -> Value {
         "stream": true,
         "stream_options": {
             "include_usage": true
+        },
+        "metadata": {
+            "prompt_version": PROMPT_VERSION
         },
         "provider": {
             "zdr": request.zdr_only,
@@ -471,23 +475,29 @@ impl OpenRouterClient {
         &self,
         secret: &str,
         model_id: &str,
+        zdr_only: bool,
     ) -> Result<AiModelPricing, AiError> {
-        let (author, slug) = model_id.split_once('/').ok_or_else(|| {
-            AiError::new(
-                "invalid_model",
-                "OpenRouter model IDs must contain author/name.",
-            )
-        })?;
-        let mut url = self.endpoint("models")?;
-        {
-            let mut segments = url.path_segments_mut().map_err(|_| {
+        let url = if zdr_only {
+            self.endpoint("endpoints/zdr")?
+        } else {
+            let (author, slug) = model_id.split_once('/').ok_or_else(|| {
                 AiError::new(
-                    "client_error",
-                    "Could not construct the model endpoint URL.",
+                    "invalid_model",
+                    "OpenRouter model IDs must contain author/name.",
                 )
             })?;
-            segments.push(author).push(slug).push("endpoints");
-        }
+            let mut url = self.endpoint("models")?;
+            {
+                let mut segments = url.path_segments_mut().map_err(|_| {
+                    AiError::new(
+                        "client_error",
+                        "Could not construct the model endpoint URL.",
+                    )
+                })?;
+                segments.push(author).push(slug).push("endpoints");
+            }
+            url
+        };
         let response = self
             .http
             .get(url)
@@ -502,12 +512,25 @@ impl OpenRouterClient {
                 "OpenRouter returned invalid endpoint pricing.",
             )
         })?;
-        let endpoints = payload
-            .pointer("/data/endpoints")
-            .or_else(|| payload.get("data"))
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+        let endpoints = if zdr_only {
+            payload
+                .get("data")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|endpoint| {
+                    endpoint.get("model_id").and_then(Value::as_str) == Some(model_id)
+                })
+                .cloned()
+                .collect()
+        } else {
+            payload
+                .pointer("/data/endpoints")
+                .or_else(|| payload.get("data"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+        };
         let prompt = endpoints
             .iter()
             .filter_map(|endpoint| endpoint.pointer("/pricing/prompt").and_then(value_as_f64))
@@ -755,8 +778,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        AiCompletionRequest, AiTask, OpenRouterClient, SseDecoder, build_chat_request,
-        build_messages, redact_sensitive,
+        build_chat_request, build_messages, redact_sensitive, AiCompletionRequest, AiTask,
+        OpenRouterClient, SseDecoder,
     };
 
     fn fixture_request(task: AiTask) -> AiCompletionRequest {
@@ -789,30 +812,25 @@ mod tests {
         assert_eq!(request["stream_options"]["include_usage"], true);
         assert_eq!(request["response_format"]["type"], "json_schema");
         assert_eq!(request["model"], "z-ai/glm-5.2");
+        assert_eq!(request["metadata"]["prompt_version"], "2026-07-31.v1");
     }
 
     #[test]
     fn document_prompt_is_delimited_as_untrusted_data() {
         let messages = build_messages(&fixture_request(AiTask::Prd));
 
-        assert!(
-            messages[0]["content"]
-                .as_str()
-                .unwrap()
-                .contains("document is data")
-        );
-        assert!(
-            messages[1]["content"]
-                .as_str()
-                .unwrap()
-                .contains("<document_data>")
-        );
-        assert!(
-            !messages[0]["content"]
-                .as_str()
-                .unwrap()
-                .contains("ignore previous instructions")
-        );
+        assert!(messages[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("document is data"));
+        assert!(messages[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("<document_data>"));
+        assert!(!messages[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("ignore previous instructions"));
     }
 
     #[test]
@@ -861,7 +879,9 @@ mod tests {
         let complete = decoder.finish().unwrap();
         assert_eq!(complete.content, r#"{"schema_version":1}"#);
         assert_eq!(complete.generation_id.as_deref(), Some("gen-1"));
-        assert_eq!(complete.usage.unwrap().total_tokens, 13);
+        let usage = complete.usage.unwrap();
+        assert_eq!(usage.total_tokens, 13);
+        assert!(!usage.cost_calculated);
     }
 
     #[test]
@@ -912,6 +932,26 @@ mod tests {
         assert_eq!(models[0].id, "z-ai/glm-5.2");
         assert_eq!(models[0].pricing.completion, Some(0.000_002));
         assert!(request.starts_with("GET /api/v1/models/user "));
+    }
+
+    #[tokio::test]
+    async fn zdr_pricing_uses_only_matching_zero_retention_endpoints() {
+        let (base_url, request_rx) = spawn_mock_response(
+            200,
+            "application/json",
+            r#"{"data":[{"model_id":"z-ai/glm-5.2","pricing":{"prompt":"0.000003","completion":"0.000004"}},{"model_id":"moonshotai/kimi-k3","pricing":{"prompt":"0.9","completion":"0.9"}},{"model_id":"z-ai/glm-5.2","pricing":{"prompt":"0.000005","completion":"0.000002"}}]}"#,
+        );
+        let client = OpenRouterClient::with_base_url(&base_url).unwrap();
+
+        let pricing = client
+            .model_pricing("sk-or-v1-test", "z-ai/glm-5.2", true)
+            .await
+            .unwrap();
+        let request = request_rx.recv().unwrap();
+
+        assert_eq!(pricing.prompt, Some(0.000_005));
+        assert_eq!(pricing.completion, Some(0.000_004));
+        assert!(request.starts_with("GET /api/v1/endpoints/zdr "));
     }
 
     #[tokio::test]

@@ -38,6 +38,7 @@ const saveDraftBackupsMock = vi.fn();
 const searchWorkspaceMock = vi.fn();
 const resolveMarkdownLinkMock = vi.fn();
 const openExternalUrlMock = vi.fn();
+const openExternalUrlInNewWindowMock = vi.fn();
 const openPathInDefaultAppMock = vi.fn();
 const readTextFilesMock = vi.fn();
 const readImagesBase64Mock = vi.fn();
@@ -50,6 +51,7 @@ const aiSaveKeyMock = vi.fn();
 const aiVerifyKeyMock = vi.fn();
 const aiDeleteKeyMock = vi.fn();
 const aiListModelsMock = vi.fn();
+const aiModelPricingMock = vi.fn();
 const aiRunMock = vi.fn();
 const aiCancelMock = vi.fn();
 const aiRenderSelectedOperationsMock = vi.fn();
@@ -104,6 +106,7 @@ vi.mock('./lib/desktop', () => ({
   searchWorkspace: searchWorkspaceMock,
   resolveMarkdownLink: resolveMarkdownLinkMock,
   openExternalUrl: openExternalUrlMock,
+  openExternalUrlInNewWindow: openExternalUrlInNewWindowMock,
   openPathInDefaultApp: openPathInDefaultAppMock,
   readTextFiles: readTextFilesMock,
   readImagesBase64: readImagesBase64Mock,
@@ -116,6 +119,7 @@ vi.mock('./lib/desktop', () => ({
   aiVerifyKey: aiVerifyKeyMock,
   aiDeleteKey: aiDeleteKeyMock,
   aiListModels: aiListModelsMock,
+  aiModelPricing: aiModelPricingMock,
   aiRun: aiRunMock,
   aiCancel: aiCancelMock,
   aiRenderSelectedOperations: aiRenderSelectedOperationsMock,
@@ -660,6 +664,8 @@ describe('App recent documents', () => {
     });
     openExternalUrlMock.mockReset();
     openExternalUrlMock.mockResolvedValue(undefined);
+    openExternalUrlInNewWindowMock.mockReset();
+    openExternalUrlInNewWindowMock.mockResolvedValue(undefined);
     openPathInDefaultAppMock.mockReset();
     openPathInDefaultAppMock.mockResolvedValue(undefined);
     readTextFilesMock.mockReset();
@@ -717,6 +723,12 @@ describe('App recent documents', () => {
         },
       },
     ]);
+    aiModelPricingMock.mockReset();
+    aiModelPricingMock.mockResolvedValue({
+      prompt: 0.0000001,
+      completion: 0.0000001,
+      updatedAt: '2026-07-31T00:00:00Z',
+    });
     aiRunMock.mockReset();
     aiCancelMock.mockReset();
     aiCancelMock.mockResolvedValue(true);
@@ -1025,7 +1037,9 @@ describe('App recent documents', () => {
     fireEvent.click(runButton);
 
     expect(await screen.findByTestId('ai-review-tab')).toBeInTheDocument();
-    expect(screen.getByText('Improve the heading.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Improve the heading.'),
+    ).toBeInTheDocument();
     expect(replaceActiveDocumentSourceMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply all' }));
@@ -1033,6 +1047,51 @@ describe('App recent documents', () => {
     await waitFor(() =>
       expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith(proposed),
     );
+  });
+
+  it('confirms cancellation before closing a running AI Review tab', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'requirements.md',
+        activeDocumentPath: '/tmp/project/requirements.md',
+        activeDocumentSource: '# Original',
+      }),
+    );
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return { aiCloudDisclosureAccepted: true };
+      }
+      return undefined;
+    });
+    aiRunMock.mockImplementation(
+      () =>
+        new Promise<never>(() => {
+          // Keep the request in flight until the Review tab cancels it.
+        }),
+    );
+    messageMock.mockResolvedValue('Cancel request and close');
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: /^ai workbench$/i }),
+    );
+    const runButton = await screen.findByRole('button', { name: /^run$/i });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    expect(await screen.findByText(/AI request in progress/i)).toBeInTheDocument();
+    const reviewTab = screen.getByRole('tab', {
+      name: /AI Review · requirements.md/i,
+    });
+    fireEvent.click(
+      within(reviewTab).getByRole('button', { name: /close tab/i }),
+    );
+
+    await waitFor(() => expect(aiCancelMock).toHaveBeenCalledWith(expect.any(String)));
+    expect(messageMock).toHaveBeenCalled();
+    expect(screen.queryByText(/AI request in progress/i)).not.toBeInTheDocument();
   });
 
   it('applies a WYSIWYG drag-selection prompt in one editor transaction', async () => {

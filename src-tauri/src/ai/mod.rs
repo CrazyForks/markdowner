@@ -423,9 +423,13 @@ pub async fn ai_list_models(state: State<'_, AiState>) -> Result<Vec<AiModel>, A
 pub async fn ai_model_pricing(
     state: State<'_, AiState>,
     model_id: String,
+    zdr_only: bool,
 ) -> Result<AiModelPricing, AiError> {
     let secret = state.keychain.read_secret()?;
-    state.client.model_pricing(&secret, &model_id).await
+    state
+        .client
+        .model_pricing(&secret, &model_id, zdr_only)
+        .await
 }
 
 #[tauri::command]

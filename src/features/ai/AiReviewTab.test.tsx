@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AiRunRequest, AiRunResult } from './types';
-import { createAiReview } from './review';
+import { createAiReview, createPendingAiReview } from './review';
 import { AiReviewTab } from './AiReviewTab';
 
 afterEach(cleanup);
@@ -80,6 +80,24 @@ const runResult: AiRunResult = {
 };
 
 describe('AiReviewTab', () => {
+  it('renders a non-applicable running state before a full-document result arrives', () => {
+    render(
+      <AiReviewTab
+        review={createPendingAiReview(request, 'requirements.md')}
+        currentSource={request.source}
+        sourcePresent
+        onApply={vi.fn()}
+        onRenderSelected={vi.fn()}
+        onOpenAsDocument={vi.fn()}
+        onRerun={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/AI request in progress/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply all' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Rerun' })).toBeDisabled();
+  });
+
   it('renders findings and diff hunks, then applies the full validated proposal', () => {
     const onApply = vi.fn();
     render(
@@ -97,6 +115,10 @@ describe('AiReviewTab', () => {
     expect(screen.getByText('No measurable threshold.')).toBeInTheDocument();
     expect(screen.getByText('− Vague.')).toBeInTheDocument();
     expect(screen.getByText('+ Measurable.')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Prompt 100 · Completion 20 · Total 120/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/\$0.0020 · calculated/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply all' }));
 

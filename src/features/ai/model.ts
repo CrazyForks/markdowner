@@ -1,8 +1,10 @@
 import type {
   AiModel,
   AiModelOption,
+  AiModelPricing,
   AiScope,
   AiTask,
+  AiUsage,
 } from './types';
 
 export type { AiModel, AiModelOption, AiScope, AiTask } from './types';
@@ -211,6 +213,25 @@ export function estimateAiRun({
     maxOutputTokens,
     maxCostUsd,
     pricingUpdatedAt: model.pricing.updatedAt || null,
+  };
+}
+
+export function resolveUsageCost(
+  usage: AiUsage,
+  pricing: AiModelPricing,
+): AiUsage {
+  if (usage.costUsd !== null) {
+    return { ...usage, costCalculated: false };
+  }
+  if (pricing.prompt === null || pricing.completion === null) {
+    return { ...usage, costCalculated: false };
+  }
+  return {
+    ...usage,
+    costUsd:
+      usage.promptTokens * pricing.prompt +
+      usage.completionTokens * pricing.completion,
+    costCalculated: true,
   };
 }
 

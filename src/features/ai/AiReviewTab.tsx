@@ -35,7 +35,8 @@ export function AiReviewTab({
   onOpenAsDocument,
   onRerun,
 }: AiReviewTabProps) {
-  const document = review.runResult.result;
+  const runResult = review.runResult;
+  const document = runResult?.result ?? null;
   const [selectedIds, setSelectedIds] = useState<string[]>(
     () => document?.operations.map((operation) => operation.id) ?? [],
   );
@@ -57,7 +58,7 @@ export function AiReviewTab({
   const sourceCurrent = isReviewSourceCurrent(review, currentSource);
   const validationPassed =
     document?.validation.passed === true &&
-    review.runResult.validationIssues.length === 0;
+    (runResult?.validationIssues.length ?? 0) === 0;
   const actions = resolveReviewActions({
     sourcePresent,
     sourceRevisionMatches: sourceCurrent,
@@ -80,11 +81,13 @@ export function AiReviewTab({
     }
   };
 
-  const usage = review.runResult.usage;
+  const usage = runResult?.usage ?? null;
   const cost =
     usage?.costUsd === null || usage?.costUsd === undefined
       ? 'cost unavailable'
-      : `$${usage.costUsd.toFixed(4)}`;
+      : `$${usage.costUsd.toFixed(4)} · ${
+          usage.costCalculated ? 'calculated' : 'provider'
+        }`;
 
   return (
     <main
@@ -110,7 +113,11 @@ export function AiReviewTab({
                   : 'PRD improvement proposal'}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {document?.summary ?? 'The response could not be validated.'}
+              {review.status === 'running'
+                ? 'The request is streaming. Results remain non-applicable until validation completes.'
+                : review.statusMessage ??
+                  document?.summary ??
+                  'The response could not be validated.'}
             </p>
             {review.request.task === 'translation' && document ? (
               <p className="mt-1 text-xs text-muted-foreground">
@@ -120,15 +127,44 @@ export function AiReviewTab({
             ) : null}
           </div>
           <div className="text-right text-xs text-muted-foreground">
-            <p>{review.runResult.model}</p>
-            <p>
-              {usage ? `${usage.totalTokens.toLocaleString()} tokens · ${cost}` : cost}
-            </p>
-            {review.runResult.generationId ? (
-              <p className="font-mono">{review.runResult.generationId}</p>
+            <p>{runResult?.model ?? review.request.model}</p>
+            {usage ? (
+              <>
+                <p>
+                  Prompt {usage.promptTokens.toLocaleString()} · Completion{' '}
+                  {usage.completionTokens.toLocaleString()} · Total{' '}
+                  {usage.totalTokens.toLocaleString()}
+                </p>
+                <p>{cost}</p>
+              </>
+            ) : (
+              <p>{cost}</p>
+            )}
+            {runResult?.generationId ? (
+              <p className="font-mono">{runResult.generationId}</p>
             ) : null}
           </div>
         </header>
+
+        {review.status === 'running' ? (
+          <p
+            role="status"
+            className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm"
+          >
+            <LoaderCircle className="size-4 animate-spin" />
+            AI request in progress…
+          </p>
+        ) : null}
+
+        {review.status === 'failed' || review.status === 'cancelled' ? (
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100"
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            {review.statusMessage}
+          </p>
+        ) : null}
 
         {!sourcePresent || !sourceCurrent ? (
           <p
@@ -142,7 +178,7 @@ export function AiReviewTab({
           </p>
         ) : null}
 
-        {!validationPassed ? (
+        {review.status === 'complete' && !validationPassed ? (
           <section
             aria-labelledby="ai-validation-heading"
             className="rounded-md border border-destructive/30 bg-destructive/5 p-4"
@@ -156,20 +192,20 @@ export function AiReviewTab({
             <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">
               {[
                 ...(document?.validation.issues ?? []),
-                ...review.runResult.validationIssues,
+                ...(runResult?.validationIssues ?? []),
               ].map((issue, index) => (
                 <li key={`${issue.code}:${issue.segmentId ?? index}`}>
                   {issue.message}
                 </li>
               ))}
             </ul>
-            {review.runResult.rawDiagnostic ? (
+            {runResult?.rawDiagnostic ? (
               <details className="mt-3 text-xs">
                 <summary className="cursor-pointer font-medium">
                   Raw diagnostic
                 </summary>
                 <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-3">
-                  {review.runResult.rawDiagnostic}
+                  {runResult.rawDiagnostic}
                 </pre>
               </details>
             ) : null}
@@ -407,6 +443,7 @@ export function AiReviewTab({
             type="button"
             variant="ghost"
             onClick={() => onRerun(review)}
+            disabled={review.status === 'running'}
           >
             <RotateCcw />
             Rerun

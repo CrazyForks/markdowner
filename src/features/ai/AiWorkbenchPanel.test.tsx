@@ -32,6 +32,8 @@ describe('AiWorkbenchPanel', () => {
         }),
     );
     const cancel = vi.fn().mockResolvedValue(true);
+    const openActivity = vi.fn().mockResolvedValue(undefined);
+    const onStart = vi.fn();
     render(
       <AiWorkbenchPanel
         documentId="doc-1"
@@ -42,6 +44,7 @@ describe('AiWorkbenchPanel', () => {
           aiCloudDisclosureAccepted: true,
         }}
         onSettingsChange={vi.fn()}
+        onStart={onStart}
         onResult={vi.fn()}
         services={{
           keyStatus: vi.fn().mockResolvedValue({
@@ -51,6 +54,7 @@ describe('AiWorkbenchPanel', () => {
           listModels: vi.fn().mockResolvedValue([glm]),
           run,
           cancel,
+          openActivity,
         }}
       />,
     );
@@ -63,9 +67,20 @@ describe('AiWorkbenchPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
+    expect(onStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: 'doc-1',
+        task: 'prd',
+      }),
+    );
     expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+    const activityLink = await screen.findByRole('button', {
+      name: 'OpenRouter Activity',
+    });
+    fireEvent.click(activityLink);
+    expect(openActivity).toHaveBeenCalledTimes(1);
   });
 
   it('blocks execution until cloud disclosure is accepted', async () => {
@@ -95,7 +110,9 @@ describe('AiWorkbenchPanel', () => {
 
   it('does not fetch a catalog or run a request when no key is configured', async () => {
     const listModels = vi.fn();
+    const modelPricing = vi.fn();
     const run = vi.fn();
+    const onOpenSettings = vi.fn();
     render(
       <AiWorkbenchPanel
         documentId="doc-1"
@@ -106,6 +123,7 @@ describe('AiWorkbenchPanel', () => {
           aiCloudDisclosureAccepted: true,
         }}
         onSettingsChange={vi.fn()}
+        onOpenSettings={onOpenSettings}
         onResult={vi.fn()}
         services={{
           keyStatus: vi.fn().mockResolvedValue({
@@ -113,6 +131,7 @@ describe('AiWorkbenchPanel', () => {
             maskedLabel: null,
           }),
           listModels,
+          modelPricing,
           run,
           cancel: vi.fn(),
         }}
@@ -120,7 +139,10 @@ describe('AiWorkbenchPanel', () => {
     );
 
     expect(await screen.findByText(/Connect OpenRouter/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open AI settings' }));
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
     expect(listModels).not.toHaveBeenCalled();
+    expect(modelPricing).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
     expect(run).not.toHaveBeenCalled();
   });
@@ -163,7 +185,7 @@ describe('AiWorkbenchPanel', () => {
     expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
   });
 
-  it('persists the selected model as the current task default', async () => {
+  it('keeps a model override request-local until the user saves it as default', async () => {
     const onSettingsChange = vi.fn();
     render(
       <AiWorkbenchPanel
@@ -202,8 +224,174 @@ describe('AiWorkbenchPanel', () => {
       target: { value: 'moonshotai/kimi-k3' },
     });
 
+    expect(onSettingsChange).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save as PRD default' }),
+    );
     expect(onSettingsChange).toHaveBeenCalledWith(
       expect.objectContaining({ aiPrdModel: 'moonshotai/kimi-k3' }),
     );
+  });
+
+  it('searches the runtime model catalog by name or slug', async () => {
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        source="A requirement."
+        selection={null}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+        }}
+        onSettingsChange={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({
+            configured: true,
+            maskedLabel: '••••secret',
+          }),
+          listModels: vi.fn().mockResolvedValue([
+            glm,
+            {
+              ...glm,
+              id: 'moonshotai/kimi-k3',
+              name: 'Kimi K3',
+            },
+          ]),
+          run: vi.fn(),
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    await screen.findByRole('option', { name: /GLM 5.2/ });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search models' }), {
+      target: { value: 'kimi' },
+    });
+
+    expect(screen.queryByRole('option', { name: /GLM 5.2/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Kimi K3/ })).toBeInTheDocument();
+  });
+
+  it('does not silently replace a saved model that is no longer available', async () => {
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        source="A requirement."
+        selection={null}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+          aiPrdModel: 'vendor/removed-model',
+        }}
+        onSettingsChange={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({
+            configured: true,
+            maskedLabel: '••••secret',
+          }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          run: vi.fn(),
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    const modelSelect = await screen.findByRole('combobox', {
+      name: 'AI model',
+    });
+    expect(modelSelect).toHaveValue('vendor/removed-model');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /saved model is unavailable/i,
+    );
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+  });
+
+  it('uses live endpoint pricing and waits for it before enabling Run', async () => {
+    let resolvePricing: ((pricing: AiModel['pricing']) => void) | undefined;
+    const modelPricing = vi.fn(
+      () =>
+        new Promise<AiModel['pricing']>((resolve) => {
+          resolvePricing = resolve;
+        }),
+    );
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        source="A requirement."
+        selection={null}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+        }}
+        onSettingsChange={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({
+            configured: true,
+            maskedLabel: '••••secret',
+          }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          modelPricing,
+          run: vi.fn(),
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    const runButton = await screen.findByRole('button', { name: 'Run' });
+    await waitFor(() =>
+      expect(modelPricing).toHaveBeenCalledWith('z-ai/glm-5.2', true),
+    );
+    expect(runButton).toBeDisabled();
+
+    resolvePricing?.({
+      prompt: 0.000_003,
+      completion: 0.000_004,
+      updatedAt: '2026-07-31T01:00:00Z',
+    });
+
+    await waitFor(() => expect(runButton).toBeEnabled());
+    expect(screen.getByText(/2026-07-31T01:00:00Z/)).toBeInTheDocument();
+  });
+
+  it('shows Retry-After metadata without automatically retrying a paid request', async () => {
+    const run = vi.fn().mockRejectedValue({
+      code: 'rate_limited',
+      message: 'OpenRouter rate-limited this request.',
+      retryAfterSeconds: 12,
+    });
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        source="A requirement."
+        selection={null}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+        }}
+        onSettingsChange={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({
+            configured: true,
+            maskedLabel: '••••secret',
+          }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          run,
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    const runButton = await screen.findByRole('button', { name: 'Run' });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    expect(
+      await screen.findByText(/Retry after 12 seconds/i),
+    ).toBeInTheDocument();
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });

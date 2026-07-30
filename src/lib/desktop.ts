@@ -410,8 +410,11 @@ export async function aiListModels(): Promise<AiModel[]> {
   return invoke<AiModel[]>('ai_list_models');
 }
 
-export async function aiModelPricing(modelId: string): Promise<AiModelPricing> {
-  return invoke<AiModelPricing>('ai_model_pricing', { modelId });
+export async function aiModelPricing(
+  modelId: string,
+  zdrOnly: boolean,
+): Promise<AiModelPricing> {
+  return invoke<AiModelPricing>('ai_model_pricing', { modelId, zdrOnly });
 }
 
 export async function aiRun(
