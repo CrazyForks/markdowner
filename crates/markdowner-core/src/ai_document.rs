@@ -164,14 +164,18 @@ pub fn revision_hash(document_id: &str, source: &str, selection: Option<ByteRang
 #[serde(rename_all = "camelCase")]
 pub struct TranslationSegment {
     pub id: String,
+    #[serde(alias = "translated_text")]
     pub translated_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslationResponse {
+    #[serde(alias = "schema_version")]
     pub schema_version: u32,
+    #[serde(alias = "detected_source_language")]
     pub detected_source_language: String,
+    #[serde(alias = "target_language")]
     pub target_language: String,
     pub segments: Vec<TranslationSegment>,
     #[serde(default)]
@@ -184,6 +188,7 @@ pub struct PrdFinding {
     pub id: String,
     pub severity: String,
     pub category: String,
+    #[serde(alias = "evidence_segment_id")]
     pub evidence_segment_id: Option<String>,
     pub rationale: String,
 }
@@ -201,15 +206,17 @@ pub enum OperationKind {
 pub struct PrdOperation {
     pub id: String,
     pub kind: OperationKind,
+    #[serde(alias = "target_segment_id")]
     pub target_segment_id: String,
     pub markdown: String,
-    #[serde(default)]
+    #[serde(default, alias = "finding_ids")]
     pub finding_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrdResponse {
+    #[serde(alias = "schema_version")]
     pub schema_version: u32,
     pub summary: String,
     #[serde(default)]
@@ -223,7 +230,9 @@ pub struct PrdResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectionResponse {
+    #[serde(alias = "schema_version")]
     pub schema_version: u32,
+    #[serde(alias = "replacement_text")]
     pub replacement_text: String,
     #[serde(default)]
     pub warnings: Vec<String>,

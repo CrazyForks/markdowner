@@ -305,3 +305,46 @@ fn markdown_safety_fixtures_preserve_every_source_byte() {
         );
     }
 }
+
+#[test]
+fn provider_responses_accept_the_prd_snake_case_schema() {
+    let translation: TranslationResponse = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "detected_source_language": "en",
+        "target_language": "ko",
+        "segments": [{"id": "segment-1", "translated_text": "번역"}],
+        "warnings": []
+    }))
+    .expect("translation schema");
+    let prd: PrdResponse = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "summary": "Clearer acceptance criteria",
+        "findings": [{
+            "id": "finding-1",
+            "severity": "high",
+            "category": "ambiguity",
+            "evidence_segment_id": "segment-1",
+            "rationale": "No measurable threshold"
+        }],
+        "operations": [{
+            "id": "operation-1",
+            "kind": "replace",
+            "target_segment_id": "segment-1",
+            "markdown": "Measurable",
+            "finding_ids": ["finding-1"]
+        }],
+        "assumptions": []
+    }))
+    .expect("PRD schema");
+    let selection: SelectionResponse = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "replacement_text": "Rewritten",
+        "warnings": []
+    }))
+    .expect("selection schema");
+
+    assert_eq!(translation.schema_version, 1);
+    assert_eq!(translation.segments[0].translated_text, "번역");
+    assert_eq!(prd.operations[0].target_segment_id, "segment-1");
+    assert_eq!(selection.replacement_text, "Rewritten");
+}

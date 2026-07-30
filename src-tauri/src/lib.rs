@@ -24,6 +24,7 @@ use tauri::{
 };
 use shell_managed_block::ManagedShellBlock;
 
+mod ai;
 mod default_handler;
 mod diagnostics;
 mod export_file;
@@ -2135,6 +2136,9 @@ pub fn run() {
             app.manage(state);
             app.manage(PendingCliWaits(Mutex::new(HashMap::new())));
             app.manage(terminal::TerminalState::new());
+            let ai_state = ai::AiState::new(app.path().app_data_dir()?)
+                .map_err(|error| std::io::Error::other(error.message))?;
+            app.manage(ai_state);
             spawn_cli_wait_listener(app.handle().clone());
             Ok(())
         })
@@ -2194,6 +2198,16 @@ pub fn run() {
             link_actions::open_external_url_in_new_window,
             link_actions::open_path_in_default_app,
             link_actions::reveal_path_in_finder,
+            ai::ai_key_status,
+            ai::ai_save_key,
+            ai::ai_verify_key,
+            ai::ai_delete_key,
+            ai::ai_list_models,
+            ai::ai_model_pricing,
+            ai::ai_run,
+            ai::ai_cancel,
+            ai::ai_render_selected_operations,
+            ai::ai_discard_result,
             updater::check_for_update,
             updater::download_and_install_update,
         ])
