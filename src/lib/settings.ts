@@ -126,6 +126,12 @@ export interface Settings extends InlineStyleColorSettings {
    * basename, anywhere in the tree). `.git` is always hidden regardless.
    */
   ignoreList: string[];
+  aiPrdModel: string;
+  aiTranslationModel: string;
+  aiCustomPromptModel: string;
+  aiTranslationTargetLanguage: string;
+  aiZdrOnly: boolean;
+  aiCloudDisclosureAccepted: boolean;
 }
 
 export interface DiagnosticsLogStatus {
@@ -170,6 +176,13 @@ export interface CtrlGLauncherActionResult {
 }
 
 export const CLI_BINARY_INSTALL_PATH = '/usr/local/bin/mdner';
+export const DEFAULT_AI_MODEL = 'z-ai/glm-5.2';
+
+export function defaultAiTranslationTargetLanguage(
+  locale = typeof navigator === 'undefined' ? '' : navigator.language,
+): string {
+  return locale.toLowerCase().startsWith('ko') ? 'ko' : 'en';
+}
 
 export const CLI_ALIAS_COMMAND =
   'alias markdowner="/Applications/Markdowner.app/Contents/MacOS/markdowner-desktop"';
@@ -249,6 +262,12 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultAppPromptSeen: false,
   keybindingOverrides: {},
   ignoreList: [...DEFAULT_IGNORE_LIST],
+  aiPrdModel: DEFAULT_AI_MODEL,
+  aiTranslationModel: DEFAULT_AI_MODEL,
+  aiCustomPromptModel: DEFAULT_AI_MODEL,
+  aiTranslationTargetLanguage: defaultAiTranslationTargetLanguage(),
+  aiZdrOnly: true,
+  aiCloudDisclosureAccepted: false,
 };
 
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>;
@@ -527,6 +546,41 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   }
   if (typeof merged.analyticsEnabled !== 'boolean') {
     merged.analyticsEnabled = DEFAULT_SETTINGS.analyticsEnabled;
+  }
+  for (const key of [
+    'aiPrdModel',
+    'aiTranslationModel',
+    'aiCustomPromptModel',
+  ] as const) {
+    const value = merged[key];
+    if (
+      typeof value !== 'string' ||
+      value.trim().length === 0 ||
+      value.length > 256 ||
+      !value.includes('/') ||
+      /\s/.test(value)
+    ) {
+      merged[key] = DEFAULT_AI_MODEL;
+    } else {
+      merged[key] = value.trim();
+    }
+  }
+  if (
+    typeof merged.aiTranslationTargetLanguage !== 'string' ||
+    merged.aiTranslationTargetLanguage.trim().length === 0 ||
+    merged.aiTranslationTargetLanguage.length > 64 ||
+    !/^[A-Za-z0-9-]+$/.test(merged.aiTranslationTargetLanguage)
+  ) {
+    merged.aiTranslationTargetLanguage = defaultAiTranslationTargetLanguage();
+  } else {
+    merged.aiTranslationTargetLanguage = merged.aiTranslationTargetLanguage.trim();
+  }
+  if (typeof merged.aiZdrOnly !== 'boolean') {
+    merged.aiZdrOnly = DEFAULT_SETTINGS.aiZdrOnly;
+  }
+  if (typeof merged.aiCloudDisclosureAccepted !== 'boolean') {
+    merged.aiCloudDisclosureAccepted =
+      DEFAULT_SETTINGS.aiCloudDisclosureAccepted;
   }
   merged.keybindingOverrides = normalizeKeybindingOverrides(merged.keybindingOverrides);
   merged.ignoreList = normalizeIgnoreList(merged.ignoreList);

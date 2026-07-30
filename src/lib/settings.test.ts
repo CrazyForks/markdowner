@@ -469,3 +469,39 @@ describe('inline style color settings', () => {
     ]);
   });
 });
+
+describe('AI settings', () => {
+  it('defaults every AI task to GLM with Korean translation and ZDR enabled', () => {
+    expect(DEFAULT_SETTINGS).toMatchObject({
+      aiPrdModel: 'z-ai/glm-5.2',
+      aiTranslationModel: 'z-ai/glm-5.2',
+      aiCustomPromptModel: 'z-ai/glm-5.2',
+      aiTranslationTargetLanguage: 'en',
+      aiZdrOnly: true,
+      aiCloudDisclosureAccepted: false,
+    });
+  });
+
+  it('normalizes malformed persisted AI preferences field by field', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      autoSave: true,
+      aiPrdModel: '',
+      aiTranslationModel: 'moonshotai/kimi-k3',
+      aiCustomPromptModel: 42,
+      aiTranslationTargetLanguage: false,
+      aiZdrOnly: 'no',
+      aiCloudDisclosureAccepted: true,
+    });
+
+    await expect(loadSettings()).resolves.toMatchObject({
+      autoSave: true,
+      aiPrdModel: 'z-ai/glm-5.2',
+      aiTranslationModel: 'moonshotai/kimi-k3',
+      aiCustomPromptModel: 'z-ai/glm-5.2',
+      aiTranslationTargetLanguage: 'en',
+      aiZdrOnly: true,
+      aiCloudDisclosureAccepted: true,
+    });
+  });
+});

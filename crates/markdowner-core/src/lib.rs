@@ -1,3 +1,4 @@
+pub mod ai_document;
 mod document;
 mod markdown;
 mod platform;

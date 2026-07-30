@@ -4,6 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::EditorMode;
 
+pub const DEFAULT_AI_MODEL: &str = "z-ai/glm-5.2";
+
 fn deserialize_bool_or_false<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
     D: Deserializer<'de>,
@@ -18,6 +20,58 @@ where
 {
     let value = serde_json::Value::deserialize(deserializer)?;
     Ok(value.as_bool().unwrap_or(true))
+}
+
+fn default_ai_translation_target_language() -> String {
+    sys_locale::get_locale()
+        .filter(|locale| locale.to_ascii_lowercase().starts_with("ko"))
+        .map(|_| "ko".to_string())
+        .unwrap_or_else(|| "en".to_string())
+}
+
+fn normalize_ai_model(value: serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|candidate| {
+            !candidate.is_empty()
+                && candidate.len() <= 256
+                && candidate.contains('/')
+                && !candidate.chars().any(char::is_whitespace)
+        })
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| DEFAULT_AI_MODEL.to_string())
+}
+
+fn deserialize_ai_model<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(normalize_ai_model(value))
+}
+
+fn normalize_target_language(value: serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|candidate| {
+            !candidate.is_empty()
+                && candidate.len() <= 64
+                && candidate
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(default_ai_translation_target_language)
+}
+
+fn deserialize_target_language<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(normalize_target_language(value))
 }
 
 fn normalize_hex_color(value: serde_json::Value, fallback: &str) -> String {
@@ -118,6 +172,18 @@ pub struct Settings {
     /// Folder names hidden from the workspace file tree (matched by exact
     /// basename, anywhere in the tree). `.git` is always hidden regardless.
     pub ignore_list: Vec<String>,
+    #[serde(deserialize_with = "deserialize_ai_model")]
+    pub ai_prd_model: String,
+    #[serde(deserialize_with = "deserialize_ai_model")]
+    pub ai_translation_model: String,
+    #[serde(deserialize_with = "deserialize_ai_model")]
+    pub ai_custom_prompt_model: String,
+    #[serde(deserialize_with = "deserialize_target_language")]
+    pub ai_translation_target_language: String,
+    #[serde(deserialize_with = "deserialize_bool_or_true")]
+    pub ai_zdr_only: bool,
+    #[serde(deserialize_with = "deserialize_bool_or_false")]
+    pub ai_cloud_disclosure_accepted: bool,
 }
 
 impl Default for Settings {
@@ -170,6 +236,12 @@ impl Default for Settings {
             default_app_prompt_seen: false,
             keybinding_overrides: BTreeMap::new(),
             ignore_list: crate::storage::default_ignore_list(),
+            ai_prd_model: DEFAULT_AI_MODEL.to_string(),
+            ai_translation_model: DEFAULT_AI_MODEL.to_string(),
+            ai_custom_prompt_model: DEFAULT_AI_MODEL.to_string(),
+            ai_translation_target_language: default_ai_translation_target_language(),
+            ai_zdr_only: true,
+            ai_cloud_disclosure_accepted: false,
         }
     }
 }
@@ -314,8 +386,7 @@ mod tests {
 
     #[test]
     fn wysiwyg_code_block_wrap_malformed_value_defaults_field_only() {
-        let malformed =
-            r#"{"autoSave":true,"editorFontSize":18,"wysiwygCodeBlockWrap":"true"}"#;
+        let malformed = r#"{"autoSave":true,"editorFontSize":18,"wysiwygCodeBlockWrap":"true"}"#;
         let parsed: Settings =
             serde_json::from_str(malformed).expect("malformed wrap value should still parse");
 
@@ -344,8 +415,7 @@ mod tests {
 
     #[test]
     fn highlight_skill_tokens_malformed_value_defaults_field_only() {
-        let malformed =
-            r#"{"autoSave":true,"editorFontSize":18,"highlightSkillTokens":"false"}"#;
+        let malformed = r#"{"autoSave":true,"editorFontSize":18,"highlightSkillTokens":"false"}"#;
         let parsed: Settings =
             serde_json::from_str(malformed).expect("malformed highlight value should still parse");
 
@@ -520,7 +590,10 @@ mod tests {
         let parsed: Settings = serde_json::from_value(json).expect("explicit settings parse");
         assert_eq!(parsed.ignore_list, vec![".diffs", ".claude"]);
         let value = serde_json::to_value(&parsed).expect("serialize settings");
-        assert_eq!(value["ignoreList"], serde_json::json!([".diffs", ".claude"]));
+        assert_eq!(
+            value["ignoreList"],
+            serde_json::json!([".diffs", ".claude"])
+        );
     }
 
     #[test]
@@ -564,5 +637,35 @@ mod tests {
         assert_eq!(value["codeBlockHighlight"], false);
         assert_eq!(value["codeBlockTheme"], "one-light");
         assert_eq!(value["codeBlockThemeSync"], true);
+    }
+
+    #[test]
+    fn ai_settings_default_and_recover_malformed_fields_independently() {
+        let parsed: Settings = serde_json::from_value(serde_json::json!({
+            "autoSave": true,
+            "aiPrdModel": 7,
+            "aiTranslationModel": "",
+            "aiCustomPromptModel": "vendor/model",
+            "aiTranslationTargetLanguage": false,
+            "aiZdrOnly": "yes",
+            "aiCloudDisclosureAccepted": true
+        }))
+        .expect("settings parse");
+
+        assert_eq!(parsed.ai_prd_model, "z-ai/glm-5.2");
+        assert_eq!(parsed.ai_translation_model, "z-ai/glm-5.2");
+        assert_eq!(parsed.ai_custom_prompt_model, "vendor/model");
+        assert_eq!(parsed.ai_translation_target_language, "en");
+        assert!(parsed.ai_zdr_only);
+        assert!(parsed.ai_cloud_disclosure_accepted);
+        assert!(parsed.auto_save);
+
+        let serialized = serde_json::to_value(parsed).expect("settings serialize");
+        assert_eq!(serialized["aiPrdModel"], "z-ai/glm-5.2");
+        assert_eq!(serialized["aiTranslationModel"], "z-ai/glm-5.2");
+        assert_eq!(serialized["aiCustomPromptModel"], "vendor/model");
+        assert_eq!(serialized["aiTranslationTargetLanguage"], "en");
+        assert_eq!(serialized["aiZdrOnly"], true);
+        assert_eq!(serialized["aiCloudDisclosureAccepted"], true);
     }
 }
