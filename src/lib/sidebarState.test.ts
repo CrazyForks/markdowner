@@ -138,6 +138,21 @@ describe('sidebar state persistence', () => {
     });
   });
 
+  it('opens and announces the AI workbench panel', () => {
+    expect(
+      resolveSidebarPanelState({
+        currentOpen: false,
+        currentPanel: 'files',
+        intent: 'toggle',
+        targetPanel: 'ai',
+      }),
+    ).toEqual({
+      panel: 'ai',
+      isOpen: true,
+      announcement: 'AI workbench shown',
+    });
+  });
+
   it('derives open sidebar layout state for the app grid and resize handle', () => {
     expect(
       resolveSidebarLayoutState({

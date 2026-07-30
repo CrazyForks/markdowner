@@ -14,7 +14,7 @@ import { ExplorerPanel, type OpenEditorItem } from './ExplorerPanel';
 export type { SearchResultFile, SearchResultMatch } from './SearchPanel';
 export type { OpenEditorItem } from './ExplorerPanel';
 
-export type SideBarPanel = 'files' | 'search' | 'outline';
+export type SideBarPanel = 'files' | 'search' | 'outline' | 'ai';
 
 export interface SideBarProps {
   panel: SideBarPanel;
@@ -54,6 +54,7 @@ export interface SideBarProps {
   onSearchOptionsChange: (options: FindReplaceOptions) => void;
   onRunSearch: () => void;
   onSelectSearchMatch: (file: SearchResultFile, match: SearchResultMatch) => void;
+  aiPanel: ReactNode;
 }
 
 export function SideBar({
@@ -94,17 +95,22 @@ export function SideBar({
   onSearchOptionsChange,
   onRunSearch,
   onSelectSearchMatch,
+  aiPanel,
 }: SideBarProps) {
   const showOutline = panel === 'outline';
   const showSearch = panel === 'search';
-  const showExplorer = !showOutline && !showSearch;
+  const showAi = panel === 'ai';
+  const showExplorer = !showOutline && !showSearch && !showAi;
 
   return (
     <aside
-      aria-label={showOutline ? 'Outline' : showSearch ? 'Search' : 'Explorer'}
+      aria-label={
+        showOutline ? 'Outline' : showSearch ? 'Search' : showAi ? 'AI Workbench' : 'Explorer'
+      }
       data-explorer-root={showExplorer ? '' : undefined}
       data-outline-root={showOutline ? '' : undefined}
       data-search-root={showSearch ? '' : undefined}
+      data-ai-root={showAi ? '' : undefined}
       tabIndex={showOutline ? -1 : undefined}
       className={cn(
         'flex min-h-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground transition-opacity duration-300 ease-in-out',
@@ -112,7 +118,9 @@ export function SideBar({
         !isOpen && 'opacity-0 invisible overflow-hidden p-0 border-r-0',
       )}
     >
-      {showOutline ? (
+      {showAi ? (
+        aiPanel
+      ) : showOutline ? (
         <OutlinePanel
           items={outlineItems}
           busy={busy}

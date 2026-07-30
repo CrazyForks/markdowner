@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { createDocumentTab, createSettingsTab } from './documentTabs';
+import type { AiRunRequest, AiRunResult } from '../features/ai/types';
+import { createAiReview } from '../features/ai/review';
+import {
+  createAiReviewTab,
+  createDocumentTab,
+  createSettingsTab,
+} from './documentTabs';
 import {
   buildOpenTabsPayload,
   cursorPositionsMapFromOpenTabsPayload,
@@ -57,6 +63,55 @@ describe('buildOpenTabsPayload', () => {
       buildOpenTabsPayload({
         tabs: [saved, createSettingsTab()],
         activeTabId: '__markdowner_settings__',
+        cursorPositions: new Map([['/tmp/saved.md', { line: 1, column: 1 }]]),
+      }),
+    ).toEqual({
+      openTabs: ['/tmp/saved.md'],
+      activeTabPath: null,
+      cursorPositions: {
+        '/tmp/saved.md': { line: 1, column: 1 },
+      },
+    });
+  });
+
+  it('never persists transient AI review tabs or their active state', () => {
+    const saved = createDocumentTab({
+      id: 'saved',
+      path: '/tmp/saved.md',
+      name: 'saved.md',
+    });
+    const request: AiRunRequest = {
+      requestId: 'request-1',
+      documentId: 'saved',
+      source: '# Source',
+      selection: null,
+      task: 'prd',
+      model: 'z-ai/glm-5.2',
+      targetLanguage: null,
+      instruction: null,
+      zdrOnly: true,
+      maxOutputTokens: 4096,
+    };
+    const result: AiRunResult = {
+      requestId: 'request-1',
+      documentId: 'saved',
+      task: 'prd',
+      model: 'z-ai/glm-5.2',
+      generationId: null,
+      result: null,
+      validationIssues: [],
+      rawDiagnostic: null,
+      usage: null,
+      retryAfterSeconds: null,
+    };
+    const reviewTab = createAiReviewTab(
+      createAiReview(request, result, 'saved.md'),
+    );
+
+    expect(
+      buildOpenTabsPayload({
+        tabs: [saved, reviewTab],
+        activeTabId: reviewTab.id,
         cursorPositions: new Map([['/tmp/saved.md', { line: 1, column: 1 }]]),
       }),
     ).toEqual({

@@ -1,17 +1,19 @@
 import { cn } from '@/lib/utils';
-import { Files, ListTree, Search, Settings } from 'lucide-react';
+import { Files, ListTree, Search, Settings, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export interface ActivityBarProps {
   onOpenSettings?: () => void;
   onOpenSearch?: () => void;
   onOpenOutline?: () => void;
+  onOpenAi?: () => void;
   className?: string;
   onToggleSidebar?: () => void;
   isSidebarOpen?: boolean;
   isSettingsOpen?: boolean;
   isSearchOpen?: boolean;
   isOutlineOpen?: boolean;
+  isAiOpen?: boolean;
 }
 
 export function ActivityBar({
@@ -21,9 +23,11 @@ export function ActivityBar({
   onOpenSettings,
   onOpenSearch,
   onOpenOutline,
+  onOpenAi,
   isSettingsOpen,
   isSearchOpen,
   isOutlineOpen,
+  isAiOpen,
 }: ActivityBarProps) {
   const activeClass = 'bg-accent text-accent-foreground';
   const inactiveClass = 'text-muted-foreground hover:text-foreground';
@@ -70,6 +74,17 @@ export function ActivityBar({
           onClick={onOpenOutline}
         >
           <ListTree className="w-5 h-5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn('w-8 h-8 rounded-md', isAiOpen ? activeClass : inactiveClass)}
+          title="AI Workbench"
+          aria-label="AI Workbench"
+          aria-pressed={Boolean(isAiOpen)}
+          onClick={onOpenAi}
+        >
+          <Sparkles className="w-5 h-5" />
         </Button>
       </div>
       <div className="mt-auto flex flex-col gap-2 w-full px-2 mb-0.5">

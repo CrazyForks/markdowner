@@ -32,6 +32,13 @@ vi.mock('@/lib/settings', async (importOriginal) => {
 
 vi.mock('@/lib/desktop', () => ({
   openExternalUrlInNewWindow: openExternalUrlInNewWindowMock,
+  aiKeyStatus: vi.fn().mockResolvedValue({
+    configured: false,
+    maskedLabel: null,
+  }),
+  aiSaveKey: vi.fn(),
+  aiVerifyKey: vi.fn(),
+  aiDeleteKey: vi.fn(),
 }));
 
 const availableUpdate: UpdateInfo = {

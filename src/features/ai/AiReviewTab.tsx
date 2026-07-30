@@ -1,0 +1,354 @@
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  Check,
+  CopyPlus,
+  FileDiff,
+  LoaderCircle,
+  RotateCcw,
+} from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+
+import {
+  isReviewSourceCurrent,
+  resolveReviewActions,
+  type AiReview,
+} from './review';
+
+export interface AiReviewTabProps {
+  review: AiReview;
+  currentSource: string | null;
+  sourcePresent: boolean;
+  onApply: (markdown: string) => void;
+  onRenderSelected: (operationIds: string[]) => Promise<string>;
+  onOpenAsDocument: (markdown: string) => void;
+  onRerun: (review: AiReview) => void;
+}
+
+export function AiReviewTab({
+  review,
+  currentSource,
+  sourcePresent,
+  onApply,
+  onRenderSelected,
+  onOpenAsDocument,
+  onRerun,
+}: AiReviewTabProps) {
+  const document = review.runResult.result;
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    () => document?.operations.map((operation) => operation.id) ?? [],
+  );
+  const [renderingSelection, setRenderingSelection] = useState(false);
+  const [selectionError, setSelectionError] = useState('');
+
+  useEffect(() => {
+    setSelectedIds(document?.operations.map((operation) => operation.id) ?? []);
+    setSelectionError('');
+  }, [document]);
+
+  const sourceCurrent = isReviewSourceCurrent(review, currentSource);
+  const validationPassed =
+    document?.validation.passed === true &&
+    review.runResult.validationIssues.length === 0;
+  const actions = resolveReviewActions({
+    sourcePresent,
+    sourceRevisionMatches: sourceCurrent,
+    validationPassed,
+  });
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedEnabled =
+    actions.applySelected && selectedIds.length > 0 && !renderingSelection;
+
+  const handleApplySelected = async () => {
+    if (!selectedEnabled) return;
+    setRenderingSelection(true);
+    setSelectionError('');
+    try {
+      onApply(await onRenderSelected(selectedIds));
+    } catch (reason) {
+      setSelectionError(errorMessage(reason));
+    } finally {
+      setRenderingSelection(false);
+    }
+  };
+
+  const usage = review.runResult.usage;
+  const cost =
+    usage?.costUsd === null || usage?.costUsd === undefined
+      ? 'cost unavailable'
+      : `$${usage.costUsd.toFixed(4)}`;
+
+  return (
+    <main
+      aria-labelledby="ai-review-heading"
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-background"
+      data-testid="ai-review-tab"
+    >
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-5">
+        <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              AI Review · {review.sourceDocumentName}
+            </p>
+            <h1
+              id="ai-review-heading"
+              className="mt-1 flex items-center gap-2 text-lg font-semibold"
+            >
+              <FileDiff className="size-5" />
+              {review.request.task === 'translation'
+                ? 'Translation proposal'
+                : review.request.task === 'custom'
+                  ? 'Document transformation'
+                  : 'PRD improvement proposal'}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {document?.summary ?? 'The response could not be validated.'}
+            </p>
+          </div>
+          <div className="text-right text-xs text-muted-foreground">
+            <p>{review.runResult.model}</p>
+            <p>
+              {usage ? `${usage.totalTokens.toLocaleString()} tokens · ${cost}` : cost}
+            </p>
+            {review.runResult.generationId ? (
+              <p className="font-mono">{review.runResult.generationId}</p>
+            ) : null}
+          </div>
+        </header>
+
+        {!sourcePresent || !sourceCurrent ? (
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100"
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            {!sourcePresent
+              ? 'The source document is no longer open. Apply is disabled.'
+              : 'The source document changed after this request. Apply is disabled; rerun or open the proposal as a new document.'}
+          </p>
+        ) : null}
+
+        {!validationPassed ? (
+          <section
+            aria-labelledby="ai-validation-heading"
+            className="rounded-md border border-destructive/30 bg-destructive/5 p-4"
+          >
+            <h2 id="ai-validation-heading" className="text-sm font-semibold">
+              Local validation failed
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Markdowner will not apply or export this response.
+            </p>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">
+              {[
+                ...(document?.validation.issues ?? []),
+                ...review.runResult.validationIssues,
+              ].map((issue, index) => (
+                <li key={`${issue.code}:${issue.segmentId ?? index}`}>
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+            {review.runResult.rawDiagnostic ? (
+              <details className="mt-3 text-xs">
+                <summary className="cursor-pointer font-medium">
+                  Raw diagnostic
+                </summary>
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-3">
+                  {review.runResult.rawDiagnostic}
+                </pre>
+              </details>
+            ) : null}
+          </section>
+        ) : null}
+
+        {document ? (
+          <>
+            {review.request.task === 'translation' ? (
+              <section
+                aria-label="Translation comparison"
+                className="grid min-h-80 gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-2"
+              >
+                <article className="bg-background p-4">
+                  <h2 className="mb-3 text-sm font-semibold">Source</h2>
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                    {review.sourceSnapshot}
+                  </pre>
+                </article>
+                <article className="bg-background p-4">
+                  <h2 className="mb-3 text-sm font-semibold">Translation</h2>
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                    {document.proposedMarkdown}
+                  </pre>
+                </article>
+              </section>
+            ) : null}
+
+            {document.findings.length > 0 ? (
+              <section aria-labelledby="ai-findings-heading">
+                <h2 id="ai-findings-heading" className="text-sm font-semibold">
+                  Findings
+                </h2>
+                <div className="mt-2 grid gap-2">
+                  {document.findings.map((finding) => (
+                    <article
+                      key={finding.id}
+                      className="rounded-md border border-border p-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-semibold uppercase">
+                          {finding.severity}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {finding.category}
+                        </span>
+                        {finding.evidenceSegmentId ? (
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {finding.evidenceSegmentId}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 text-sm">{finding.rationale}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <section aria-labelledby="ai-changes-heading">
+              <div className="flex items-center justify-between gap-3">
+                <h2 id="ai-changes-heading" className="text-sm font-semibold">
+                  Proposed changes
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {selectedIds.length} of {document.operations.length} selected
+                </span>
+              </div>
+              <div className="mt-2 grid gap-3">
+                {document.hunks.map((hunk) => {
+                  const operation = document.operations.find(
+                    (candidate) => candidate.id === hunk.operationId,
+                  );
+                  const checked = selectedSet.has(hunk.operationId);
+                  return (
+                    <article
+                      key={hunk.operationId}
+                      className="overflow-hidden rounded-md border border-border"
+                    >
+                      <label className="flex cursor-pointer items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!actions.applySelected}
+                          onChange={(event) =>
+                            setSelectedIds((current) =>
+                              event.target.checked
+                                ? [...current, hunk.operationId]
+                                : current.filter((id) => id !== hunk.operationId),
+                            )
+                          }
+                        />
+                        {operation?.kind.replace(/_/g, ' ') ?? 'change'} ·{' '}
+                        {operation?.targetSegmentId ?? hunk.operationId}
+                      </label>
+                      <pre className="overflow-x-auto whitespace-pre-wrap p-3 text-xs leading-relaxed">
+                        <span className="block bg-red-500/10 text-red-800 dark:text-red-200">
+                          − {hunk.originalMarkdown}
+                        </span>
+                        <span className="mt-1 block bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">
+                          + {hunk.proposedMarkdown}
+                        </span>
+                      </pre>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+
+            {document.assumptions.length > 0 || document.warnings.length > 0 ? (
+              <section className="grid gap-3 md:grid-cols-2">
+                {document.assumptions.length > 0 ? (
+                  <div>
+                    <h2 className="text-sm font-semibold">Assumptions</h2>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                      {document.assumptions.map((assumption) => (
+                        <li key={assumption}>{assumption}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {document.warnings.length > 0 ? (
+                  <div>
+                    <h2 className="text-sm font-semibold">Warnings</h2>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                      {document.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+          </>
+        ) : null}
+
+        <footer className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background/95 py-3 backdrop-blur">
+          <Button
+            type="button"
+            onClick={() => document && onApply(document.proposedMarkdown)}
+            disabled={!actions.applyAll || !document}
+          >
+            <Check />
+            Apply all
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void handleApplySelected()}
+            disabled={!selectedEnabled}
+          >
+            {renderingSelection ? (
+              <LoaderCircle className="animate-spin" />
+            ) : (
+              <FileDiff />
+            )}
+            Apply selected
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => document && onOpenAsDocument(document.proposedMarkdown)}
+            disabled={!actions.openAsDocument || !document}
+          >
+            <CopyPlus />
+            Open as new document
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onRerun(review)}
+          >
+            <RotateCcw />
+            Rerun
+          </Button>
+          <p className="ml-auto text-[11px] text-muted-foreground">
+            Cancelling a request may not prevent provider usage charges.
+          </p>
+          {selectionError ? (
+            <p role="alert" className="w-full text-xs text-destructive">
+              {selectionError}
+            </p>
+          ) : null}
+        </footer>
+      </div>
+    </main>
+  );
+}
+
+function errorMessage(reason: unknown): string {
+  if (reason && typeof reason === 'object' && 'message' in reason) {
+    return String(reason.message);
+  }
+  return reason instanceof Error ? reason.message : String(reason);
+}

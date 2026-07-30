@@ -58,6 +58,7 @@ import {
 import { openExternalUrlInNewWindow } from '@/lib/desktop';
 import type { UpdateInfo } from '@/lib/updateCheck';
 import type { InlineStyleTone } from '@/lib/inlineStylePalette';
+import { OpenRouterSettings } from '@/features/ai/OpenRouterSettings';
 import { InlineStyleColorSettings } from './InlineStyleColorSettings';
 import { PdfPaperControls } from './PdfPaperControls';
 
@@ -519,6 +520,17 @@ export function SettingsPanel({
             }
           />
         </div>
+        <Separator />
+        <OpenRouterSettings
+          zdrOnly={settings.aiZdrOnly}
+          disclosureAccepted={settings.aiCloudDisclosureAccepted}
+          onZdrOnlyChange={(aiZdrOnly) =>
+            onSettingsChange({ ...settings, aiZdrOnly })
+          }
+          onDisclosureAcceptedChange={(aiCloudDisclosureAccepted) =>
+            onSettingsChange({ ...settings, aiCloudDisclosureAccepted })
+          }
+        />
         <Separator />
         <div data-testid="settings-default-md-handler" className="flex min-w-0 flex-col gap-2">
           <div className="flex items-center justify-between gap-3">

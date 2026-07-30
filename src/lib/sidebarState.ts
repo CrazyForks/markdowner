@@ -8,7 +8,7 @@ export const SIDEBAR_KEYBOARD_PAGE_STEP = 32;
 export const ACTIVITY_BAR_WIDTH = 48;
 export const SIDEBAR_ANIMATION_ROW_LIMIT = 300;
 
-export type SidebarPanel = 'files' | 'search' | 'outline';
+export type SidebarPanel = 'files' | 'search' | 'outline' | 'ai';
 
 type SidebarPanelIntent = 'toggle' | 'show';
 
@@ -166,6 +166,8 @@ function sidebarPanelAnnouncement(
       return 'Search sidebar shown';
     case 'outline':
       return 'Outline sidebar shown';
+    case 'ai':
+      return 'AI workbench shown';
   }
 }
 

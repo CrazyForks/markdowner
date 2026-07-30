@@ -3,7 +3,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import { FileDown, Settings as SettingsIcon, X } from 'lucide-react';
+import { FileDown, Settings as SettingsIcon, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { planTabDragPlacement, type TabSlot } from '@/lib/tabDragReorder';
 
@@ -13,7 +13,7 @@ const EDGE_SCROLL_ZONE_PX = 48;
 const EDGE_SCROLL_MAX_STEP_PX = 18;
 const TAB_SLIDE_MS = 130;
 
-export type TabsItemKind = 'document' | 'settings' | 'export';
+export type TabsItemKind = 'document' | 'settings' | 'export' | 'ai-review';
 
 export interface TabsItem {
   id: string;
@@ -372,6 +372,9 @@ export function Tabs({ items, activeTabId, onSelectTab, onCloseTab, onReorderTab
             ) : null}
             {item.kind === 'export' ? (
               <FileDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            ) : null}
+            {item.kind === 'ai-review' ? (
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             ) : null}
             <span className={cn('truncate', item.missing && 'italic text-muted-foreground line-through')}>
               {item.name}

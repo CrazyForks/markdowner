@@ -45,6 +45,15 @@ const exportPdfFileMock = vi.fn();
 const exportPdfFilesMock = vi.fn();
 const exportTextFileMock = vi.fn();
 const exportTextFilesMock = vi.fn();
+const aiKeyStatusMock = vi.fn();
+const aiSaveKeyMock = vi.fn();
+const aiVerifyKeyMock = vi.fn();
+const aiDeleteKeyMock = vi.fn();
+const aiListModelsMock = vi.fn();
+const aiRunMock = vi.fn();
+const aiCancelMock = vi.fn();
+const aiRenderSelectedOperationsMock = vi.fn();
+const aiDiscardResultMock = vi.fn();
 const openDialogMock = vi.fn();
 const saveDialogMock = vi.fn();
 const messageMock = vi.fn();
@@ -102,6 +111,15 @@ vi.mock('./lib/desktop', () => ({
   exportPdfFiles: exportPdfFilesMock,
   exportTextFile: exportTextFileMock,
   exportTextFiles: exportTextFilesMock,
+  aiKeyStatus: aiKeyStatusMock,
+  aiSaveKey: aiSaveKeyMock,
+  aiVerifyKey: aiVerifyKeyMock,
+  aiDeleteKey: aiDeleteKeyMock,
+  aiListModels: aiListModelsMock,
+  aiRun: aiRunMock,
+  aiCancel: aiCancelMock,
+  aiRenderSelectedOperations: aiRenderSelectedOperationsMock,
+  aiDiscardResult: aiDiscardResultMock,
 }));
 
 vi.mock('@/shell/TerminalPanel', async () => {
@@ -644,6 +662,56 @@ describe('App recent documents', () => {
     exportTextFileMock.mockResolvedValue(undefined);
     exportTextFilesMock.mockReset();
     exportTextFilesMock.mockResolvedValue(undefined);
+    aiKeyStatusMock.mockReset();
+    aiKeyStatusMock.mockResolvedValue({
+      configured: true,
+      maskedLabel: 'sk-or-…test',
+    });
+    aiSaveKeyMock.mockReset();
+    aiSaveKeyMock.mockResolvedValue({
+      configured: true,
+      maskedLabel: 'sk-or-…test',
+    });
+    aiVerifyKeyMock.mockReset();
+    aiVerifyKeyMock.mockResolvedValue({
+      configured: true,
+      maskedLabel: 'sk-or-…test',
+      label: 'test',
+      limit: null,
+      limitRemaining: null,
+      usage: null,
+      expiresAt: null,
+      isFreeTier: false,
+    });
+    aiDeleteKeyMock.mockReset();
+    aiDeleteKeyMock.mockResolvedValue({
+      configured: false,
+      maskedLabel: null,
+    });
+    aiListModelsMock.mockReset();
+    aiListModelsMock.mockResolvedValue([
+      {
+        id: 'z-ai/glm-5.2',
+        name: 'GLM 5.2',
+        description: null,
+        contextLength: 131_072,
+        inputModalities: ['text'],
+        outputModalities: ['text'],
+        supportedParameters: ['structured_outputs'],
+        pricing: {
+          prompt: 0.0000001,
+          completion: 0.0000001,
+          updatedAt: '2026-07-31T00:00:00Z',
+        },
+      },
+    ]);
+    aiRunMock.mockReset();
+    aiCancelMock.mockReset();
+    aiCancelMock.mockResolvedValue(true);
+    aiRenderSelectedOperationsMock.mockReset();
+    aiRenderSelectedOperationsMock.mockResolvedValue('# Improved');
+    aiDiscardResultMock.mockReset();
+    aiDiscardResultMock.mockResolvedValue(undefined);
     openDialogMock.mockReset();
     saveDialogMock.mockReset();
     messageMock.mockReset();
@@ -866,6 +934,93 @@ describe('App recent documents', () => {
     expect(
       within(toolbar).getByRole('button', { name: /^settings \(cmd\+,\)$/i }),
     ).toBeInTheDocument();
+  });
+
+  it('opens a validated AI result in a transient review tab before applying it', async () => {
+    const source = '# Original';
+    const proposed = '# Improved';
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'requirements.md',
+        activeDocumentPath: '/tmp/project/requirements.md',
+        activeDocumentSource: source,
+      }),
+    );
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return { aiCloudDisclosureAccepted: true };
+      }
+      return undefined;
+    });
+    aiRunMock.mockImplementation(async (request) => ({
+      requestId: request.requestId,
+      documentId: request.documentId,
+      task: request.task,
+      model: request.model,
+      generationId: 'generation-1',
+      result: {
+        sourceRevisionHash: 'revision-1',
+        proposedMarkdown: proposed,
+        validation: { passed: true, issues: [] },
+        operations: [
+          {
+            id: 'operation-1',
+            kind: 'replace',
+            targetSegmentId: 'segment-1',
+            sourceRange: { start: 0, end: source.length },
+            originalMarkdown: source,
+            proposedMarkdown: proposed,
+            findingIds: [],
+          },
+        ],
+        hunks: [
+          {
+            operationId: 'operation-1',
+            sourceRange: { start: 0, end: source.length },
+            originalMarkdown: source,
+            proposedMarkdown: proposed,
+          },
+        ],
+        summary: 'Improve the heading.',
+        findings: [],
+        assumptions: [],
+        detectedSourceLanguage: 'en',
+        targetLanguage: null,
+        warnings: [],
+      },
+      validationIssues: [],
+      rawDiagnostic: null,
+      usage: {
+        promptTokens: 10,
+        completionTokens: 4,
+        totalTokens: 14,
+        costUsd: 0.0001,
+        costCalculated: true,
+      },
+      retryAfterSeconds: null,
+    }));
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: /^ai workbench$/i }),
+    );
+    const runButton = await screen.findByRole('button', { name: /^run$/i });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    replaceActiveDocumentSourceMock.mockClear();
+
+    fireEvent.click(runButton);
+
+    expect(await screen.findByTestId('ai-review-tab')).toBeInTheDocument();
+    expect(screen.getByText('Improve the heading.')).toBeInTheDocument();
+    expect(replaceActiveDocumentSourceMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply all' }));
+
+    await waitFor(() =>
+      expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith(proposed),
+    );
   });
 
   it('smoke-tests empty-state controls without runtime errors', async () => {

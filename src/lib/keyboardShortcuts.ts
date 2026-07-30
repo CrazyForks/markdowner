@@ -33,7 +33,7 @@ type TerminalPanelShortcutEvent = CommandModifierEvent &
 
 type FocusToggleContext = {
   isSidebarOpen: boolean;
-  sidebarPanel: 'files' | 'outline' | 'search';
+  sidebarPanel: 'files' | 'outline' | 'search' | 'ai';
   focusInsideExplorer: boolean;
   focusInsideSearch: boolean;
 };
@@ -43,13 +43,13 @@ type FindShortcutContext = {
   findReplaceOpen: boolean;
   focusInsideExplorer: boolean;
   isSidebarOpen: boolean;
-  sidebarPanel: 'files' | 'outline' | 'search';
+  sidebarPanel: 'files' | 'outline' | 'search' | 'ai';
 };
 
 type ShellShortcutContext = {
   activeDocumentOpen: boolean;
   isSidebarOpen: boolean;
-  sidebarPanel: 'files' | 'outline' | 'search';
+  sidebarPanel: 'files' | 'outline' | 'search' | 'ai';
 };
 
 export type ModeChordResolution =

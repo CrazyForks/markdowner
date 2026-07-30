@@ -51,6 +51,16 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { UpdateInfo } from '@/lib/updateCheck';
+import { AiReviewTab } from '@/features/ai/AiReviewTab';
+import { AiWorkbenchPanel } from '@/features/ai/AiWorkbenchPanel';
+import {
+  createAiReview,
+  type AiReview,
+} from '@/features/ai/review';
+import type {
+  AiRunRequest,
+  AiRunResult,
+} from '@/features/ai/types';
 import { ActivityBar } from '@/shell/ActivityBar';
 import { AppMenu } from '@/shell/AppMenu';
 import { AppOverlays } from '@/shell/AppOverlays';
@@ -112,6 +122,8 @@ import {
   loadDraftBackups,
   saveDraftBackups,
   searchWorkspace,
+  aiDiscardResult,
+  aiRenderSelectedOperations,
 } from './lib/desktop';
 import {
   buildExportHtml,
@@ -189,6 +201,7 @@ import {
 } from './lib/snapshotState';
 import {
   createDocumentTab,
+  createAiReviewTab,
   createExportPreviewTab,
   createMissingDocumentTab,
   EXPORT_PREVIEW_TAB_ID,
@@ -1302,6 +1315,10 @@ export default function App() {
   const handleToggleSearchPanel = useEffectEvent(() => {
     applySidebarPanelState('search', 'toggle');
     setSearchFocusToken((value) => value + 1);
+  });
+
+  const handleOpenAiPanel = useEffectEvent(() => {
+    applySidebarPanelState('ai', 'toggle');
   });
 
   const handleFocusSearchPanel = useEffectEvent(() => {
@@ -2618,6 +2635,8 @@ export default function App() {
   );
   const {
     activeTab,
+    activeAiReview,
+    isAiReviewTabActive,
     isExportPreviewTabActive,
     isSettingsTabActive,
     hasActiveTabEdits,
@@ -4502,6 +4521,44 @@ export default function App() {
     });
   };
 
+  const activateAiReview = (
+    result: AiRunResult,
+    request: AiRunRequest,
+  ) => {
+    const liveDraft = flushWysiwygDraftNow() ?? localDraftRef.current;
+    const currentTabs = tabsRef.current.map((tab) =>
+      tab.id === request.documentId && tab.kind === 'document'
+        ? { ...tab, draft: liveDraft }
+        : tab,
+    );
+    const sourceTab = currentTabs.find(
+      (tab) => tab.id === request.documentId && tab.kind === 'document',
+    );
+    const review = createAiReview(
+      request,
+      result,
+      sourceTab?.name ?? snapshotRef.current.activeDocumentName ?? 'Untitled',
+    );
+    const reviewTab = createAiReviewTab(review);
+    const existingIndex = currentTabs.findIndex((tab) => tab.id === reviewTab.id);
+    const nextTabs =
+      existingIndex >= 0
+        ? currentTabs.map((tab, index) => (index === existingIndex ? reviewTab : tab))
+        : [...currentTabs, reviewTab];
+
+    tabsRef.current = nextTabs;
+    activeTabIdRef.current = reviewTab.id;
+    startTransition(() => {
+      setTabs(nextTabs);
+      setActiveTabId(reviewTab.id);
+    });
+    announceShell(
+      result.result
+        ? 'AI result is ready for review'
+        : 'AI result failed local validation',
+    );
+  };
+
   const openDocumentExport = (format: ExportFormat) => {
     if (!activeDocumentOpen) return;
     const fresh = flushWysiwygDraftNow();
@@ -5018,9 +5075,10 @@ export default function App() {
       try {
         if (
           transition.kind === 'activateSettings' ||
-          transition.kind === 'activateExportPreview'
+          transition.kind === 'activateExportPreview' ||
+          transition.kind === 'activateAiReview'
         ) {
-          // Settings and Export Preview are UI-only surfaces — stay on the
+          // Settings, Export Preview, and AI Review are UI-only surfaces — stay on the
           // current snapshot but hand the active-tab pointer to the UI tab so
           // the editor area swaps without re-opening the underlying document.
           if (transition.kind === 'activateExportPreview') {
@@ -5193,6 +5251,82 @@ export default function App() {
     });
   });
 
+  const handleApplyAiReview = useEffectEvent(
+    async (review: AiReview, markdown: string) => {
+      const sourceTab = tabsRef.current.find(
+        (tab) =>
+          tab.id === review.sourceDocumentId && tab.kind === 'document',
+      );
+      if (!sourceTab || sourceTab.draft !== review.sourceSnapshot) {
+        announceShell(
+          'AI changes were not applied because the source document changed',
+        );
+        return;
+      }
+
+      await switchToTab(sourceTab.id);
+      if (activeTabIdRef.current !== sourceTab.id) return;
+
+      await withBusy(async () => {
+        const next = await replaceActiveDocumentSource(markdown);
+        applySnapshot(next);
+        const nextTabs = tabsRef.current.map((tab) =>
+          tab.id === sourceTab.id && tab.kind === 'document'
+            ? { ...tab, draft: markdown, missing: false }
+            : tab,
+        );
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
+      }, 'Could not apply AI changes');
+      announceShell('AI changes applied to the source document');
+      focusActiveEditor();
+    },
+  );
+
+  const handleOpenAiProposalAsDocument = useEffectEvent(
+    async (markdown: string) => {
+      const token = nextEditorOpRequest();
+      await withBusy(async () => {
+        const created = await newDocument();
+        if (isEditorOpStale(token)) return;
+        applySnapshot(created);
+        upsertActiveTabFromSnapshot(created);
+        const documentTabId = activeTabIdRef.current;
+        if (!documentTabId) return;
+
+        const next = await replaceActiveDocumentSource(markdown);
+        if (isEditorOpStale(token)) return;
+        applySnapshot(next);
+        const nextTabs = tabsRef.current.map((tab) =>
+          tab.id === documentTabId && tab.kind === 'document'
+            ? { ...tab, draft: markdown }
+            : tab,
+        );
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
+      }, 'Could not open AI result as a document');
+      if (isEditorOpStale(token)) return;
+      announceShell('AI result opened as a new untitled document');
+      focusActiveEditor();
+    },
+  );
+
+  const handleRerunAiReview = useEffectEvent(async (review: AiReview) => {
+    const sourceTab = tabsRef.current.find(
+      (tab) =>
+        tab.id === review.sourceDocumentId && tab.kind === 'document',
+    );
+    if (sourceTab) {
+      await switchToTab(sourceTab.id);
+    }
+    applySidebarPanelState('ai', 'show');
+    announceShell(
+      sourceTab
+        ? 'AI Workbench opened for the current source. Review the request and run again.'
+        : 'The source document is closed. Reopen it before running again.',
+    );
+  });
+
   const handleCloseTab = useEffectEvent(async (targetId: string) => {
     if (targetId === EXPORT_PREVIEW_TAB_ID) {
       const currentTabs = tabsRef.current;
@@ -5222,6 +5356,11 @@ export default function App() {
         setActiveTabId(nextActiveTabId);
       });
       return;
+    }
+
+    const targetTab = tabsRef.current.find((tab) => tab.id === targetId);
+    if (targetTab?.kind === 'ai-review' && targetTab.aiReview) {
+      await aiDiscardResult(targetTab.aiReview.requestId).catch(() => undefined);
     }
 
     const closedTab = snapshotClosedDocumentTab(targetId);
@@ -5973,7 +6112,9 @@ export default function App() {
       ? visibleWorkspaceTreeRowCount
       : sidebarPanel === 'search'
         ? searchResultRowCount
-        : outlineItems.length;
+        : sidebarPanel === 'outline'
+          ? outlineItems.length
+          : 12;
   const sidebarLayout = resolveSidebarLayoutState({
     isOpen: isSidebarOpen,
     width: sidebarWidth,
@@ -6182,11 +6323,13 @@ export default function App() {
           onOpenSettings={() => void toggleSettingsTab()}
           onOpenSearch={handleToggleSearchPanel}
           onOpenOutline={handleOpenOutlinePanel}
+          onOpenAi={handleOpenAiPanel}
           onToggleSidebar={handleOpenFilesPanel}
           isSidebarOpen={isSidebarOpen && sidebarPanel === 'files'}
           isSettingsOpen={isSettingsTabActive}
           isSearchOpen={isSidebarOpen && sidebarPanel === 'search'}
           isOutlineOpen={isSidebarOpen && sidebarPanel === 'outline'}
+          isAiOpen={isSidebarOpen && sidebarPanel === 'ai'}
         />
         <SideBar
           panel={sidebarPanel}
@@ -6226,6 +6369,20 @@ export default function App() {
           onSearchOptionsChange={handleSearchOptionsChange}
           onRunSearch={() => void handleRunWorkspaceSearch()}
           onSelectSearchMatch={(file, match) => void handleSelectSearchMatch(file, match)}
+          aiPanel={
+            <AiWorkbenchPanel
+              documentId={
+                activeTab?.kind === 'document'
+                  ? activeTab.id
+                  : snapshot.activeDocumentPath ?? 'active-document'
+              }
+              source={localDraft}
+              selection={null}
+              settings={settings}
+              onSettingsChange={handleSettingsChange}
+              onResult={activateAiReview}
+            />
+          }
         />
         <SidebarResizeHandle
           width={sidebarWidth}
@@ -6282,10 +6439,40 @@ export default function App() {
           />
         </div>
       ) : null}
+      {isAiReviewTabActive && activeAiReview ? (
+        <AiReviewTab
+          review={activeAiReview}
+          currentSource={
+            tabs.find(
+              (tab) =>
+                tab.id === activeAiReview.sourceDocumentId &&
+                tab.kind === 'document',
+            )?.draft ?? null
+          }
+          sourcePresent={tabs.some(
+            (tab) =>
+              tab.id === activeAiReview.sourceDocumentId &&
+              tab.kind === 'document',
+          )}
+          onApply={(markdown) =>
+            void handleApplyAiReview(activeAiReview, markdown)
+          }
+          onRenderSelected={(operationIds) =>
+            aiRenderSelectedOperations(activeAiReview.requestId, operationIds)
+          }
+          onOpenAsDocument={(markdown) =>
+            void handleOpenAiProposalAsDocument(markdown)
+          }
+          onRerun={(review) => void handleRerunAiReview(review)}
+        />
+      ) : null}
       <div
         className={cn(
           'flex min-h-0 min-w-0 flex-1 flex-col',
-          (isSettingsTabActive || isExportPreviewTabActive) && 'hidden',
+          (isSettingsTabActive ||
+            isExportPreviewTabActive ||
+            isAiReviewTabActive) &&
+            'hidden',
         )}
       >
       <EditorArea

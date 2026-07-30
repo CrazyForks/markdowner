@@ -343,6 +343,8 @@ describe('resolveDocumentTabViewState', () => {
       dirtyTabIds: new Set(['active', 'inactive']),
       isSettingsTabActive: false,
       isExportPreviewTabActive: false,
+      isAiReviewTabActive: false,
+      activeAiReview: null,
       hasActiveTabEdits: true,
       hasAnyTabEdits: true,
       hasUnsavedChanges: true,

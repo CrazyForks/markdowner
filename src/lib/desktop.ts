@@ -1,5 +1,14 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 
+import type {
+  AiKeyMetadata,
+  AiKeyStatus,
+  AiModel,
+  AiModelPricing,
+  AiRunRequest,
+  AiRunResult,
+  AiStreamEvent,
+} from '@/features/ai/types';
 import {
   normalizeDraftBackupEntries,
   type DraftBackupEntry,
@@ -379,4 +388,55 @@ export async function resizeTerminal(id: number, cols: number, rows: number): Pr
 
 export async function closeTerminal(id: number): Promise<void> {
   await invoke<void>('terminal_close', { id });
+}
+
+export async function aiKeyStatus(): Promise<AiKeyStatus> {
+  return invoke<AiKeyStatus>('ai_key_status');
+}
+
+export async function aiSaveKey(apiKey: string): Promise<AiKeyStatus> {
+  return invoke<AiKeyStatus>('ai_save_key', { apiKey });
+}
+
+export async function aiVerifyKey(): Promise<AiKeyMetadata> {
+  return invoke<AiKeyMetadata>('ai_verify_key');
+}
+
+export async function aiDeleteKey(): Promise<AiKeyStatus> {
+  return invoke<AiKeyStatus>('ai_delete_key');
+}
+
+export async function aiListModels(): Promise<AiModel[]> {
+  return invoke<AiModel[]>('ai_list_models');
+}
+
+export async function aiModelPricing(modelId: string): Promise<AiModelPricing> {
+  return invoke<AiModelPricing>('ai_model_pricing', { modelId });
+}
+
+export async function aiRun(
+  request: AiRunRequest,
+  onEvent: (event: AiStreamEvent) => void,
+): Promise<AiRunResult> {
+  const channel = new Channel<AiStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke<AiRunResult>('ai_run', { request, onEvent: channel });
+}
+
+export async function aiCancel(requestId: string): Promise<boolean> {
+  return invoke<boolean>('ai_cancel', { requestId });
+}
+
+export async function aiRenderSelectedOperations(
+  requestId: string,
+  operationIds: string[],
+): Promise<string> {
+  return invoke<string>('ai_render_selected_operations', {
+    requestId,
+    operationIds,
+  });
+}
+
+export async function aiDiscardResult(requestId: string): Promise<void> {
+  await invoke<void>('ai_discard_result', { requestId });
 }

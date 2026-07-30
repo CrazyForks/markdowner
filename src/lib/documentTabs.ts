@@ -1,6 +1,7 @@
 import { normalizeFinalNewline } from './sourceText';
+import type { AiReview } from '../features/ai/review';
 
-export type DocumentTabKind = 'document' | 'settings' | 'export';
+export type DocumentTabKind = 'document' | 'settings' | 'export' | 'ai-review';
 
 export type DocumentTab = {
   id: string;
@@ -10,6 +11,7 @@ export type DocumentTab = {
   source: string;
   draft: string;
   missing: boolean;
+  aiReview?: AiReview;
 };
 
 export const SETTINGS_TAB_ID = '__markdowner_settings__';
@@ -73,6 +75,8 @@ export type DocumentTabViewState = {
   dirtyTabIds: ReadonlySet<string>;
   isSettingsTabActive: boolean;
   isExportPreviewTabActive: boolean;
+  isAiReviewTabActive: boolean;
+  activeAiReview: AiReview | null;
   hasActiveTabEdits: boolean;
   hasAnyTabEdits: boolean;
   hasUnsavedChanges: boolean;
@@ -240,6 +244,7 @@ type SwitchTabTransition =
   | { kind: 'noop' }
   | { kind: 'activateSettings'; target: DocumentTab }
   | { kind: 'activateExportPreview'; target: DocumentTab }
+  | { kind: 'activateAiReview'; target: DocumentTab; review: AiReview }
   | { kind: 'activateMissing'; target: DocumentTab }
   | { kind: 'openPath'; target: DocumentTab; path: string }
   | { kind: 'newDocument'; target: DocumentTab };
@@ -344,6 +349,19 @@ export function createExportPreviewTab(): DocumentTab {
   };
 }
 
+export function createAiReviewTab(review: AiReview): DocumentTab {
+  return {
+    id: `__markdowner_ai_review__:${review.requestId}`,
+    kind: 'ai-review',
+    path: null,
+    name: `AI Review · ${review.sourceDocumentName}`,
+    source: '',
+    draft: '',
+    missing: false,
+    aiReview: review,
+  };
+}
+
 export function documentTabMetadataFromSnapshot(
   snapshot: DocumentTabSnapshotMetadataInput,
 ): DocumentTabSnapshotMetadata {
@@ -395,6 +413,9 @@ export function resolveDocumentTabViewState({
     dirtyTabIds,
     isSettingsTabActive: activeTab?.kind === 'settings',
     isExportPreviewTabActive: activeTab?.kind === 'export',
+    isAiReviewTabActive: activeTab?.kind === 'ai-review',
+    activeAiReview:
+      activeTab?.kind === 'ai-review' ? activeTab.aiReview ?? null : null,
     hasActiveTabEdits,
     hasAnyTabEdits: dirtyTabIds.size > 0,
     hasUnsavedChanges: hasActiveTabEdits,
@@ -700,6 +721,10 @@ export function resolveSwitchTabTransition(
 
   if (target.kind === 'export') {
     return { kind: 'activateExportPreview', target };
+  }
+
+  if (target.kind === 'ai-review' && target.aiReview) {
+    return { kind: 'activateAiReview', target, review: target.aiReview };
   }
 
   if (target.missing && target.path) {
