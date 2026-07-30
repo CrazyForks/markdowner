@@ -165,7 +165,7 @@ export function AiSelectionPopover({
       role="dialog"
       aria-modal="false"
       aria-labelledby="ai-selection-heading"
-      className="fixed bottom-12 left-1/2 z-[80] w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl"
+      className="ai-motion-surface fixed bottom-12 left-1/2 z-[80] w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl"
       data-testid="ai-selection-popover"
     >
       <header className="flex items-start justify-between gap-3">

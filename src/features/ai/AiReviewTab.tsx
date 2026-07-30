@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -41,10 +41,17 @@ export function AiReviewTab({
   );
   const [renderingSelection, setRenderingSelection] = useState(false);
   const [selectionError, setSelectionError] = useState('');
+  const [translationView, setTranslationView] = useState<
+    'split' | 'translation'
+  >('split');
+  const sourceScrollRef = useRef<HTMLElement>(null);
+  const translationScrollRef = useRef<HTMLElement>(null);
+  const synchronizingScroll = useRef(false);
 
   useEffect(() => {
     setSelectedIds(document?.operations.map((operation) => operation.id) ?? []);
     setSelectionError('');
+    setTranslationView('split');
   }, [document]);
 
   const sourceCurrent = isReviewSourceCurrent(review, currentSource);
@@ -82,7 +89,7 @@ export function AiReviewTab({
   return (
     <main
       aria-labelledby="ai-review-heading"
-      className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-background"
+      className="ai-motion-surface min-h-0 min-w-0 flex-1 overflow-y-auto bg-background"
       data-testid="ai-review-tab"
     >
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-5">
@@ -105,6 +112,12 @@ export function AiReviewTab({
             <p className="mt-1 text-sm text-muted-foreground">
               {document?.summary ?? 'The response could not be validated.'}
             </p>
+            {review.request.task === 'translation' && document ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Detected {document.detectedSourceLanguage ?? 'unknown'} · Target{' '}
+                {document.targetLanguage ?? review.request.targetLanguage ?? 'unknown'}
+              </p>
+            ) : null}
           </div>
           <div className="text-right text-xs text-muted-foreground">
             <p>{review.runResult.model}</p>
@@ -166,22 +179,85 @@ export function AiReviewTab({
         {document ? (
           <>
             {review.request.task === 'translation' ? (
-              <section
-                aria-label="Translation comparison"
-                className="grid min-h-80 gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-2"
-              >
-                <article className="bg-background p-4">
-                  <h2 className="mb-3 text-sm font-semibold">Source</h2>
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                    {review.sourceSnapshot}
-                  </pre>
-                </article>
-                <article className="bg-background p-4">
-                  <h2 className="mb-3 text-sm font-semibold">Translation</h2>
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                    {document.proposedMarkdown}
-                  </pre>
-                </article>
+              <section aria-labelledby="ai-translation-comparison-heading">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h2
+                    id="ai-translation-comparison-heading"
+                    className="text-sm font-semibold"
+                  >
+                    Translation comparison
+                  </h2>
+                  <div
+                    role="group"
+                    aria-label="Translation view"
+                    className="flex rounded-md border border-border p-0.5"
+                  >
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={translationView === 'split' ? 'secondary' : 'ghost'}
+                      aria-pressed={translationView === 'split'}
+                      aria-label="Show source and translation"
+                      onClick={() => setTranslationView('split')}
+                    >
+                      Side by side
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={
+                        translationView === 'translation' ? 'secondary' : 'ghost'
+                      }
+                      aria-pressed={translationView === 'translation'}
+                      aria-label="Show translation only"
+                      onClick={() => setTranslationView('translation')}
+                    >
+                      Translation only
+                    </Button>
+                  </div>
+                </div>
+                <div
+                  className={
+                    translationView === 'split'
+                      ? 'grid min-h-80 gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-2'
+                      : 'grid min-h-80 overflow-hidden rounded-md border border-border'
+                  }
+                >
+                  {translationView === 'split' ? (
+                    <article
+                      ref={sourceScrollRef}
+                      className="max-h-[65vh] overflow-y-auto bg-background p-4"
+                      onScroll={() =>
+                        syncTranslationScroll(
+                          sourceScrollRef.current,
+                          translationScrollRef.current,
+                          synchronizingScroll,
+                        )
+                      }
+                    >
+                      <h2 className="mb-3 text-sm font-semibold">Source</h2>
+                      <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                        {review.sourceSnapshot}
+                      </pre>
+                    </article>
+                  ) : null}
+                  <article
+                    ref={translationScrollRef}
+                    className="max-h-[65vh] overflow-y-auto bg-background p-4"
+                    onScroll={() =>
+                      syncTranslationScroll(
+                        translationScrollRef.current,
+                        sourceScrollRef.current,
+                        synchronizingScroll,
+                      )
+                    }
+                  >
+                    <h2 className="mb-3 text-sm font-semibold">Translation</h2>
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                      {document.proposedMarkdown}
+                    </pre>
+                  </article>
+                </div>
               </section>
             ) : null}
 
@@ -239,6 +315,9 @@ export function AiReviewTab({
                       <label className="flex cursor-pointer items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium">
                         <input
                           type="checkbox"
+                          aria-label={`Select change for ${
+                            operation?.targetSegmentId ?? hunk.operationId
+                          }`}
                           checked={checked}
                           disabled={!actions.applySelected}
                           onChange={(event) =>
@@ -351,4 +430,20 @@ function errorMessage(reason: unknown): string {
     return String(reason.message);
   }
   return reason instanceof Error ? reason.message : String(reason);
+}
+
+function syncTranslationScroll(
+  source: HTMLElement | null,
+  target: HTMLElement | null,
+  synchronizing: { current: boolean },
+) {
+  if (!source || !target || synchronizing.current) return;
+  const sourceRange = source.scrollHeight - source.clientHeight;
+  const targetRange = target.scrollHeight - target.clientHeight;
+  if (sourceRange <= 0 || targetRange <= 0) return;
+  synchronizing.current = true;
+  target.scrollTop = (source.scrollTop / sourceRange) * targetRange;
+  window.requestAnimationFrame(() => {
+    synchronizing.current = false;
+  });
 }

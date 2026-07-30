@@ -99,6 +99,8 @@ export interface TranslationLanguage {
   quick: boolean;
 }
 
+export type DetectedDocumentLanguage = 'en' | 'ja' | 'ko' | 'zh';
+
 function fallbackPinnedModel(id: (typeof PINNED_AI_MODELS)[number]): AiModel {
   return {
     id,
@@ -277,4 +279,67 @@ export function searchLanguages(
       if (left.quick !== right.quick) return left.quick ? -1 : 1;
       return left.name.localeCompare(right.name, displayLocale);
     });
+}
+
+export function detectDocumentLanguage(
+  source: string,
+): DetectedDocumentLanguage | null {
+  const prose = source
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/~~~[\s\S]*?~~~/g, ' ')
+    .replace(/`[^`\r\n]*`/g, ' ')
+    .replace(/!?\[([^\]]*)]\([^)]*\)/g, '$1');
+  const counts: Record<DetectedDocumentLanguage, number> = {
+    en: 0,
+    ja: 0,
+    ko: 0,
+    zh: 0,
+  };
+  for (const character of prose) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === undefined) continue;
+    if (
+      isInRanges(codePoint, [
+        [0xac00, 0xd7af],
+        [0x1100, 0x11ff],
+      ])
+    ) {
+      counts.ko += 1;
+    } else if (
+      isInRanges(codePoint, [
+        [0x3040, 0x309f],
+        [0x30a0, 0x30ff],
+      ])
+    ) {
+      counts.ja += 1;
+    } else if (
+      isInRanges(codePoint, [
+        [0x3400, 0x4dbf],
+        [0x4e00, 0x9fff],
+      ])
+    ) {
+      counts.zh += 1;
+    } else if (
+      (codePoint >= 0x41 && codePoint <= 0x5a) ||
+      (codePoint >= 0x61 && codePoint <= 0x7a)
+    ) {
+      counts.en += 1;
+    }
+  }
+
+  // Japanese prose normally combines kana with Han characters. Attribute Han
+  // characters to Japanese when kana is present so mixed-script text is not
+  // classified as Chinese.
+  if (counts.ja > 0) counts.ja += counts.zh;
+  const detected = (
+    Object.entries(counts) as Array<[DetectedDocumentLanguage, number]>
+  ).sort((left, right) => right[1] - left[1])[0];
+  return detected && detected[1] > 0 ? detected[0] : null;
+}
+
+function isInRanges(
+  codePoint: number,
+  ranges: ReadonlyArray<readonly [number, number]>,
+): boolean {
+  return ranges.some(([start, end]) => codePoint >= start && codePoint <= end);
 }

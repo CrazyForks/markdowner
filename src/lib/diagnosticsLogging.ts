@@ -1,3 +1,5 @@
+import { sanitizeAiTelemetry } from '@/features/ai/telemetry';
+
 import { recordDiagnosticsEvent } from './settings';
 
 type ConsoleLevel = 'debug' | 'error' | 'info' | 'log' | 'warn';
@@ -89,4 +91,10 @@ export function installDiagnosticsLogging() {
     window.addEventListener('error', recordWindowError);
     window.addEventListener('unhandledrejection', recordUnhandledRejection);
   }
+}
+
+export function recordAiDiagnosticsLifecycle(
+  properties: Record<string, unknown>,
+) {
+  void recordDiagnosticsEvent('ai.lifecycle', sanitizeAiTelemetry(properties));
 }

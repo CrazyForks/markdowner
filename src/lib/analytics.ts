@@ -1,5 +1,7 @@
 import posthog from 'posthog-js';
 
+import { sanitizeAiTelemetry } from '@/features/ai/telemetry';
+
 // Project (write-only) API key — safe to ship in the client bundle.
 const POSTHOG_KEY = 'phc_qQ6Rft3mAeStoCsN9t7KDpfhxEhynWy7aFTdDh4ZiECi';
 const POSTHOG_HOST = 'https://us.i.posthog.com';
@@ -72,4 +74,8 @@ export function capture(event: string, properties?: Record<string, unknown>): vo
   } catch (error) {
     console.error('Failed to capture analytics event:', error);
   }
+}
+
+export function captureAiLifecycle(properties: Record<string, unknown>): void {
+  capture('ai.lifecycle', sanitizeAiTelemetry(properties));
 }

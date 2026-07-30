@@ -1,0 +1,183 @@
+[
+  {
+    "id": "prd-ko-01",
+    "language": "ko",
+    "source": "# 결제 알림\n\n사용자에게 결제 알림을 빠르게 보낸다.",
+    "labels": ["unmeasurable", "missing_acceptance_criteria", "missing_edge_case"]
+  },
+  {
+    "id": "prd-ko-02",
+    "language": "ko",
+    "source": "# 검색\n\n모든 문서를 검색한다. 단, 비공개 문서는 검색 결과에 포함한다.\n\n## 보안\n비공개 문서는 결과에서 제외한다.",
+    "labels": ["contradiction", "security"]
+  },
+  {
+    "id": "prd-ko-03",
+    "language": "ko",
+    "source": "# 회원가입\n\n이메일을 입력하면 가입된다.",
+    "labels": ["missing_user", "missing_acceptance_criteria", "privacy"]
+  },
+  {
+    "id": "prd-ko-04",
+    "language": "ko",
+    "source": "# 내보내기\n\n사용자가 문서를 PDF로 내보낼 수 있다.\n\n성공 기준: 잘 동작한다.",
+    "labels": ["unmeasurable", "missing_error_state"]
+  },
+  {
+    "id": "prd-ko-05",
+    "language": "ko",
+    "source": "# 팀 초대\n\n관리자가 링크로 팀원을 초대한다. 링크는 영구히 유효하다.",
+    "labels": ["security", "missing_edge_case", "privacy"]
+  },
+  {
+    "id": "prd-ko-06",
+    "language": "ko",
+    "source": "# 오프라인 편집\n\n네트워크가 없을 때 편집할 수 있다. 동기화 충돌은 발생하지 않는다.",
+    "labels": ["unsupported_assumption", "missing_conflict_policy", "missing_edge_case"]
+  },
+  {
+    "id": "prd-ko-07",
+    "language": "ko",
+    "source": "# 추천\n\nAI가 사용자에게 가장 좋은 콘텐츠를 추천한다.",
+    "labels": ["ambiguous_scope", "unmeasurable", "privacy", "missing_ai_safety"]
+  },
+  {
+    "id": "prd-ko-08",
+    "language": "ko",
+    "source": "# 관리자 로그\n\n모든 사용자 행동을 무기한 저장한다.",
+    "labels": ["privacy", "security", "missing_retention_policy"]
+  },
+  {
+    "id": "prd-ko-09",
+    "language": "ko",
+    "source": "# 이미지 업로드\n\n사용자는 이미지를 업로드할 수 있다. 최대 크기와 형식 제한은 추후 결정한다.",
+    "labels": ["ambiguous_scope", "missing_acceptance_criteria", "missing_security_validation"]
+  },
+  {
+    "id": "prd-ko-10",
+    "language": "ko",
+    "source": "# 대시보드\n\n모든 지표를 한 화면에 표시하고 실시간 협업, 채팅, 결제도 제공한다.",
+    "labels": ["scope_overreach", "missing_non_goals", "ambiguous_scope"]
+  },
+  {
+    "id": "prd-ko-11",
+    "language": "ko",
+    "source": "# 비밀번호 재설정\n\n이메일 링크로 비밀번호를 바꾼다.\n\n링크 만료: 없음.",
+    "labels": ["security", "missing_abuse_case", "missing_acceptance_criteria"]
+  },
+  {
+    "id": "prd-ko-12",
+    "language": "ko",
+    "source": "# 번역\n\n문서를 번역하되 코드도 자연스럽게 번역한다.",
+    "labels": ["security", "ambiguous_scope", "missing_structure_preservation"]
+  },
+  {
+    "id": "prd-ko-13",
+    "language": "ko",
+    "source": "# 자동 저장\n\n입력할 때마다 즉시 서버에 저장한다. 네트워크 요청은 최소화한다.",
+    "labels": ["contradiction", "missing_performance_budget", "missing_offline_behavior"]
+  },
+  {
+    "id": "prd-ko-14",
+    "language": "ko",
+    "source": "# 계정 삭제\n\n사용자가 계정을 삭제할 수 있다.",
+    "labels": ["missing_data_deletion_policy", "privacy", "missing_edge_case"]
+  },
+  {
+    "id": "prd-ko-15",
+    "language": "ko",
+    "source": "# 출시\n\n완성되면 전체 사용자에게 바로 배포한다.",
+    "labels": ["missing_rollout", "missing_metrics", "missing_rollback"]
+  },
+  {
+    "id": "prd-en-01",
+    "language": "en",
+    "source": "# Notifications\n\nSend important notifications quickly.",
+    "labels": ["ambiguous_scope", "unmeasurable", "missing_acceptance_criteria"]
+  },
+  {
+    "id": "prd-en-02",
+    "language": "en",
+    "source": "# Document sharing\n\nAnyone with the link can edit. Confidential documents must never be editable by guests.",
+    "labels": ["contradiction", "security", "missing_permission_model"]
+  },
+  {
+    "id": "prd-en-03",
+    "language": "en",
+    "source": "# Signup\n\nCollect name, email, date of birth, employer, and location before showing the product.",
+    "labels": ["privacy", "scope_overreach", "missing_data_justification"]
+  },
+  {
+    "id": "prd-en-04",
+    "language": "en",
+    "source": "# Search\n\nReturn every matching item with no latency.",
+    "labels": ["unmeasurable", "unsupported_assumption", "missing_performance_budget"]
+  },
+  {
+    "id": "prd-en-05",
+    "language": "en",
+    "source": "# Import\n\nUsers can import files.",
+    "labels": ["ambiguous_scope", "missing_error_state", "missing_security_validation"]
+  },
+  {
+    "id": "prd-en-06",
+    "language": "en",
+    "source": "# AI summary\n\nThe model summarizes private workspaces and always returns correct facts.",
+    "labels": ["missing_ai_safety", "privacy", "unmeasurable", "unsupported_assumption"]
+  },
+  {
+    "id": "prd-en-07",
+    "language": "en",
+    "source": "# Billing\n\nCharge the card monthly. Failed payments are out of scope.",
+    "labels": ["missing_edge_case", "missing_recovery_flow", "missing_acceptance_criteria"]
+  },
+  {
+    "id": "prd-en-08",
+    "language": "en",
+    "source": "# Audit log\n\nRecord changes. Users may edit or delete any log entry.",
+    "labels": ["security", "missing_integrity_requirement", "ambiguous_scope"]
+  },
+  {
+    "id": "prd-en-09",
+    "language": "en",
+    "source": "# Mobile app\n\nMatch every desktop feature in the first release.",
+    "labels": ["scope_overreach", "missing_non_goals", "missing_rollout"]
+  },
+  {
+    "id": "prd-en-10",
+    "language": "en",
+    "source": "# Sessions\n\nKeep users signed in forever on all devices.",
+    "labels": ["security", "privacy", "missing_revocation"]
+  },
+  {
+    "id": "prd-en-11",
+    "language": "en",
+    "source": "# Data export\n\nExports should be complete and arrive soon.",
+    "labels": ["unmeasurable", "missing_format_contract", "missing_error_state"]
+  },
+  {
+    "id": "prd-en-12",
+    "language": "en",
+    "source": "# Collaboration\n\nEdits from multiple users never conflict.",
+    "labels": ["unsupported_assumption", "missing_conflict_policy", "missing_metrics"]
+  },
+  {
+    "id": "prd-en-13",
+    "language": "en",
+    "source": "# Account deletion\n\nDelete the profile immediately but retain all records indefinitely.",
+    "labels": ["contradiction", "privacy", "missing_retention_policy"]
+  },
+  {
+    "id": "prd-en-14",
+    "language": "en",
+    "source": "# Accessibility\n\nThe interface should be accessible.",
+    "labels": ["unmeasurable", "missing_acceptance_criteria", "missing_user_flow"]
+  },
+  {
+    "id": "prd-en-15",
+    "language": "en",
+    "source": "# Rollout\n\nRelease to production after engineering finishes.",
+    "labels": ["missing_rollout", "missing_metrics", "missing_rollback"],
+    "unsupportedClaims": ["The release will have zero incidents"]
+  }
+]

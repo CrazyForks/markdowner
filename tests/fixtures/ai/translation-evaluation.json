@@ -1,0 +1,322 @@
+[
+  {
+    "id": "tr-ko-en-01",
+    "direction": "ko->en",
+    "source": "# 설치\n\n`cargo install mdner`를 실행하세요.",
+    "targetLanguage": "en",
+    "protectedTokens": ["`cargo install mdner`"],
+    "requiredLiterals": ["mdner"]
+  },
+  {
+    "id": "tr-ko-en-02",
+    "direction": "ko->en",
+    "source": "[문서](/docs/setup?q=1)를 읽고 30초 기다립니다.",
+    "targetLanguage": "en",
+    "protectedTokens": ["/docs/setup?q=1"],
+    "requiredLiterals": ["30"]
+  },
+  {
+    "id": "tr-ko-en-03",
+    "direction": "ko->en",
+    "source": "이미지 ![설명](./assets/hero.png)은 2MB입니다.",
+    "targetLanguage": "en",
+    "protectedTokens": ["./assets/hero.png"],
+    "requiredLiterals": ["2MB"]
+  },
+  {
+    "id": "tr-ko-en-04",
+    "direction": "ko->en",
+    "source": "$git-commit 스킬을 사용하고 `main`은 유지하세요.",
+    "targetLanguage": "en",
+    "protectedTokens": ["$git-commit", "`main`"],
+    "requiredLiterals": ["main"]
+  },
+  {
+    "id": "tr-ko-en-05",
+    "direction": "ko->en",
+    "source": "<kbd>Cmd+S</kbd>를 눌러 v1.2.0을 저장합니다.",
+    "targetLanguage": "en",
+    "protectedTokens": ["<kbd>", "</kbd>", "Cmd+S"],
+    "requiredLiterals": ["v1.2.0"]
+  },
+  {
+    "id": "tr-en-ko-01",
+    "direction": "en->ko",
+    "source": "# Setup\n\nRun `pnpm install` before opening port 14238.",
+    "targetLanguage": "ko",
+    "protectedTokens": ["`pnpm install`"],
+    "requiredLiterals": ["14238"]
+  },
+  {
+    "id": "tr-en-ko-02",
+    "direction": "en->ko",
+    "source": "Read [the API guide](https://example.com/api?v=2) in 5 minutes.",
+    "targetLanguage": "ko",
+    "protectedTokens": ["https://example.com/api?v=2"],
+    "requiredLiterals": ["5"]
+  },
+  {
+    "id": "tr-en-ko-03",
+    "direction": "en->ko",
+    "source": "Keep ![logo](/static/logo.svg) at 120px wide.",
+    "targetLanguage": "ko",
+    "protectedTokens": ["/static/logo.svg"],
+    "requiredLiterals": ["120px"]
+  },
+  {
+    "id": "tr-en-ko-04",
+    "direction": "en->ko",
+    "source": "Use $git-commit-push and do not rename `README.md`.",
+    "targetLanguage": "ko",
+    "protectedTokens": ["$git-commit-push", "`README.md`"],
+    "requiredLiterals": ["README.md"]
+  },
+  {
+    "id": "tr-en-ko-05",
+    "direction": "en->ko",
+    "source": "<span data-id=\"A-17\">Account</span> expires after 24h.",
+    "targetLanguage": "ko",
+    "protectedTokens": ["<span data-id=\"A-17\">", "</span>"],
+    "requiredLiterals": ["24h"]
+  },
+  {
+    "id": "tr-ja-ko-01",
+    "direction": "ja->ko",
+    "source": "# 導入\n\n`cargo test`を実行して3件を確認します。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["`cargo test`"],
+    "requiredLiterals": ["3"]
+  },
+  {
+    "id": "tr-ja-ko-02",
+    "direction": "ja->ko",
+    "source": "[仕様書](/ja/spec#v2)を10分以内に読みます。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["/ja/spec#v2"],
+    "requiredLiterals": ["10"]
+  },
+  {
+    "id": "tr-ja-ko-03",
+    "direction": "ja->ko",
+    "source": "画像 ![図](./img/flow.webp) は640x480です。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["./img/flow.webp"],
+    "requiredLiterals": ["640x480"]
+  },
+  {
+    "id": "tr-ja-ko-04",
+    "direction": "ja->ko",
+    "source": "$git-commitを使い、`dev`ブランチを保持します。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["$git-commit", "`dev`"],
+    "requiredLiterals": ["dev"]
+  },
+  {
+    "id": "tr-ja-ko-05",
+    "direction": "ja->ko",
+    "source": "<kbd>⌘K</kbd>を押してv2.1を選択します。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["<kbd>", "</kbd>", "⌘K"],
+    "requiredLiterals": ["v2.1"]
+  },
+  {
+    "id": "tr-zh-ko-01",
+    "direction": "zh->ko",
+    "source": "# 安装\n\n运行 `pnpm build` 并等待60秒。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["`pnpm build`"],
+    "requiredLiterals": ["60"]
+  },
+  {
+    "id": "tr-zh-ko-02",
+    "direction": "zh->ko",
+    "source": "阅读[文档](/zh/docs?id=9)，版本为3.0。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["/zh/docs?id=9"],
+    "requiredLiterals": ["3.0"]
+  },
+  {
+    "id": "tr-zh-ko-03",
+    "direction": "zh->ko",
+    "source": "保留图片 ![图标](../icons/app.icns) 和512px尺寸。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["../icons/app.icns"],
+    "requiredLiterals": ["512px"]
+  },
+  {
+    "id": "tr-zh-ko-04",
+    "direction": "zh->ko",
+    "source": "使用 $git-commit-push，保持 `main` 分支。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["$git-commit-push", "`main`"],
+    "requiredLiterals": ["main"]
+  },
+  {
+    "id": "tr-zh-ko-05",
+    "direction": "zh->ko",
+    "source": "<code>API_KEY</code> 的有效期是7天。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["<code>", "</code>", "API_KEY"],
+    "requiredLiterals": ["7"]
+  },
+  {
+    "id": "tr-ko-en-06",
+    "direction": "ko->en",
+    "source": "---\ntitle: 출시 계획\nversion: 2\n---\n\n사용자에게 계획을 안내합니다.",
+    "targetLanguage": "en",
+    "protectedTokens": ["title:", "version:"],
+    "requiredLiterals": ["2"]
+  },
+  {
+    "id": "tr-ko-en-07",
+    "direction": "ko->en",
+    "source": "| 단계 | 시간 |\n| --- | ---: |\n| 검토 | 15분 |",
+    "targetLanguage": "en",
+    "protectedTokens": ["| --- | ---: |"],
+    "requiredLiterals": ["15"]
+  },
+  {
+    "id": "tr-ko-en-08",
+    "direction": "ko->en",
+    "source": "- 배포\n  - `pnpm build`\n  - 성공률 99.9% 확인",
+    "targetLanguage": "en",
+    "protectedTokens": ["`pnpm build`"],
+    "requiredLiterals": ["99.9%"]
+  },
+  {
+    "id": "tr-ko-en-09",
+    "direction": "ko->en",
+    "source": "흐름은 다음과 같습니다.\n\n```mermaid\ngraph LR\nA-->B\n```\n",
+    "targetLanguage": "en",
+    "protectedTokens": ["```mermaid\ngraph LR\nA-->B\n```"],
+    "requiredLiterals": ["A-->B"]
+  },
+  {
+    "id": "tr-ko-en-10",
+    "direction": "ko->en",
+    "source": "> [지원팀](/help)은 SLA 4h 내 응답합니다.",
+    "targetLanguage": "en",
+    "protectedTokens": ["/help"],
+    "requiredLiterals": ["SLA 4h"]
+  },
+  {
+    "id": "tr-en-ko-06",
+    "direction": "en->ko",
+    "source": "---\ntitle: Release plan\nversion: 3\n---\n\nExplain the plan to users.",
+    "targetLanguage": "ko",
+    "protectedTokens": ["title:", "version:"],
+    "requiredLiterals": ["3"]
+  },
+  {
+    "id": "tr-en-ko-07",
+    "direction": "en->ko",
+    "source": "| Phase | Time |\n| --- | ---: |\n| Review | 20 min |",
+    "targetLanguage": "ko",
+    "protectedTokens": ["| --- | ---: |"],
+    "requiredLiterals": ["20"]
+  },
+  {
+    "id": "tr-en-ko-08",
+    "direction": "en->ko",
+    "source": "- Deploy\n  - Run `cargo test`\n  - Confirm 99.95% availability",
+    "targetLanguage": "ko",
+    "protectedTokens": ["`cargo test`"],
+    "requiredLiterals": ["99.95%"]
+  },
+  {
+    "id": "tr-en-ko-09",
+    "direction": "en->ko",
+    "source": "The flow follows.\n\n```mermaid\nsequenceDiagram\nA->>B: Ping\n```\n",
+    "targetLanguage": "ko",
+    "protectedTokens": ["```mermaid\nsequenceDiagram\nA->>B: Ping\n```"],
+    "requiredLiterals": ["A->>B"]
+  },
+  {
+    "id": "tr-en-ko-10",
+    "direction": "en->ko",
+    "source": "> [Support](/support) replies within SLA 6h.",
+    "targetLanguage": "ko",
+    "protectedTokens": ["/support"],
+    "requiredLiterals": ["SLA 6h"]
+  },
+  {
+    "id": "tr-ja-ko-06",
+    "direction": "ja->ko",
+    "source": "---\ntitle: リリース計画\nversion: 4\n---\n\n利用者に計画を説明します。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["title:", "version:"],
+    "requiredLiterals": ["4"]
+  },
+  {
+    "id": "tr-ja-ko-07",
+    "direction": "ja->ko",
+    "source": "| 段階 | 時間 |\n| --- | ---: |\n| 確認 | 25分 |",
+    "targetLanguage": "ko",
+    "protectedTokens": ["| --- | ---: |"],
+    "requiredLiterals": ["25"]
+  },
+  {
+    "id": "tr-ja-ko-08",
+    "direction": "ja->ko",
+    "source": "- 配布\n  - `pnpm build`\n  - 成功率99.8%を確認",
+    "targetLanguage": "ko",
+    "protectedTokens": ["`pnpm build`"],
+    "requiredLiterals": ["99.8%"]
+  },
+  {
+    "id": "tr-ja-ko-09",
+    "direction": "ja->ko",
+    "source": "次のフローを使います。\n\n```mermaid\ngraph TD\nStart-->End\n```\n",
+    "targetLanguage": "ko",
+    "protectedTokens": ["```mermaid\ngraph TD\nStart-->End\n```"],
+    "requiredLiterals": ["Start-->End"]
+  },
+  {
+    "id": "tr-ja-ko-10",
+    "direction": "ja->ko",
+    "source": "> [サポート](/ja/help)はSLA 2h以内に返信します。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["/ja/help"],
+    "requiredLiterals": ["SLA 2h"]
+  },
+  {
+    "id": "tr-zh-ko-06",
+    "direction": "zh->ko",
+    "source": "---\ntitle: 发布计划\nversion: 5\n---\n\n向用户说明该计划。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["title:", "version:"],
+    "requiredLiterals": ["5"]
+  },
+  {
+    "id": "tr-zh-ko-07",
+    "direction": "zh->ko",
+    "source": "| 阶段 | 时间 |\n| --- | ---: |\n| 审核 | 30分钟 |",
+    "targetLanguage": "ko",
+    "protectedTokens": ["| --- | ---: |"],
+    "requiredLiterals": ["30"]
+  },
+  {
+    "id": "tr-zh-ko-08",
+    "direction": "zh->ko",
+    "source": "- 发布\n  - 运行 `cargo clippy`\n  - 确认99.7%可用性",
+    "targetLanguage": "ko",
+    "protectedTokens": ["`cargo clippy`"],
+    "requiredLiterals": ["99.7%"]
+  },
+  {
+    "id": "tr-zh-ko-09",
+    "direction": "zh->ko",
+    "source": "流程如下。\n\n```mermaid\nflowchart LR\nInput-->Output\n```\n",
+    "targetLanguage": "ko",
+    "protectedTokens": ["```mermaid\nflowchart LR\nInput-->Output\n```"],
+    "requiredLiterals": ["Input-->Output"]
+  },
+  {
+    "id": "tr-zh-ko-10",
+    "direction": "zh->ko",
+    "source": "> [支持团队](/zh/help)会在SLA 1h内回复。",
+    "targetLanguage": "ko",
+    "protectedTokens": ["/zh/help"],
+    "requiredLiterals": ["SLA 1h"]
+  }
+]

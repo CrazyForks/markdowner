@@ -1969,3 +1969,13 @@ section[data-minimap='on'] .editor-pane-preview {
 :root[data-cb-theme="monokai-dark"] .hljs-attribute,
 :root[data-cb-theme="monokai-dark"] .hljs-variable { color: #ae81ff; }
 :root[data-cb-theme="monokai-dark"] .hljs-tag { color: #f92672; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-motion-surface,
+  .ai-motion-surface * {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

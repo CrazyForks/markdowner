@@ -122,4 +122,53 @@ describe('AiReviewTab', () => {
       screen.getByRole('button', { name: 'Open as new document' }),
     ).toBeEnabled();
   });
+
+  it('supports translation-only review and exposes language and hunk controls', () => {
+    const translationRequest: AiRunRequest = {
+      ...request,
+      task: 'translation',
+      targetLanguage: 'ko',
+    };
+    const translationResult: AiRunResult = {
+      ...runResult,
+      task: 'translation',
+      result: runResult.result
+        ? {
+            ...runResult.result,
+            proposedMarkdown: '# 요구사항\n\n측정 가능합니다.',
+            detectedSourceLanguage: 'en',
+            targetLanguage: 'ko',
+          }
+        : null,
+    };
+
+    render(
+      <AiReviewTab
+        review={createAiReview(
+          translationRequest,
+          translationResult,
+          'requirements.md',
+        )}
+        currentSource={request.source}
+        sourcePresent
+        onApply={vi.fn()}
+        onRenderSelected={vi.fn()}
+        onOpenAsDocument={vi.fn()}
+        onRerun={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Detected en · Target ko/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('checkbox', { name: /Select change for segment-1/i }),
+    ).toBeChecked();
+    expect(screen.getByRole('heading', { name: 'Source' })).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show translation only' }),
+    );
+
+    expect(screen.queryByRole('heading', { name: 'Source' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Translation' })).toBeInTheDocument();
+  });
 });

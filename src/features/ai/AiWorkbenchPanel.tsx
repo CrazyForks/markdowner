@@ -14,6 +14,7 @@ import {
 import type { Settings } from '@/lib/settings';
 
 import {
+  detectDocumentLanguage,
   estimateAiRun,
   orderModels,
   resolveRunGate,
@@ -163,6 +164,18 @@ export function AiWorkbenchPanel({
   const languages = searchLanguages(languageQuery).slice(0, 12);
   const requiresInstruction = task === 'custom';
   const targetRequired = task === 'translation';
+  const detectedSourceLanguage = useMemo(
+    () => (targetRequired ? detectDocumentLanguage(source) : null),
+    [source, targetRequired],
+  );
+  const normalizedTargetLanguage = targetLanguage
+    .trim()
+    .toLocaleLowerCase()
+    .split('-')[0];
+  const sameLanguage =
+    targetRequired &&
+    detectedSourceLanguage !== null &&
+    detectedSourceLanguage === normalizedTargetLanguage;
   const configured = keyStatus?.configured === true;
   const disclosureAccepted = settings.aiCloudDisclosureAccepted;
   const canRun =
@@ -174,7 +187,38 @@ export function AiWorkbenchPanel({
     gate?.kind !== 'blocked' &&
     (gate?.kind !== 'confirm' || confirmed) &&
     (!requiresInstruction || instruction.trim().length > 0) &&
-    (!targetRequired || targetLanguage.trim().length > 0);
+    (!targetRequired || targetLanguage.trim().length > 0) &&
+    !sameLanguage;
+
+  const chooseTargetLanguage = (language: string) => {
+    setTargetLanguage(language);
+    setLanguageQuery('');
+    if (language !== settings.aiTranslationTargetLanguage) {
+      onSettingsChange({
+        ...settings,
+        aiTranslationTargetLanguage: language,
+      });
+    }
+  };
+
+  const chooseModel = (modelId: string) => {
+    setModel(modelId);
+    setConfirmed(false);
+    const currentDefault =
+      task === 'prd'
+        ? settings.aiPrdModel
+        : task === 'translation'
+          ? settings.aiTranslationModel
+          : settings.aiCustomPromptModel;
+    if (modelId === currentDefault) return;
+    onSettingsChange(
+      task === 'prd'
+        ? { ...settings, aiPrdModel: modelId }
+        : task === 'translation'
+          ? { ...settings, aiTranslationModel: modelId }
+          : { ...settings, aiCustomPromptModel: modelId },
+    );
+  };
 
   const handleRun = async () => {
     if (!canRun || !selectedModel) return;
@@ -232,7 +276,7 @@ export function AiWorkbenchPanel({
   return (
     <section
       aria-labelledby="ai-workbench-heading"
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+      className="ai-motion-surface flex min-h-0 flex-1 flex-col overflow-y-auto"
       data-testid="ai-workbench-panel"
     >
       <header className="border-b border-border px-3 py-3">
@@ -310,10 +354,7 @@ export function AiWorkbenchPanel({
             className={selectClass}
             value={selectedModel?.id ?? model}
             disabled={Boolean(runningRequestId)}
-            onChange={(event) => {
-              setModel(event.target.value);
-              setConfirmed(false);
-            }}
+            onChange={(event) => chooseModel(event.target.value)}
           >
             {modelOptions.map((option) => (
               <option
@@ -340,7 +381,7 @@ export function AiWorkbenchPanel({
               onChange={(event) => {
                 setLanguageQuery(event.target.value);
                 if (/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*$/.test(event.target.value)) {
-                  setTargetLanguage(event.target.value);
+                  chooseTargetLanguage(event.target.value);
                 }
               }}
               placeholder="Search by language or BCP 47 code"
@@ -356,16 +397,23 @@ export function AiWorkbenchPanel({
                       ? 'rounded-md bg-accent px-2 py-1 text-xs text-accent-foreground'
                       : 'rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground'
                   }
-                  onClick={() => {
-                    setTargetLanguage(language.code);
-                    setLanguageQuery('');
-                  }}
+                  onClick={() => chooseTargetLanguage(language.code)}
                   disabled={Boolean(runningRequestId)}
                 >
                   {language.name} · {language.code}
                 </button>
               ))}
             </div>
+            {sameLanguage ? (
+              <p
+                role="alert"
+                className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-200"
+              >
+                This document already appears to be{' '}
+                {languageName(detectedSourceLanguage)}. Choose a different target
+                language before running.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -406,6 +454,11 @@ export function AiWorkbenchPanel({
             <p className="mt-1 text-[11px] text-muted-foreground">
               Estimate only. Actual provider usage can differ.
             </p>
+            {estimate.pricingUpdatedAt ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Pricing checked · {estimate.pricingUpdatedAt}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -509,4 +562,9 @@ function errorMessage(reason: unknown): string {
     return String(reason.message);
   }
   return reason instanceof Error ? reason.message : String(reason);
+}
+
+function languageName(code: string): string {
+  if (typeof Intl.DisplayNames !== 'function') return code.toLocaleUpperCase();
+  return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) ?? code;
 }

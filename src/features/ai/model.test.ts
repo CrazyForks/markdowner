@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_AI_MODEL,
   PINNED_AI_MODELS,
+  detectDocumentLanguage,
   estimateAiRun,
   orderModels,
   resolveRunGate,
@@ -137,6 +138,20 @@ describe('AI estimates and run gates', () => {
 });
 
 describe('translation languages', () => {
+  it('detects the four built-in source-language families locally', () => {
+    expect(detectDocumentLanguage('# 제품 요구사항\n\n사용자가 문서를 엽니다.')).toBe(
+      'ko',
+    );
+    expect(detectDocumentLanguage('# Requirements\n\nThe user opens a document.')).toBe(
+      'en',
+    );
+    expect(detectDocumentLanguage('# 要件\n\nユーザーが文書を開きます。')).toBe(
+      'ja',
+    );
+    expect(detectDocumentLanguage('# 需求\n\n用户打开文档。')).toBe('zh');
+    expect(detectDocumentLanguage('`pnpm test` 123')).toBeNull();
+  });
+
   it('searches by BCP 47 code and localized language name', () => {
     expect(searchLanguages('ja', 'en').slice(0, 1)).toMatchObject([
       { code: 'ja' },

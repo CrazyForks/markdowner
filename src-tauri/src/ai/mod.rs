@@ -24,6 +24,8 @@ use self::{
     },
 };
 
+#[cfg(test)]
+mod evaluation;
 pub mod keychain;
 pub mod openrouter;
 
@@ -679,8 +681,10 @@ fn validation_issues(error: ValidationError) -> Vec<AiValidationIssue> {
 mod tests {
     use super::{
         CatalogCache, RequestScheduler,
-        openrouter::{AiModel, AiModelPricing},
+        openrouter::{AiModel, AiModelPricing, AiTask},
+        validate_provider_result,
     };
+    use markdowner_core::ai_document::{AiDocumentEnvelope, ByteRange};
 
     #[tokio::test]
     async fn limits_two_app_requests_and_one_per_document() {
@@ -737,5 +741,110 @@ mod tests {
         assert_eq!(cache.load().unwrap(), models);
         assert!(!serialized.contains("sk-or-"));
         assert!(!serialized.contains("authorization"));
+    }
+
+    #[test]
+    fn invalid_provider_schema_fails_closed_without_a_result() {
+        let envelope = AiDocumentEnvelope::new("doc-1", "# PRD\n\nVague.", None).unwrap();
+
+        let (result, issues) = validate_provider_result(&envelope, AiTask::Prd, "not valid json");
+
+        assert!(result.is_none());
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].code, "invalid_schema");
+    }
+
+    #[test]
+    fn mock_prd_and_translation_results_validate_without_network() {
+        let envelope = AiDocumentEnvelope::new("doc-1", "Vague requirement.", None).unwrap();
+        let prd = serde_json::json!({
+            "schema_version": 1,
+            "summary": "Clarify the requirement.",
+            "findings": [],
+            "operations": [],
+            "assumptions": []
+        })
+        .to_string();
+        let (prd_result, prd_issues) = validate_provider_result(&envelope, AiTask::Prd, &prd);
+        assert!(prd_result.is_some());
+        assert!(prd_issues.is_empty());
+
+        let translation = serde_json::json!({
+            "schema_version": 1,
+            "detected_source_language": "en",
+            "target_language": "ko",
+            "segments": envelope
+                .segments
+                .iter()
+                .map(|segment| serde_json::json!({
+                    "id": segment.id,
+                    "translated_text": segment.text
+                }))
+                .collect::<Vec<_>>(),
+            "warnings": []
+        })
+        .to_string();
+        let (translation_result, translation_issues) =
+            validate_provider_result(&envelope, AiTask::Translation, &translation);
+        assert!(translation_result.is_some());
+        assert!(translation_issues.is_empty());
+    }
+
+    #[test]
+    fn mock_selection_result_validates_without_network() {
+        let source = "Make this clear.";
+        let envelope = AiDocumentEnvelope::new(
+            "doc-1",
+            source,
+            Some(ByteRange {
+                start: 0,
+                end: source.len(),
+            }),
+        )
+        .unwrap();
+        let response = serde_json::json!({
+            "schema_version": 1,
+            "replacement_text": "Make this measurable.",
+            "warnings": []
+        })
+        .to_string();
+
+        let (result, issues) = validate_provider_result(&envelope, AiTask::Custom, &response);
+
+        assert_eq!(
+            result.map(|result| result.proposed_markdown),
+            Some("Make this measurable.".to_string())
+        );
+        assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn unsafe_selection_replacement_fails_closed_without_a_result() {
+        let source = "Keep `cargo test` exactly.";
+        let start = source.find('K').unwrap();
+        let envelope = AiDocumentEnvelope::new(
+            "doc-1",
+            source,
+            Some(ByteRange {
+                start,
+                end: source.len(),
+            }),
+        )
+        .unwrap();
+        let response = serde_json::json!({
+            "schema_version": 1,
+            "replacement_text": "Remove the command."
+        })
+        .to_string();
+
+        let (result, issues) = validate_provider_result(&envelope, AiTask::Custom, &response);
+
+        assert!(result.is_none());
+        assert!(!issues.is_empty());
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "protected_token_missing")
+        );
     }
 }

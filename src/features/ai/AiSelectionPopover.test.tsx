@@ -79,4 +79,36 @@ describe('AiSelectionPopover', () => {
     });
     expect(onResult).toHaveBeenCalledTimes(1);
   });
+
+  it('closes with Escape before a request starts', async () => {
+    const snapshot = captureSourceSelection('alpha beta', 6, 10, 'doc-1');
+    if (!snapshot) throw new Error('selection required');
+    const onClose = vi.fn();
+
+    render(
+      <AiSelectionPopover
+        snapshot={snapshot}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+        }}
+        onClose={onClose}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn(async () => ({
+            configured: false,
+            maskedLabel: null,
+          })),
+          listModels: vi.fn(),
+          run: vi.fn(),
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    await screen.findByText(/Add and verify an OpenRouter key/i);
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

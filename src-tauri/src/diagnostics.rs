@@ -6,7 +6,7 @@ use std::{
 };
 
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 const LOG_DIR_NAME: &str = "logs";
 const LOG_FILE_NAME: &str = "markdowner.log";
@@ -74,7 +74,7 @@ pub fn write_diagnostics_event_with_limit(
         fs::create_dir_all(parent)?;
     }
 
-    let line = render_event_line(event_name, payload)?;
+    let line = render_event_line(event_name, sanitize_payload(event_name, payload))?;
     rotate_log_if_needed(&log_path, line.len() as u64, max_log_bytes)?;
 
     let mut file = OpenOptions::new()
@@ -101,6 +101,83 @@ fn render_event_line(event_name: &str, payload: Value) -> io::Result<String> {
     .map_err(io::Error::other)?;
     line.push('\n');
     Ok(line)
+}
+
+fn sanitize_payload(event_name: &str, payload: Value) -> Value {
+    if event_name == "ai.lifecycle" {
+        let Value::Object(payload) = payload else {
+            return Value::Object(Map::new());
+        };
+        let allowed = [
+            "lifecycle",
+            "task",
+            "model",
+            "promptTokens",
+            "completionTokens",
+            "totalTokens",
+            "costUsd",
+            "durationMs",
+            "errorCode",
+            "generationId",
+        ];
+        return Value::Object(
+            payload
+                .into_iter()
+                .filter(|(key, _)| allowed.contains(&key.as_str()))
+                .map(|(key, value)| (key, sanitize_value(value)))
+                .collect(),
+        );
+    }
+    sanitize_value(payload)
+}
+
+fn sanitize_value(value: Value) -> Value {
+    match value {
+        Value::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .filter(|(key, _)| !forbidden_diagnostics_key(key))
+                .map(|(key, value)| (key, sanitize_value(value)))
+                .collect(),
+        ),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(sanitize_value).collect::<Vec<_>>())
+        }
+        Value::String(value) if contains_credential_pattern(&value) => {
+            Value::String("[redacted]".to_string())
+        }
+        other => other,
+    }
+}
+
+fn forbidden_diagnostics_key(key: &str) -> bool {
+    let normalized = key
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    [
+        "apikey",
+        "authorization",
+        "credential",
+        "secret",
+        "prompt",
+        "source",
+        "response",
+        "translation",
+        "diff",
+        "content",
+        "path",
+        "document",
+        "selection",
+    ]
+    .iter()
+    .any(|forbidden| normalized.contains(forbidden))
+}
+
+fn contains_credential_pattern(value: &str) -> bool {
+    let normalized = value.to_ascii_lowercase();
+    normalized.contains("sk-or-") || normalized.contains("bearer ")
 }
 
 fn rotate_log_if_needed(
@@ -133,8 +210,7 @@ mod tests {
 
     use super::{
         diagnostics_log_path, diagnostics_status, ensure_diagnostics_log_file,
-        write_diagnostics_event,
-        write_diagnostics_event_with_limit,
+        write_diagnostics_event, write_diagnostics_event_with_limit,
     };
 
     #[test]
@@ -146,11 +222,7 @@ mod tests {
         assert!(!status.enabled);
         assert_eq!(
             status.log_path.as_deref(),
-            Some(
-                diagnostics_log_path(temp.path())
-                    .to_string_lossy()
-                    .as_ref()
-            )
+            Some(diagnostics_log_path(temp.path()).to_string_lossy().as_ref())
         );
         assert!(!temp.path().join("logs").exists());
     }
@@ -203,5 +275,47 @@ mod tests {
         let contents = fs::read_to_string(&log_path).unwrap();
         assert!(contents.contains("\"event\":\"settings.changed\""));
         assert!(!contents.contains("stale log entry"));
+    }
+
+    #[test]
+    fn write_event_removes_ai_secrets_and_document_content() {
+        let temp = tempdir().unwrap();
+
+        let log_path = write_diagnostics_event(
+            temp.path(),
+            "ai.lifecycle",
+            json!({
+                "lifecycle": "failed",
+                "task": "translation",
+                "model": "z-ai/glm-5.2",
+                "errorCode": "invalid_schema",
+                "apiKey": "sk-or-private-key",
+                "authorization": "Bearer private-key",
+                "prompt": "translate this secret",
+                "source": "# private source",
+                "response": "private response",
+                "translation": "비밀 번역",
+                "diff": "- old\n+ private",
+                "path": "/Users/example/private.md",
+                "selection": "private range"
+            }),
+        )
+        .unwrap();
+
+        let contents = fs::read_to_string(&log_path).unwrap();
+        assert!(contents.contains("\"errorCode\":\"invalid_schema\""));
+        assert!(contents.contains("\"model\":\"z-ai/glm-5.2\""));
+        for secret in [
+            "sk-or-private-key",
+            "Bearer private-key",
+            "translate this secret",
+            "# private source",
+            "private response",
+            "비밀 번역",
+            "/Users/example/private.md",
+            "private range",
+        ] {
+            assert!(!contents.contains(secret), "leaked {secret}");
+        }
     }
 }

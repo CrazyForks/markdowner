@@ -92,4 +92,118 @@ describe('AiWorkbenchPanel', () => {
     expect(await screen.findByRole('button', { name: 'Run' })).toBeDisabled();
     expect(screen.getAllByText(/approve cloud processing/i)).not.toHaveLength(0);
   });
+
+  it('does not fetch a catalog or run a request when no key is configured', async () => {
+    const listModels = vi.fn();
+    const run = vi.fn();
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        source="Document"
+        selection={null}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+        }}
+        onSettingsChange={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({
+            configured: false,
+            maskedLabel: null,
+          }),
+          listModels,
+          run,
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(await screen.findByText(/Connect OpenRouter/i)).toBeInTheDocument();
+    expect(listModels).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('persists a translation target and blocks a detected same-language request', async () => {
+    const onSettingsChange = vi.fn();
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        source="# 요구사항\n\n사용자가 문서를 엽니다."
+        selection={null}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+          aiTranslationTargetLanguage: 'en',
+        }}
+        onSettingsChange={onSettingsChange}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({
+            configured: true,
+            maskedLabel: '••••secret',
+          }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          run: vi.fn(),
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI task' }), {
+      target: { value: 'translation' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Korean · ko/i }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ aiTranslationTargetLanguage: 'ko' }),
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(/already appears to be Korean/i);
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+  });
+
+  it('persists the selected model as the current task default', async () => {
+    const onSettingsChange = vi.fn();
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        source="A requirement."
+        selection={null}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+        }}
+        onSettingsChange={onSettingsChange}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({
+            configured: true,
+            maskedLabel: '••••secret',
+          }),
+          listModels: vi.fn().mockResolvedValue([
+            glm,
+            {
+              ...glm,
+              id: 'moonshotai/kimi-k3',
+              name: 'Kimi K3',
+            },
+          ]),
+          run: vi.fn(),
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    const modelSelect = await screen.findByRole('combobox', {
+      name: 'AI model',
+    });
+    fireEvent.change(modelSelect, {
+      target: { value: 'moonshotai/kimi-k3' },
+    });
+
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ aiPrdModel: 'moonshotai/kimi-k3' }),
+    );
+  });
 });

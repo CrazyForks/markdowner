@@ -816,6 +816,33 @@ mod tests {
     }
 
     #[test]
+    fn injection_corpus_never_adds_tools_or_changes_system_instructions() {
+        let fixtures: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/ai/prompt-injection-evaluation.json"
+        ))
+        .unwrap();
+        assert_eq!(fixtures.len(), 20);
+
+        for fixture in fixtures {
+            let source = fixture["source"].as_str().unwrap();
+            let mut request = fixture_request(AiTask::Prd);
+            request.document = json!({
+                "documentId": fixture["id"],
+                "revisionHash": "revision",
+                "segments": [{"id": "segment-1", "text": source}],
+                "protected": []
+            });
+            let chat = build_chat_request(&request);
+            let messages = build_messages(&request);
+
+            assert!(chat.get("tools").is_none());
+            assert!(chat.get("tool_choice").is_none());
+            assert!(!messages[0]["content"].as_str().unwrap().contains(source));
+            assert!(messages[1]["content"].as_str().unwrap().contains(source));
+        }
+    }
+
+    #[test]
     fn decoder_ignores_comments_and_captures_final_usage_across_chunks() {
         let mut decoder = SseDecoder::default();
         decoder.push(b": OPENROUTER PROCESSING\n\n").unwrap();
