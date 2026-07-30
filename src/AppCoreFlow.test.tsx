@@ -67,6 +67,18 @@ vi.mock('./lib/desktop', () => ({
   saveOpenTabs: saveOpenTabsMock,
   loadDraftBackups: loadDraftBackupsMock,
   saveDraftBackups: saveDraftBackupsMock,
+  aiCancel: vi.fn(),
+  aiDeleteKey: vi.fn(),
+  aiDiscardResult: vi.fn(),
+  aiKeyStatus: vi.fn().mockResolvedValue({
+    configured: false,
+    maskedLabel: null,
+  }),
+  aiListModels: vi.fn().mockResolvedValue([]),
+  aiRenderSelectedOperations: vi.fn(),
+  aiRun: vi.fn(),
+  aiSaveKey: vi.fn(),
+  aiVerifyKey: vi.fn(),
 }));
 
 vi.mock('@/shell/TerminalPanel', () => ({
