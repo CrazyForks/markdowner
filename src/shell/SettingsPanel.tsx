@@ -521,17 +521,6 @@ export function SettingsPanel({
           />
         </div>
         <Separator />
-        <OpenRouterSettings
-          zdrOnly={settings.aiZdrOnly}
-          disclosureAccepted={settings.aiCloudDisclosureAccepted}
-          onZdrOnlyChange={(aiZdrOnly) =>
-            onSettingsChange({ ...settings, aiZdrOnly })
-          }
-          onDisclosureAcceptedChange={(aiCloudDisclosureAccepted) =>
-            onSettingsChange({ ...settings, aiCloudDisclosureAccepted })
-          }
-        />
-        <Separator />
         <div data-testid="settings-default-md-handler" className="flex min-w-0 flex-col gap-2">
           <div className="flex items-center justify-between gap-3">
             <h4 className="text-sm font-medium leading-none">Default Markdown App</h4>
@@ -1504,6 +1493,18 @@ export function SettingsPanel({
             />
           </div>
         </div>
+
+        <Separator />
+        <OpenRouterSettings
+          zdrOnly={settings.aiZdrOnly}
+          disclosureAccepted={settings.aiCloudDisclosureAccepted}
+          onZdrOnlyChange={(aiZdrOnly) =>
+            onSettingsChange({ ...settings, aiZdrOnly })
+          }
+          onDisclosureAcceptedChange={(aiCloudDisclosureAccepted) =>
+            onSettingsChange({ ...settings, aiCloudDisclosureAccepted })
+          }
+        />
 
         <Separator />
         <div data-testid="settings-reset-section" className="flex justify-end">

@@ -217,6 +217,19 @@ describe('SettingsPanel update section', () => {
     );
   });
 
+  it('places AI and OpenRouter immediately below terminal preferences', () => {
+    renderPanel();
+
+    const terminalSection = screen.getByTestId('settings-terminal-section');
+    const openRouterSection = screen.getByTestId('settings-openrouter');
+    const siblingSections = Array.from(terminalSection.parentElement?.children ?? [])
+      .filter((element) => element.hasAttribute('data-testid'));
+
+    expect(siblingSections.indexOf(openRouterSection)).toBe(
+      siblingSections.indexOf(terminalSection) + 1,
+    );
+  });
+
   it('persists A3 size and landscape orientation', () => {
     const onSettingsChange = vi.fn();
     renderPanel({ onSettingsChange });
