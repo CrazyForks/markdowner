@@ -4,9 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '@/lib/settings';
 
 import { AiWorkbenchPanel } from './AiWorkbenchPanel';
-import type { AiModel } from './types';
+import type { AiModel, AiRunRequest } from './types';
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 const glm: AiModel = {
   id: 'z-ai/glm-5.2',
@@ -507,4 +510,80 @@ describe('AiWorkbenchPanel', () => {
     });
     expect(onResult).toHaveBeenCalledTimes(2);
   });
+
+  it('resumes a workspace batch at the failed file with the original model', async () => {
+    const run = vi.fn()
+      .mockImplementationOnce(async (request) => runResult(request))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockImplementationOnce(async (request) => runResult(request));
+    const onResult = vi.fn();
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-current"
+        documentPath="/vault/current.md"
+        source="# Current draft"
+        workspaceRoot="/vault"
+        workspaceDocumentCount={2}
+        workspaceDocumentPaths={['/vault/current.md', '/vault/other.md']}
+        selection={null}
+        settings={{ ...DEFAULT_SETTINGS, aiCloudDisclosureAccepted: true }}
+        onSettingsChange={vi.fn()}
+        onResult={onResult}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({ configured: true, maskedLabel: '••••secret' }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          run,
+          cancel: vi.fn(),
+          readDocuments: vi.fn().mockResolvedValue([
+            { path: '/vault/current.md', contents: '# Current draft' },
+            { path: '/vault/other.md', contents: '# Other document' },
+          ]),
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI task' }), {
+      target: { value: 'translation' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Scope' }), {
+      target: { value: 'workspace' },
+    });
+    const runButton = await screen.findByRole('button', { name: 'Run' });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    expect(await screen.findByText('offline')).toBeVisible();
+    expect(localStorage.getItem('markdowner.ai.translation-resume.v1')).not.toContain(
+      '# Other document',
+    );
+    const failedRequest = run.mock.calls[1][0];
+    fireEvent.click(screen.getByRole('button', { name: 'Resume translation' }));
+
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
+    expect(run.mock.calls[2][0]).toMatchObject({
+      requestId: failedRequest.requestId,
+      documentId: failedRequest.documentId,
+      model: 'z-ai/glm-5.2',
+      resume: true,
+    });
+    expect(onResult).toHaveBeenCalledTimes(2);
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Resume translation' })).not.toBeInTheDocument(),
+    );
+  });
 });
+
+function runResult(request: AiRunRequest) {
+  return {
+    requestId: request.requestId,
+    documentId: request.documentId,
+    task: request.task,
+    model: request.model,
+    generationId: null,
+    result: null,
+    validationIssues: [],
+    rawDiagnostic: null,
+    usage: null,
+    retryAfterSeconds: null,
+  };
+}

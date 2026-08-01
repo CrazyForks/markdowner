@@ -74,6 +74,7 @@ export interface AiRunRequest {
   recordHistory: boolean;
   scope?: AiRunScope;
   interviewId?: string | null;
+  resume?: boolean;
 }
 
 export type AiInterviewStatus =

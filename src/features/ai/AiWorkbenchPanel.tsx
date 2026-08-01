@@ -155,6 +155,13 @@ export function AiWorkbenchPanel({
   const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [showActivityLink, setShowActivityLink] = useState(false);
+  const [translationResume, setTranslationResume] =
+    useState<TranslationResumeRecord | null>(() => loadTranslationResume());
+
+  const persistTranslationResume = (record: TranslationResumeRecord | null) => {
+    setTranslationResume(record);
+    saveTranslationResume(record);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -395,6 +402,21 @@ export function AiWorkbenchPanel({
       recordHistory: settings.aiHistoryEnabled,
       scope: runScope,
     };
+    const resumable =
+      task === 'translation' && settings.aiHistoryEnabled
+        ? translationResumeRecord({
+            batchId: requestId,
+            documents: [targetDocument],
+            scope: runScope,
+            model: selectedModel.id,
+            targetLanguage,
+            instruction: instruction.trim() || null,
+            zdrOnly: settings.aiZdrOnly,
+          })
+        : null;
+    if (resumable) {
+      persistTranslationResume({ ...resumable, currentStarted: true });
+    }
     setRunningRequestId(requestId);
     setShowActivityLink(false);
     setError('');
@@ -430,6 +452,7 @@ export function AiWorkbenchPanel({
           : result,
         request,
       );
+      if (resumable) persistTranslationResume(null);
     } catch (reason) {
       onFailure?.(request, reason);
       if (errorCode(reason) === 'cancelled') {
@@ -458,6 +481,27 @@ export function AiWorkbenchPanel({
       if (loaded.length === 0) {
         throw new Error('No readable Markdown files were found in this workspace.');
       }
+      const resumable = settings.aiHistoryEnabled
+        ? translationResumeRecord({
+            batchId,
+            documents: loaded.map((document) => {
+              const openDocument = document.path === documentPath
+                ? currentDocument
+                : openDocuments.find((candidate) => candidate.path === document.path);
+              return {
+                documentId: openDocument?.documentId ?? document.path,
+                path: document.path,
+                label: fileLabel(document.path),
+              };
+            }),
+            scope: runScope,
+            model: selectedModelId,
+            targetLanguage,
+            instruction: instruction.trim() || null,
+            zdrOnly: settings.aiZdrOnly,
+          })
+        : null;
+      if (resumable) persistTranslationResume(resumable);
       for (let index = 0; index < loaded.length; index += 1) {
         const document = loaded[index];
         const openDocument = openDocuments.find(
@@ -490,6 +534,13 @@ export function AiWorkbenchPanel({
             },
           },
         };
+        if (resumable) {
+          persistTranslationResume({
+            ...resumable,
+            nextIndex: index,
+            currentStarted: true,
+          });
+        }
         setRunningRequestId(requestId);
         setStatus(
           `Translating ${index + 1} of ${loaded.length} · ${fileLabel(document.path)}`,
@@ -504,12 +555,109 @@ export function AiWorkbenchPanel({
             }
           });
           onResult(result, request);
+          if (resumable) {
+            persistTranslationResume({
+              ...resumable,
+              nextIndex: index + 1,
+              currentStarted: false,
+            });
+          }
         } catch (reason) {
           onFailure?.(request, reason);
           throw reason;
         }
       }
+      if (resumable) persistTranslationResume(null);
       setStatus(`${loaded.length} translation proposals are ready for review.`);
+    } catch (reason) {
+      setError(errorMessage(reason));
+      setStatus('');
+    } finally {
+      setRunningRequestId(null);
+    }
+  };
+
+  const handleResumeTranslation = async () => {
+    if (!translationResume || runningRequestId || !settings.aiHistoryEnabled) return;
+    const readDocuments = services.readDocuments ?? DEFAULT_SERVICES.readDocuments;
+    if (!readDocuments) return;
+    setError('');
+    setShowActivityLink(false);
+    setRunningRequestId(translationResume.batchId);
+    try {
+      const paths = translationResume.documents.flatMap((document) =>
+        document.path ? [document.path] : [],
+      );
+      const loaded = paths.length > 0 ? await readDocuments(paths) : [];
+      const diskSources = new Map(loaded.map((document) => [document.path, document.contents]));
+      for (
+        let index = translationResume.nextIndex;
+        index < translationResume.documents.length;
+        index += 1
+      ) {
+        const document = translationResume.documents[index];
+        const latestSource =
+          document.documentId === documentId || document.path === documentPath
+            ? source
+            : documentSources[document.documentId] ??
+              (document.path ? diskSources.get(document.path) : undefined);
+        if (latestSource === undefined) {
+          throw new Error(`Could not reload ${document.label} for translation resume.`);
+        }
+        const requestId = translationResume.documents.length === 1
+          ? translationResume.batchId
+          : `${translationResume.batchId}:${index + 1}`;
+        const resumeCurrent =
+          index === translationResume.nextIndex && translationResume.currentStarted;
+        const request: AiRunRequest = {
+          requestId,
+          documentId: document.documentId,
+          source: latestSource,
+          selection: null,
+          task: 'translation',
+          model: translationResume.model,
+          targetLanguage: translationResume.targetLanguage,
+          instruction: translationResume.instruction,
+          zdrOnly: translationResume.zdrOnly,
+          maxOutputTokens: translationResume.maxOutputTokens,
+          recordHistory: true,
+          scope:
+            translationResume.scope.kind === 'workspace'
+              ? { ...translationResume.scope, target: document }
+              : { kind: 'document', target: document },
+          resume: resumeCurrent,
+        };
+        persistTranslationResume({
+          ...translationResume,
+          nextIndex: index,
+          currentStarted: true,
+        });
+        setRunningRequestId(requestId);
+        setStatus(
+          translationResume.documents.length === 1
+            ? `Resuming ${document.label}…`
+            : `Resuming ${index + 1} of ${translationResume.documents.length} · ${document.label}`,
+        );
+        onStart?.(request);
+        try {
+          const result = await services.run(request, (event) => {
+            if (event.type === 'progress') {
+              setStatus(`Resuming ${document.label} · ${event.receivedCharacters} characters`);
+            }
+          });
+          onResult(result, request);
+        } catch (reason) {
+          onFailure?.(request, reason);
+          throw reason;
+        }
+        persistTranslationResume({
+          ...translationResume,
+          nextIndex: index + 1,
+          currentStarted: false,
+        });
+      }
+      persistTranslationResume(null);
+      setStatus('Translation resume completed. Proposals are ready for review.');
     } catch (reason) {
       setError(errorMessage(reason));
       setStatus('');
@@ -804,6 +952,39 @@ export function AiWorkbenchPanel({
           </p>
         ) : null}
 
+        {translationResume && settings.aiHistoryEnabled ? (
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-xs">
+            <p className="font-medium">Interrupted translation available</p>
+            <p className="mt-1 text-muted-foreground">
+              Resume at file {Math.min(
+                translationResume.nextIndex + 1,
+                translationResume.documents.length,
+              )}{' '}
+              of {translationResume.documents.length} with {translationResume.model}.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={Boolean(runningRequestId)}
+                onClick={() => void handleResumeTranslation()}
+              >
+                Resume translation
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={Boolean(runningRequestId)}
+                onClick={() => persistTranslationResume(null)}
+              >
+                Discard
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         {gate?.reason ? (
           <div
             role={gate.kind === 'blocked' ? 'alert' : undefined}
@@ -922,6 +1103,115 @@ function createRequestId(): string {
 
 function fileLabel(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+const TRANSLATION_RESUME_STORAGE_KEY = 'markdowner.ai.translation-resume.v1';
+
+interface TranslationResumeRecord {
+  version: 1;
+  batchId: string;
+  documents: AiDocumentRef[];
+  nextIndex: number;
+  currentStarted: boolean;
+  scope: AiRunScope;
+  model: string;
+  targetLanguage: string;
+  instruction: string | null;
+  zdrOnly: boolean;
+  maxOutputTokens: number;
+}
+
+function translationResumeRecord({
+  batchId,
+  documents,
+  scope,
+  model,
+  targetLanguage,
+  instruction,
+  zdrOnly,
+}: Omit<TranslationResumeRecord, 'version' | 'nextIndex' | 'currentStarted' | 'maxOutputTokens'>): TranslationResumeRecord {
+  return {
+    version: 1,
+    batchId,
+    documents,
+    nextIndex: 0,
+    currentStarted: false,
+    scope,
+    model,
+    targetLanguage,
+    instruction,
+    zdrOnly,
+    maxOutputTokens: 4_096,
+  };
+}
+
+function loadTranslationResume(): TranslationResumeRecord | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const value = JSON.parse(localStorage.getItem(TRANSLATION_RESUME_STORAGE_KEY) ?? 'null');
+    if (
+      !value ||
+      value.version !== 1 ||
+      typeof value.batchId !== 'string' ||
+      !Array.isArray(value.documents) ||
+      value.documents.length === 0 ||
+      value.documents.length > 10_000 ||
+      !value.documents.every(isDocumentRef) ||
+      !Number.isInteger(value.nextIndex) ||
+      value.nextIndex < 0 ||
+      value.nextIndex >= value.documents.length ||
+      typeof value.currentStarted !== 'boolean' ||
+      !isRunScope(value.scope) ||
+      typeof value.model !== 'string' ||
+      typeof value.targetLanguage !== 'string' ||
+      !(value.instruction === null || typeof value.instruction === 'string') ||
+      typeof value.zdrOnly !== 'boolean' ||
+      value.maxOutputTokens !== 4_096
+    ) {
+      return null;
+    }
+    return value as TranslationResumeRecord;
+  } catch {
+    return null;
+  }
+}
+
+function saveTranslationResume(record: TranslationResumeRecord | null): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (record) {
+      localStorage.setItem(TRANSLATION_RESUME_STORAGE_KEY, JSON.stringify(record));
+    } else {
+      localStorage.removeItem(TRANSLATION_RESUME_STORAGE_KEY);
+    }
+  } catch {
+    // Resume metadata is best-effort; the request itself remains usable.
+  }
+}
+
+function isDocumentRef(value: unknown): value is AiDocumentRef {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<AiDocumentRef>;
+  return (
+    typeof candidate.documentId === 'string' &&
+    typeof candidate.label === 'string' &&
+    (candidate.path === null || typeof candidate.path === 'string')
+  );
+}
+
+function isRunScope(value: unknown): value is AiRunScope {
+  if (!value || typeof value !== 'object' || !('kind' in value)) return false;
+  const candidate = value as Partial<AiRunScope>;
+  if (candidate.kind === 'document') {
+    return 'target' in candidate && isDocumentRef(candidate.target);
+  }
+  return (
+    candidate.kind === 'workspace' &&
+    'rootPath' in candidate &&
+    typeof candidate.rootPath === 'string' &&
+    'documentCount' in candidate &&
+    typeof candidate.documentCount === 'number'
+  );
 }
 
 function errorMessage(reason: unknown): string {
