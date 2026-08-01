@@ -1,5 +1,11 @@
 # OpenRouter AI Document Workbench PRD
 
+> 이 문서는 최초 AI Workbench 기준선이다. Activity, History, 대화형 PRD,
+> 장문·워크스페이스 번역, `AI Feature` 명칭과 Obsidian front matter 지원을 포함한
+> 현재 제품 요구사항은
+> [2026-08-01 AI Feature v2 PRD](./2026-08-01-ai-feature-document-intelligence-prd.md)를
+> 따른다.
+
 - 상태: 제품 설계 확정 · 구현 전
 - 작성일: 2026-07-31
 - 대상 제품: Markdowner for macOS
