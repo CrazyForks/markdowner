@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import { calculateDocumentStats } from './documentStats';
+import obsidianFixture from '../../tests/fixtures/obsidian-frontmatter.md?raw';
 
 describe('calculateDocumentStats', () => {
+  it('excludes leading Obsidian properties from body statistics', () => {
+    expect(calculateDocumentStats(obsidianFixture)).toEqual({
+      words: 0,
+      characters: 0,
+      readingTimeMinutes: 0,
+      headings: 0,
+      links: 0,
+      images: 0,
+      tables: 0,
+    });
+  });
   it('counts words, characters, headings, links, images, and markdown tables', () => {
     const source = [
       '# Report',

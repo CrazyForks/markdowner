@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import { parseMarkdownOutline } from './outline';
+import obsidianFixture from '../../tests/fixtures/obsidian-frontmatter.md?raw';
 
 describe('parseMarkdownOutline', () => {
+  it('excludes properties while retaining full-source heading offsets', () => {
+    expect(parseMarkdownOutline(obsidianFixture)).toEqual([]);
+    const source = `${obsidianFixture}# Article notes\n`;
+    expect(parseMarkdownOutline(source)).toEqual([
+      expect.objectContaining({
+        title: 'Article notes',
+        selectionStart: obsidianFixture.length,
+      }),
+    ]);
+  });
   it('returns heading depth, display title, and source ranges', () => {
     const source = ['# Agenda', '', '##   Decisions   ###', 'Notes', '### Follow-up'].join('\n');
 

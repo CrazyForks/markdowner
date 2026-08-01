@@ -20,11 +20,13 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { common, createLowlight } from 'lowlight';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { FrontMatterExtension } from '@/components/wysiwyg/frontMatterExtension';
 import { serializeWysiwygSliceToMarkdown } from './wysiwygCopy';
 import {
   handleWysiwygPlainTextPaste,
   isPlainTextPasteRequest,
 } from './wysiwygPaste';
+import obsidianFixture from '../../tests/fixtures/obsidian-frontmatter.md?raw';
 
 const lowlight = createLowlight(common);
 
@@ -41,6 +43,7 @@ function buildEditor(markdown = '') {
   const editorRef: { current: Editor | null } = { current: null };
   const instance = new Editor({
     extensions: [
+      FrontMatterExtension,
       StarterKit.configure({ codeBlock: false }),
       CodeBlockLowlight.configure({ lowlight, defaultLanguage: null }),
       Image,
@@ -463,5 +466,25 @@ describe('WYSIWYG markdown paste (real editor)', () => {
 
     expect(blockTypes(target)).toEqual(['paragraph']);
     expect(target.getText()).toContain('# literal');
+  });
+
+  it('creates a properties atom only when front matter is pasted at the document start', () => {
+    const target = buildEditor();
+    target.commands.focus('start');
+
+    paste(target, { plain: obsidianFixture, html: '' });
+
+    expect(blockTypes(target)[0]).toBe('frontMatter');
+    expect(target.getMarkdown().startsWith(obsidianFixture)).toBe(true);
+  });
+
+  it('keeps pasted front matter literal inside the document body', () => {
+    const target = buildEditor('Before after');
+    setCursorAfter(target, 'Before ');
+
+    paste(target, { plain: obsidianFixture, html: '' });
+
+    expect(blockTypes(target)).not.toContain('frontMatter');
+    expect(target.getText()).toContain('title:');
   });
 });

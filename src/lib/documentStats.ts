@@ -1,4 +1,5 @@
 import { collectMarkdownHeadings } from './markdownHeadings';
+import { markdownBody } from './frontMatter';
 
 export type DocumentStats = {
   words: number;
@@ -15,6 +16,7 @@ const LINK_PATTERN = /\[[^\]]+]\([^\n)]+\)/g;
 const TABLE_SEPARATOR_PATTERN = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 
 export function calculateDocumentStats(source: string): DocumentStats {
+  source = markdownBody(source);
   const characters = source.length;
   const trimmed = source.trim();
   const words = trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;

@@ -52,6 +52,7 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { UpdateInfo } from '@/lib/updateCheck';
 import { AiReviewTab } from '@/features/ai/AiReviewTab';
+import { FrontMatterExtension } from '@/components/wysiwyg/frontMatterExtension';
 import { AiSelectionPopover } from '@/features/ai/AiSelectionPopover';
 import { AiFeaturePanel } from '@/features/ai/AiFeaturePanel';
 import {
@@ -1878,6 +1879,7 @@ export default function App() {
 
   const wysiwygExtensions = useMemo(
     () => [
+      FrontMatterExtension,
       StarterKit.configure({
         // Links only from explicit markdown / commands — never autolinked
         // from bare dotted words. See wysiwygLinkOptions.ts for the why.

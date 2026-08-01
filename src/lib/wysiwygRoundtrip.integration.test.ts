@@ -25,12 +25,15 @@ import { common, createLowlight } from 'lowlight';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { resolvePersistedWysiwygMarkdown } from './wysiwygEditorSync';
+import { FrontMatterExtension } from '@/components/wysiwyg/frontMatterExtension';
+import obsidianFixture from '../../tests/fixtures/obsidian-frontmatter.md?raw';
 
 const lowlight = createLowlight(common);
 
 function buildEditor() {
   return new Editor({
     extensions: [
+      FrontMatterExtension,
       StarterKit.configure({ codeBlock: false }),
       CodeBlockLowlight.configure({ lowlight, defaultLanguage: null }),
       Image,
@@ -45,6 +48,24 @@ function buildEditor() {
     content: '',
   });
 }
+
+describe('Obsidian front matter round-trip', () => {
+  it('retains the exact property prefix while editing body Markdown', () => {
+    const editor = buildEditor();
+    const source = `${obsidianFixture}# Article notes\n\nThe body remains editable.\n`;
+    const snapshot = loadAndSnapshot(editor, source);
+
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, ' edited');
+    const persisted = resolvePersistedWysiwygMarkdown(
+      editor.getMarkdown(),
+      snapshot.loaded,
+      snapshot.canonical,
+    );
+
+    expect(persisted.startsWith(obsidianFixture)).toBe(true);
+    editor.destroy();
+  });
+});
 
 // Simulates the App.tsx load flow: setContent(original) then capture the
 // canonical round-trip. Returns the two refs the save path consults.

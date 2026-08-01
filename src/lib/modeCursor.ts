@@ -61,6 +61,9 @@ export function wysiwygCursorSourceLocation(editor: TiptapEditor | null): Source
   if (!editor) return { line: 1, column: 1 };
   const selection = editor.state.selection;
   const head = wysiwygSelectionHead(selection);
+  if (isLeadingFrontMatterNodeSelection(editor, selection)) {
+    return { line: 1, column: 1 };
+  }
   if (head <= 0) return { line: 1, column: 1 };
   try {
     const slice = editor.state.doc.cut(0, head);
@@ -97,6 +100,20 @@ export function wysiwygPositionAtSourceLocation(
   if (!serializer) return null;
 
   const doc = editor.state.doc;
+  const leadingFrontMatter = getLeadingFrontMatter(editor);
+  if (leadingFrontMatter) {
+    try {
+      const markdown = serializer.serialize(doc);
+      const targetOffset = markdownOffsetForSourceLocation(
+        markdown,
+        targetLine,
+        targetColumn,
+      );
+      return wysiwygPositionAtMarkdownOffset(editor, targetOffset);
+    } catch {
+      return null;
+    }
+  }
   let cumulativeLines = 1;
   let positionAfterPreviousBlocks = 0;
   let candidate: number | null = null;
@@ -179,6 +196,7 @@ export function wysiwygPositionAtSourceLine(
 // cursor model (which is what we need for an exact mode-switch round-trip).
 export function wysiwygCursorMarkdownOffset(editor: TiptapEditor | null): number {
   if (!editor) return 0;
+  if (isLeadingFrontMatterNodeSelection(editor, editor.state.selection)) return 0;
   const head = wysiwygSelectionHead(editor.state.selection);
   return wysiwygMarkdownOffsetAtPosition(editor, head);
 }
@@ -221,6 +239,10 @@ export function wysiwygPositionAtMarkdownOffset(
   if (docSize <= 0) return 0;
 
   try {
+    const leadingFrontMatter = getLeadingFrontMatter(editor);
+    if (leadingFrontMatter && targetOffset < leadingFrontMatter.raw.length) {
+      return 0;
+    }
     const fullLength = serializer.serialize(doc).length;
     // `docSize - 1` is the last position that sits *inside* a block's text
     // (just before its closing token); `docSize` itself is after the doc's
@@ -244,6 +266,45 @@ export function wysiwygPositionAtMarkdownOffset(
   } catch {
     return null;
   }
+}
+
+function getLeadingFrontMatter(editor: TiptapEditor): { raw: string } | null {
+  const first = editor.state.doc.firstChild as
+    | { type?: { name?: string }; attrs?: { raw?: unknown } }
+    | null;
+  if (first?.type?.name !== 'frontMatter' || typeof first.attrs?.raw !== 'string') {
+    return null;
+  }
+  return { raw: first.attrs.raw };
+}
+
+function isLeadingFrontMatterNodeSelection(
+  editor: TiptapEditor,
+  selection: WysiwygSelection & { node?: { type?: { name?: string } } },
+): boolean {
+  return (
+    selection.from === 0 &&
+    selection.node?.type?.name === 'frontMatter' &&
+    getLeadingFrontMatter(editor) !== null
+  );
+}
+
+function markdownOffsetForSourceLocation(
+  markdown: string,
+  line: number,
+  column: number,
+): number {
+  let currentLine = 1;
+  let lineStart = 0;
+  while (currentLine < line) {
+    const newline = markdown.indexOf('\n', lineStart);
+    if (newline < 0) return markdown.length;
+    lineStart = newline + 1;
+    currentLine += 1;
+  }
+  const lineEnd = markdown.indexOf('\n', lineStart);
+  const boundedEnd = lineEnd < 0 ? markdown.length : lineEnd;
+  return Math.min(lineStart + Math.max(0, column - 1), boundedEnd);
 }
 
 type Serializer = {

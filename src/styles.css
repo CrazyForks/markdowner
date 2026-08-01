@@ -1971,11 +1971,104 @@ section[data-minimap='on'] .editor-pane-preview {
 :root[data-cb-theme="monokai-dark"] .hljs-tag { color: #f92672; }
 
 @media (prefers-reduced-motion: reduce) {
+  .front-matter-card,
+  .front-matter-card * {
+    transition-duration: 0.01ms !important;
+  }
   .ai-motion-surface,
   .ai-motion-surface * {
     scroll-behavior: auto !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+.front-matter-card {
+  margin-block: 0.5rem 1rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--muted) 35%, var(--background));
+  color: var(--foreground);
+}
+
+.front-matter-summary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  font-size: 0.75rem;
+}
+
+.front-matter-summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.front-matter-content {
+  border-top: 1px solid var(--border);
+  padding: 0.7rem;
+}
+
+.front-matter-properties {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.front-matter-property {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 0.35fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 65%, transparent);
+  font-size: 0.75rem;
+}
+
+.front-matter-property dt {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.front-matter-property dd {
+  min-width: 0;
+}
+
+.front-matter-property input,
+.front-matter-content textarea {
+  width: 100%;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  padding: 0.4rem 0.5rem;
+  color: var(--foreground);
+  outline: none;
+}
+
+.front-matter-property input:focus,
+.front-matter-content textarea:focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 25%, transparent);
+}
+
+.front-matter-actions {
+  display: flex;
+  align-items: center;
+}
+
+@media (max-width: 560px) {
+  .front-matter-property {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .front-matter-property dd {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 }

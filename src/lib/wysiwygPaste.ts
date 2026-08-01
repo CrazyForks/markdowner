@@ -157,8 +157,25 @@ interface MarkdownManagerLike {
 // definitions through this file.
 interface EditorLike {
   storage?: { markdown?: { manager?: MarkdownManagerLike } };
+  state?: {
+    selection?: { from?: number };
+    doc?: { firstChild?: { type?: { name?: string } } | null };
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  commands?: { insertContent?: (content: any) => boolean };
+  commands?: {
+    insertContent?: (content: any) => boolean;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    insertContentAt?: (position: number, content: any) => boolean;
+  };
+}
+
+function parsedDocContainsNodeType(doc: unknown, type: string): boolean {
+  if (!doc || typeof doc !== 'object') return false;
+  const visit = (node: ParsedNode): boolean => {
+    if (node.type === type) return true;
+    return Array.isArray(node.content) && node.content.some(visit);
+  };
+  return visit(doc as ParsedNode);
 }
 
 /**
@@ -184,6 +201,22 @@ function tryPasteAsMarkdown(editor: EditorLike | null, text: string): boolean {
     return false;
   }
   if (!parsedDocHasFormatting(parsed)) return false;
+  if (parsedDocContainsNodeType(parsed, 'frontMatter')) {
+    const selectionFrom = editor.state?.selection?.from ?? 1;
+    const existingFrontMatter =
+      editor.state?.doc?.firstChild?.type?.name === 'frontMatter';
+    // YAML properties are a document prefix, never an inline/body block.
+    // At any other location we deliberately fall back to literal text.
+    if (selectionFrom > 1 || existingFrontMatter) return false;
+    if (typeof editor.commands.insertContentAt !== 'function') return false;
+    try {
+      const content = (parsed as { content?: unknown }).content ?? parsed;
+      const ok = editor.commands.insertContentAt(0, content);
+      return ok !== false;
+    } catch {
+      return false;
+    }
+  }
   try {
     const ok = editor.commands.insertContent(parsed);
     return ok !== false;

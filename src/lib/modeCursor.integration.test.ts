@@ -3,6 +3,8 @@ import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown } from '@tiptap/markdown';
 
+import { FrontMatterExtension } from '@/components/wysiwyg/frontMatterExtension';
+import obsidianFixture from '../../tests/fixtures/obsidian-frontmatter.md?raw';
 import {
   wysiwygCursorMarkdownOffset,
   wysiwygCursorSourceLocation,
@@ -23,7 +25,11 @@ function buildEditor(markdown: string) {
   document.body.appendChild(element);
   return new Editor({
     element,
-    extensions: [StarterKit, Markdown],
+    extensions: [
+      FrontMatterExtension,
+      StarterKit.configure({ trailingNode: false }),
+      Markdown,
+    ],
     content: markdown,
     contentType: 'markdown' as never,
   });
@@ -90,6 +96,34 @@ describe('modeCursor against real Tiptap + Markdown', () => {
       const reconstructedOffset = wysiwygCursorMarkdownOffset(editor);
       expect(Math.abs(reconstructedOffset - sourceOffset)).toBeLessThanOrEqual(2);
     }
+    editor.destroy();
+  });
+
+  it('maps source positions inside properties to the front matter atom', () => {
+    const editor = buildEditor(`${obsidianFixture}# Body\n\nText`);
+    const propertyOffset = obsidianFixture.indexOf('source:') + 3;
+
+    expect(wysiwygPositionAtMarkdownOffset(editor, propertyOffset)).toBe(0);
+    editor.commands.setNodeSelection(0);
+    expect(wysiwygCursorMarkdownOffset(editor)).toBe(0);
+    expect(wysiwygCursorSourceLocation(editor)).toEqual({ line: 1, column: 1 });
+
+    editor.destroy();
+  });
+
+  it('keeps body offsets after the exact front matter prefix', () => {
+    const editor = buildEditor(`${obsidianFixture}# Body\n\nText`);
+    const bodyOffset = obsidianFixture.length + '# Body\n\nTe'.length;
+    const position = wysiwygPositionAtMarkdownOffset(editor, bodyOffset);
+
+    expect(position).not.toBeNull();
+    if (position !== null) {
+      editor.commands.setTextSelection(position);
+      expect(wysiwygCursorMarkdownOffset(editor)).toBeGreaterThanOrEqual(
+        obsidianFixture.length,
+      );
+    }
+
     editor.destroy();
   });
 });

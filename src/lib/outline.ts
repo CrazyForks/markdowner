@@ -1,4 +1,5 @@
 import { collectMarkdownHeadings } from './markdownHeadings';
+import { parseLeadingFrontMatter } from './frontMatter';
 
 export interface OutlineItem {
   id: string;
@@ -11,8 +12,16 @@ export interface OutlineItem {
 }
 
 export function parseMarkdownOutline(source: string): OutlineItem[] {
-  return collectMarkdownHeadings(source).map((heading, index) => ({
-    id: `${index}-${heading.selectionStart}`,
-    ...heading,
-  }));
+  const frontMatter = parseLeadingFrontMatter(source);
+  return collectMarkdownHeadings(frontMatter.body).map((heading, index) => {
+    const offset = frontMatter.bodyOffset;
+    return {
+      id: `${index}-${heading.selectionStart + offset}`,
+      ...heading,
+      titleStart: heading.titleStart + offset,
+      titleEnd: heading.titleEnd + offset,
+      selectionStart: heading.selectionStart + offset,
+      selectionEnd: heading.selectionEnd + offset,
+    };
+  });
 }
