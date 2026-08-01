@@ -2206,6 +2206,7 @@ pub fn run() {
             ai::ai_model_pricing,
             ai::ai_run,
             ai::ai_cancel,
+            ai::ai_list_active,
             ai::ai_history_page,
             ai::ai_history_detail,
             ai::ai_history_delete,

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt, fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -17,6 +17,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use self::{
+    activity::{
+        ActiveAiRun, ActiveStatus, ActivityProgress, ActivityRegistry, AiDocumentRef, AiRunScope,
+    },
     history::{HistoryPage, HistoryRepository, RunStatus, StoredRun},
     keychain::{AiKeyStatus, KeychainService},
     openrouter::{
@@ -25,6 +28,7 @@ use self::{
     },
 };
 
+pub mod activity;
 #[cfg(test)]
 mod evaluation;
 pub mod history;
@@ -91,21 +95,58 @@ impl RequestScheduler {
         document_id: &str,
         request_id: &str,
     ) -> Result<RequestPermit, AiError> {
-        self.try_acquire(document_id, request_id)
+        self.acquire_scoped(&[document_id.to_string()], request_id)
+            .await
     }
 
+    #[cfg(test)]
     pub fn try_acquire(
         &self,
         document_id: &str,
         request_id: &str,
     ) -> Result<RequestPermit, AiError> {
+        self.try_acquire_scoped(&[document_id.to_string()], request_id)
+    }
+
+    pub async fn acquire_scoped(
+        &self,
+        document_ids: &[String],
+        request_id: &str,
+    ) -> Result<RequestPermit, AiError> {
+        self.try_acquire_scoped(document_ids, request_id)
+    }
+
+    pub fn try_acquire_scoped(
+        &self,
+        document_ids: &[String],
+        request_id: &str,
+    ) -> Result<RequestPermit, AiError> {
+        let mut seen = HashSet::new();
+        let document_ids = document_ids
+            .iter()
+            .filter(|document_id| seen.insert(document_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if document_ids.is_empty()
+            || document_ids
+                .iter()
+                .any(|document_id| document_id.trim().is_empty())
+        {
+            return Err(AiError::new(
+                "invalid_scope",
+                "At least one document is required for an AI request.",
+            ));
+        }
         let mut active = self.inner.active.lock().map_err(|_| {
             AiError::new(
                 "scheduler_error",
                 "The AI request scheduler is unavailable.",
             )
         })?;
-        if active.contains_key(document_id) {
+        if document_ids
+            .iter()
+            .any(|document_id| active.contains_key(document_id))
+        {
             return Err(AiError::new(
                 "document_busy",
                 "This document already has an AI request in progress.",
@@ -123,16 +164,18 @@ impl RequestScheduler {
                 )
             })?;
         let cancellation = CancellationToken::new();
-        active.insert(
-            document_id.to_string(),
-            ActiveRequest {
-                request_id: request_id.to_string(),
-                cancellation: cancellation.clone(),
-            },
-        );
+        for document_id in &document_ids {
+            active.insert(
+                document_id.clone(),
+                ActiveRequest {
+                    request_id: request_id.to_string(),
+                    cancellation: cancellation.clone(),
+                },
+            );
+        }
         Ok(RequestPermit {
             scheduler: self.clone(),
-            document_id: document_id.to_string(),
+            document_ids,
             request_id: request_id.to_string(),
             cancellation,
             _app_permit: app_permit,
@@ -162,7 +205,7 @@ impl Default for RequestScheduler {
 
 pub struct RequestPermit {
     scheduler: RequestScheduler,
-    document_id: String,
+    document_ids: Vec<String>,
     request_id: String,
     cancellation: CancellationToken,
     _app_permit: OwnedSemaphorePermit,
@@ -172,7 +215,7 @@ impl fmt::Debug for RequestPermit {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RequestPermit")
-            .field("document_id", &self.document_id)
+            .field("document_ids", &self.document_ids)
             .field("request_id", &self.request_id)
             .finish_non_exhaustive()
     }
@@ -189,11 +232,13 @@ impl Drop for RequestPermit {
         let Ok(mut active) = self.scheduler.inner.active.lock() else {
             return;
         };
-        if active
-            .get(&self.document_id)
-            .is_some_and(|request| request.request_id == self.request_id)
-        {
-            active.remove(&self.document_id);
+        for document_id in &self.document_ids {
+            if active
+                .get(document_id)
+                .is_some_and(|request| request.request_id == self.request_id)
+            {
+                active.remove(document_id);
+            }
         }
     }
 }
@@ -293,6 +338,7 @@ pub struct AiState {
     scheduler: RequestScheduler,
     cache: CatalogCache,
     history: HistoryRepository,
+    activity: ActivityRegistry,
     results: Mutex<HashMap<String, ValidatedDocument>>,
 }
 
@@ -305,6 +351,7 @@ impl AiState {
             scheduler: RequestScheduler::new(),
             cache: CatalogCache::new(&app_data_dir),
             history,
+            activity: ActivityRegistry::default(),
             results: Mutex::new(HashMap::new()),
         })
     }
@@ -439,7 +486,20 @@ pub async fn ai_model_pricing(
 
 #[tauri::command]
 pub fn ai_cancel(state: State<'_, AiState>, request_id: String) -> bool {
-    state.scheduler.cancel(&request_id)
+    if !state.activity.mark_cancelling(&request_id).unwrap_or(false) {
+        return false;
+    }
+    if state.scheduler.cancel(&request_id) {
+        true
+    } else {
+        let _ = state.activity.finish(&request_id);
+        false
+    }
+}
+
+#[tauri::command]
+pub fn ai_list_active(state: State<'_, AiState>) -> Result<Vec<ActiveAiRun>, AiError> {
+    state.activity.list()
 }
 
 #[tauri::command]
@@ -515,13 +575,32 @@ pub async fn ai_run(
     let envelope =
         AiDocumentEnvelope::new(&request.document_id, &request.source, request.selection)
             .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
-    record_history_start(&state, &request, &envelope);
     let document = serde_json::to_value(&envelope).map_err(|_| {
         AiError::new(
             "invalid_document",
             "Could not prepare the document for the AI request.",
         )
     })?;
+    state.activity.start(ActiveAiRun {
+        request_id: request.request_id.clone(),
+        task: request.task,
+        model: request.model.clone(),
+        scope: AiRunScope::Document {
+            target: AiDocumentRef {
+                document_id: request.document_id.clone(),
+                path: None,
+                label: request.document_id.clone(),
+            },
+        },
+        status: ActiveStatus::Running,
+        progress: ActivityProgress {
+            stage: "preparing".to_string(),
+            ..ActivityProgress::default()
+        },
+        started_at: i64::try_from(unix_timestamp()).unwrap_or(i64::MAX),
+        cancelable: true,
+    })?;
+    record_history_start(&state, &request, &envelope);
     let completion_request = AiCompletionRequest {
         task: request.task,
         model: request.model.clone(),
@@ -540,10 +619,13 @@ pub async fn ai_run(
         Ok(secret) => secret,
         Err(error) => {
             record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+            let _ = state.activity.finish(&request.request_id);
             return Err(error);
         }
     };
     let mut last_progress = 0;
+    let activity = state.activity.clone();
+    let activity_request_id = request.request_id.clone();
     let completion = state
         .client
         .stream_completion(
@@ -553,6 +635,10 @@ pub async fn ai_run(
             |received_characters| {
                 if received_characters >= last_progress + 64 {
                     last_progress = received_characters;
+                    let _ = activity.progress(
+                        &activity_request_id,
+                        ActivityProgress::streaming(received_characters),
+                    );
                     let _ = on_event.send(AiStreamEvent::Progress {
                         request_id: request.request_id.clone(),
                         received_characters,
@@ -569,6 +655,7 @@ pub async fn ai_run(
                 request_id: request.request_id.clone(),
             });
             record_history_error(&state, &request.request_id, RunStatus::Cancelled, &error);
+            let _ = state.activity.finish(&request.request_id);
             return Err(error);
         }
         Err(error) => {
@@ -578,6 +665,7 @@ pub async fn ai_run(
                 message: error.message.clone(),
             });
             record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+            let _ = state.activity.finish(&request.request_id);
             return Err(error);
         }
     };
@@ -613,6 +701,7 @@ pub async fn ai_run(
             history_usage.as_deref(),
         );
     }
+    let _ = state.activity.finish(&request.request_id);
     Ok(AiRunResult {
         request_id: request.request_id,
         document_id: request.document_id,
@@ -809,6 +898,30 @@ mod tests {
         assert!(scheduler.cancel("request-1"));
         assert!(cancelled.is_cancelled());
         assert!(!scheduler.cancel("missing"));
+    }
+
+    #[tokio::test]
+    async fn batch_reserves_one_app_slot_and_every_document() {
+        let scheduler = RequestScheduler::new();
+        let documents = vec!["doc-a".to_string(), "doc-b".to_string()];
+        let permit = scheduler
+            .acquire_scoped(&documents, "batch-1")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            scheduler
+                .try_acquire_scoped(&["doc-b".to_string()], "single")
+                .unwrap_err()
+                .code,
+            "document_busy"
+        );
+        let _other = scheduler
+            .try_acquire_scoped(&["doc-c".to_string()], "single-2")
+            .unwrap();
+
+        drop(permit);
+        assert!(scheduler.try_acquire_scoped(&documents, "batch-2").is_ok());
     }
 
     #[test]
