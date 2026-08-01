@@ -18,7 +18,7 @@ use super::AiError;
 const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
 const OPENROUTER_APP_TITLE: &str = "Markdowner";
 const OPENROUTER_APP_REFERER: &str = "https://markdowner.chann.dev";
-const PROMPT_VERSION: &str = "2026-07-31.v1";
+pub(crate) const PROMPT_VERSION: &str = "2026-07-31.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

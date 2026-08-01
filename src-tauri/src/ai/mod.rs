@@ -17,15 +17,17 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use self::{
+    history::{HistoryPage, HistoryRepository, RunStatus, StoredRun},
     keychain::{AiKeyStatus, KeychainService},
     openrouter::{
         AiCompletionRequest, AiKeyMetadata, AiModel, AiModelPricing, AiTask, AiUsage,
-        OpenRouterClient, redact_sensitive,
+        OpenRouterClient, PROMPT_VERSION, redact_sensitive,
     },
 };
 
 #[cfg(test)]
 mod evaluation;
+pub mod history;
 pub mod keychain;
 pub mod openrouter;
 
@@ -290,16 +292,19 @@ pub struct AiState {
     client: OpenRouterClient,
     scheduler: RequestScheduler,
     cache: CatalogCache,
+    history: HistoryRepository,
     results: Mutex<HashMap<String, ValidatedDocument>>,
 }
 
 impl AiState {
     pub fn new(app_data_dir: PathBuf) -> Result<Self, AiError> {
+        let history = HistoryRepository::open(&app_data_dir.join("ai").join("history.sqlite3"));
         Ok(Self {
             keychain: KeychainService::system(),
             client: OpenRouterClient::new()?,
             scheduler: RequestScheduler::new(),
             cache: CatalogCache::new(&app_data_dir),
+            history,
             results: Mutex::new(HashMap::new()),
         })
     }
@@ -438,6 +443,33 @@ pub fn ai_cancel(state: State<'_, AiState>, request_id: String) -> bool {
 }
 
 #[tauri::command]
+pub fn ai_history_page(
+    state: State<'_, AiState>,
+    page: u32,
+    page_size: u32,
+) -> Result<HistoryPage, AiError> {
+    state.history.store()?.page(page, page_size)
+}
+
+#[tauri::command]
+pub fn ai_history_detail(
+    state: State<'_, AiState>,
+    request_id: String,
+) -> Result<Option<StoredRun>, AiError> {
+    state.history.store()?.detail(&request_id)
+}
+
+#[tauri::command]
+pub fn ai_history_delete(state: State<'_, AiState>, request_id: String) -> Result<bool, AiError> {
+    state.history.store()?.delete(&request_id)
+}
+
+#[tauri::command]
+pub fn ai_history_clear(state: State<'_, AiState>) -> Result<u32, AiError> {
+    state.history.store()?.clear()
+}
+
+#[tauri::command]
 pub fn ai_render_selected_operations(
     state: State<'_, AiState>,
     request_id: String,
@@ -483,6 +515,7 @@ pub async fn ai_run(
     let envelope =
         AiDocumentEnvelope::new(&request.document_id, &request.source, request.selection)
             .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+    record_history_start(&state, &request, &envelope);
     let document = serde_json::to_value(&envelope).map_err(|_| {
         AiError::new(
             "invalid_document",
@@ -503,7 +536,13 @@ pub async fn ai_run(
         request_id: request.request_id.clone(),
         generation_id: None,
     });
-    let secret = state.keychain.read_secret()?;
+    let secret = match state.keychain.read_secret() {
+        Ok(secret) => secret,
+        Err(error) => {
+            record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+            return Err(error);
+        }
+    };
     let mut last_progress = 0;
     let completion = state
         .client
@@ -529,6 +568,7 @@ pub async fn ai_run(
             let _ = on_event.send(AiStreamEvent::Cancelled {
                 request_id: request.request_id.clone(),
             });
+            record_history_error(&state, &request.request_id, RunStatus::Cancelled, &error);
             return Err(error);
         }
         Err(error) => {
@@ -537,6 +577,7 @@ pub async fn ai_run(
                 code: error.code.clone(),
                 message: error.message.clone(),
             });
+            record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
             return Err(error);
         }
     };
@@ -556,6 +597,22 @@ pub async fn ai_run(
         request_id: request.request_id.clone(),
         generation_id: completion.generation_id.clone(),
     });
+    let history_result = result
+        .as_ref()
+        .and_then(|validated| serde_json::to_string(validated).ok());
+    let history_usage = completion
+        .usage
+        .as_ref()
+        .and_then(|usage| serde_json::to_string(usage).ok());
+    if let Ok(store) = state.history.store() {
+        let _ = store.finish_run_with_usage(
+            &request.request_id,
+            RunStatus::Completed,
+            history_result.as_deref(),
+            None,
+            history_usage.as_deref(),
+        );
+    }
     Ok(AiRunResult {
         request_id: request.request_id,
         document_id: request.document_id,
@@ -568,6 +625,40 @@ pub async fn ai_run(
         usage: completion.usage,
         retry_after_seconds: None,
     })
+}
+
+fn record_history_start(state: &AiState, request: &AiRunRequest, envelope: &AiDocumentEnvelope) {
+    let scope_json = serde_json::json!({
+        "kind": if request.selection.is_some() { "selection" } else { "document" },
+        "documentId": request.document_id,
+        "selection": request.selection,
+    })
+    .to_string();
+    let started_at = i64::try_from(unix_timestamp()).unwrap_or(i64::MAX);
+    let run = StoredRun {
+        id: request.request_id.clone(),
+        task: request.task,
+        model: request.model.clone(),
+        status: RunStatus::Running,
+        scope_json,
+        source_hash: envelope.revision_hash.clone(),
+        prompt_version: PROMPT_VERSION.to_string(),
+        result_json: None,
+        error_json: None,
+        usage_json: None,
+        started_at,
+        finished_at: None,
+    };
+    if let Ok(store) = state.history.store() {
+        let _ = store.insert_run(&run);
+    }
+}
+
+fn record_history_error(state: &AiState, request_id: &str, status: RunStatus, error: &AiError) {
+    let error_json = serde_json::to_string(error).ok();
+    if let Ok(store) = state.history.store() {
+        let _ = store.finish_run(request_id, status, None, error_json.as_deref());
+    }
 }
 
 fn validate_run_request(request: &AiRunRequest) -> Result<(), AiError> {
@@ -684,7 +775,7 @@ fn validation_issues(error: ValidationError) -> Vec<AiValidationIssue> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CatalogCache, RequestScheduler,
+        AiState, CatalogCache, RequestScheduler,
         openrouter::{AiModel, AiModelPricing, AiTask},
         validate_provider_result,
     };
@@ -718,6 +809,22 @@ mod tests {
         assert!(scheduler.cancel("request-1"));
         assert!(cancelled.is_cancelled());
         assert!(!scheduler.cancel("missing"));
+    }
+
+    #[test]
+    fn corrupt_history_is_isolated_from_ai_state_startup() {
+        let directory = tempfile::tempdir().unwrap();
+        let ai_directory = directory.path().join("ai");
+        std::fs::create_dir_all(&ai_directory).unwrap();
+        std::fs::write(
+            ai_directory.join("history.sqlite3"),
+            b"not a sqlite database",
+        )
+        .unwrap();
+
+        let state = AiState::new(directory.path().to_path_buf()).unwrap();
+
+        assert!(!state.history.is_available());
     }
 
     #[test]
