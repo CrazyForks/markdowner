@@ -53,7 +53,7 @@ import { cn } from '@/lib/utils';
 import type { UpdateInfo } from '@/lib/updateCheck';
 import { AiReviewTab } from '@/features/ai/AiReviewTab';
 import { AiSelectionPopover } from '@/features/ai/AiSelectionPopover';
-import { AiWorkbenchPanel } from '@/features/ai/AiWorkbenchPanel';
+import { AiFeaturePanel } from '@/features/ai/AiFeaturePanel';
 import {
   createAiReview,
   createPendingAiReview,
@@ -6703,7 +6703,7 @@ export default function App() {
           onRunSearch={() => void handleRunWorkspaceSearch()}
           onSelectSearchMatch={(file, match) => void handleSelectSearchMatch(file, match)}
           aiPanel={
-            <AiWorkbenchPanel
+            <AiFeaturePanel
               documentId={
                 activeTab?.kind === 'document'
                   ? activeTab.id

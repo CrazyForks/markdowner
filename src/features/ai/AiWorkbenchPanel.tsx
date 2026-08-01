@@ -70,6 +70,7 @@ export interface AiWorkbenchPanelProps {
   onFailure?: (request: AiRunRequest, reason: unknown) => void;
   onResult: (result: AiRunResult, request: AiRunRequest) => void;
   services?: AiWorkbenchServices;
+  showHeader?: boolean;
 }
 
 const DEFAULT_SERVICES: AiWorkbenchServices = {
@@ -104,6 +105,7 @@ export function AiWorkbenchPanel({
   onFailure,
   onResult,
   services = DEFAULT_SERVICES,
+  showHeader = true,
 }: AiWorkbenchPanelProps) {
   const [task, setTask] = useState<AiTask>('prd');
   const currentDocument = useMemo<AiDocumentRef>(
@@ -446,11 +448,12 @@ export function AiWorkbenchPanel({
 
   return (
     <section
-      aria-labelledby="ai-workbench-heading"
+      aria-labelledby={showHeader ? 'ai-workbench-heading' : undefined}
+      aria-label={showHeader ? undefined : 'New AI request'}
       className="ai-motion-surface flex min-h-0 flex-1 flex-col overflow-y-auto"
       data-testid="ai-workbench-panel"
     >
-      <header className="border-b border-border px-3 py-3">
+      {showHeader ? <header className="border-b border-border px-3 py-3">
         <h2
           id="ai-workbench-heading"
           className="flex items-center gap-2 text-sm font-semibold"
@@ -461,7 +464,7 @@ export function AiWorkbenchPanel({
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           Improve, translate, or transform the active Markdown document.
         </p>
-      </header>
+      </header> : null}
 
       <div className="flex flex-col gap-4 p-3">
         {!configured && keyStatus !== null ? (

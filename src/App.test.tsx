@@ -54,6 +54,11 @@ const aiListModelsMock = vi.fn();
 const aiModelPricingMock = vi.fn();
 const aiRunMock = vi.fn();
 const aiCancelMock = vi.fn();
+const aiListActiveMock = vi.fn();
+const aiHistoryPageMock = vi.fn();
+const aiHistoryDetailMock = vi.fn();
+const aiHistoryDeleteMock = vi.fn();
+const aiHistoryClearMock = vi.fn();
 const aiRenderSelectedOperationsMock = vi.fn();
 const aiDiscardResultMock = vi.fn();
 const openDialogMock = vi.fn();
@@ -80,6 +85,8 @@ let updateSnapshotHandler:
   | undefined;
 
 vi.mock('./lib/desktop', () => ({
+  AI_ACTIVITY_CHANGED_EVENT: 'markdowner://ai-activity-changed',
+  AI_HISTORY_CHANGED_EVENT: 'markdowner://ai-history-changed',
   bootstrap: bootstrapMock,
   activeDocumentDiskSource: activeDocumentDiskSourceMock,
   importTheme: importThemeMock,
@@ -122,6 +129,11 @@ vi.mock('./lib/desktop', () => ({
   aiModelPricing: aiModelPricingMock,
   aiRun: aiRunMock,
   aiCancel: aiCancelMock,
+  aiListActive: aiListActiveMock,
+  aiHistoryPage: aiHistoryPageMock,
+  aiHistoryDetail: aiHistoryDetailMock,
+  aiHistoryDelete: aiHistoryDeleteMock,
+  aiHistoryClear: aiHistoryClearMock,
   aiRenderSelectedOperations: aiRenderSelectedOperationsMock,
   aiDiscardResult: aiDiscardResultMock,
 }));
@@ -732,6 +744,21 @@ describe('App recent documents', () => {
     aiRunMock.mockReset();
     aiCancelMock.mockReset();
     aiCancelMock.mockResolvedValue(true);
+    aiListActiveMock.mockReset();
+    aiListActiveMock.mockResolvedValue([]);
+    aiHistoryPageMock.mockReset();
+    aiHistoryPageMock.mockResolvedValue({
+      items: [],
+      page: 0,
+      pageSize: 20,
+      total: 0,
+    });
+    aiHistoryDetailMock.mockReset();
+    aiHistoryDetailMock.mockResolvedValue(null);
+    aiHistoryDeleteMock.mockReset();
+    aiHistoryDeleteMock.mockResolvedValue(false);
+    aiHistoryClearMock.mockReset();
+    aiHistoryClearMock.mockResolvedValue(0);
     aiRenderSelectedOperationsMock.mockReset();
     aiRenderSelectedOperationsMock.mockResolvedValue('# Improved');
     aiDiscardResultMock.mockReset();

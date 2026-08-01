@@ -3,6 +3,9 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   AiKeyMetadata,
   AiKeyStatus,
+  AiActiveRun,
+  AiHistoryDetail,
+  AiHistoryPage,
   AiModel,
   AiModelPricing,
   AiRunRequest,
@@ -40,6 +43,8 @@ export interface AppSnapshot {
 
 export const TERMINAL_OUTPUT_EVENT = 'markdowner://terminal-output';
 export const TERMINAL_EXIT_EVENT = 'markdowner://terminal-exit';
+export const AI_ACTIVITY_CHANGED_EVENT = 'markdowner://ai-activity-changed';
+export const AI_HISTORY_CHANGED_EVENT = 'markdowner://ai-history-changed';
 
 export interface TerminalSession {
   id: number;
@@ -428,6 +433,26 @@ export async function aiRun(
 
 export async function aiCancel(requestId: string): Promise<boolean> {
   return invoke<boolean>('ai_cancel', { requestId });
+}
+
+export async function aiListActive(): Promise<AiActiveRun[]> {
+  return invoke<AiActiveRun[]>('ai_list_active');
+}
+
+export async function aiHistoryPage(page: number, pageSize = 20): Promise<AiHistoryPage> {
+  return invoke<AiHistoryPage>('ai_history_page', { page, pageSize });
+}
+
+export async function aiHistoryDetail(requestId: string): Promise<AiHistoryDetail | null> {
+  return invoke<AiHistoryDetail | null>('ai_history_detail', { requestId });
+}
+
+export async function aiHistoryDelete(requestId: string): Promise<boolean> {
+  return invoke<boolean>('ai_history_delete', { requestId });
+}
+
+export async function aiHistoryClear(): Promise<number> {
+  return invoke<number>('ai_history_clear');
 }
 
 export async function aiRenderSelectedOperations(

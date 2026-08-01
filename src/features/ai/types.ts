@@ -148,3 +148,63 @@ export interface AiRunResult {
   usage: AiUsage | null;
   retryAfterSeconds: number | null;
 }
+
+export type AiFeatureTab = 'new' | 'activity' | 'history';
+export type AiActiveStatus = 'queued' | 'running' | 'cancelling';
+export type AiRunStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+
+export interface AiActivityProgress {
+  stage: string;
+  fileCompleted: number | null;
+  fileTotal: number | null;
+  chunkCompleted: number | null;
+  chunkTotal: number | null;
+  label: string | null;
+  receivedCharacters: number;
+}
+
+export interface AiActiveRun {
+  requestId: string;
+  task: AiTask;
+  model: string;
+  scope: AiRunScope;
+  status: AiActiveStatus;
+  progress: AiActivityProgress;
+  startedAt: number;
+  cancelable: boolean;
+}
+
+export interface AiInterviewTurn {
+  position: number;
+  question: string;
+  answer: string | null;
+  skipped: boolean;
+  rationale?: string;
+  unresolvedArea?: string;
+}
+
+export interface AiHistorySummary {
+  id: string;
+  task: AiTask;
+  model: string;
+  status: AiRunStatus;
+  scopeJson: string;
+  sourceHash: string;
+  promptVersion: string;
+  resultJson: string | null;
+  errorJson: string | null;
+  usageJson: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+}
+
+export interface AiHistoryDetail extends AiHistorySummary {
+  interviewTurns?: AiInterviewTurn[];
+}
+
+export interface AiHistoryPage {
+  items: AiHistorySummary[];
+  page: number;
+  pageSize: number;
+  total: number;
+}

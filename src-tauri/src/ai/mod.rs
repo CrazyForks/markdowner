@@ -12,7 +12,7 @@ use markdowner_core::ai_document::{
     validate_translation,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{State, ipc::Channel};
+use tauri::{AppHandle, Emitter, State, ipc::Channel};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
@@ -34,6 +34,9 @@ mod evaluation;
 pub mod history;
 pub mod keychain;
 pub mod openrouter;
+
+const AI_ACTIVITY_CHANGED_EVENT: &str = "markdowner://ai-activity-changed";
+const AI_HISTORY_CHANGED_EVENT: &str = "markdowner://ai-history-changed";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -372,6 +375,8 @@ pub struct AiRunRequest {
     pub max_output_tokens: u32,
     #[serde(default = "default_record_history")]
     pub record_history: bool,
+    #[serde(default)]
+    pub scope: Option<AiRunScope>,
 }
 
 fn default_record_history() -> bool {
@@ -491,16 +496,18 @@ pub async fn ai_model_pricing(
 }
 
 #[tauri::command]
-pub fn ai_cancel(state: State<'_, AiState>, request_id: String) -> bool {
+pub fn ai_cancel(app: AppHandle, state: State<'_, AiState>, request_id: String) -> bool {
     if !state.activity.mark_cancelling(&request_id).unwrap_or(false) {
         return false;
     }
-    if state.scheduler.cancel(&request_id) {
+    let cancelled = if state.scheduler.cancel(&request_id) {
         true
     } else {
         let _ = state.activity.finish(&request_id);
         false
-    }
+    };
+    emit_activity_changed(&app);
+    cancelled
 }
 
 #[tauri::command]
@@ -526,13 +533,25 @@ pub fn ai_history_detail(
 }
 
 #[tauri::command]
-pub fn ai_history_delete(state: State<'_, AiState>, request_id: String) -> Result<bool, AiError> {
-    state.history.store()?.delete(&request_id)
+pub fn ai_history_delete(
+    app: AppHandle,
+    state: State<'_, AiState>,
+    request_id: String,
+) -> Result<bool, AiError> {
+    let deleted = state.history.store()?.delete(&request_id)?;
+    if deleted {
+        emit_history_changed(&app);
+    }
+    Ok(deleted)
 }
 
 #[tauri::command]
-pub fn ai_history_clear(state: State<'_, AiState>) -> Result<u32, AiError> {
-    state.history.store()?.clear()
+pub fn ai_history_clear(app: AppHandle, state: State<'_, AiState>) -> Result<u32, AiError> {
+    let cleared = state.history.store()?.clear()?;
+    if cleared > 0 {
+        emit_history_changed(&app);
+    }
+    Ok(cleared)
 }
 
 #[tauri::command]
@@ -568,6 +587,7 @@ pub fn ai_discard_result(state: State<'_, AiState>, request_id: String) {
 
 #[tauri::command]
 pub async fn ai_run(
+    app: AppHandle,
     state: State<'_, AiState>,
     request: AiRunRequest,
     on_event: Channel<AiStreamEvent>,
@@ -591,13 +611,7 @@ pub async fn ai_run(
         request_id: request.request_id.clone(),
         task: request.task,
         model: request.model.clone(),
-        scope: AiRunScope::Document {
-            target: AiDocumentRef {
-                document_id: request.document_id.clone(),
-                path: None,
-                label: request.document_id.clone(),
-            },
-        },
+        scope: request_scope(&request),
         status: ActiveStatus::Running,
         progress: ActivityProgress {
             stage: "preparing".to_string(),
@@ -606,8 +620,10 @@ pub async fn ai_run(
         started_at: i64::try_from(unix_timestamp()).unwrap_or(i64::MAX),
         cancelable: true,
     })?;
+    emit_activity_changed(&app);
     if request.record_history {
         record_history_start(&state, &request, &envelope);
+        emit_history_changed(&app);
     }
     let completion_request = AiCompletionRequest {
         task: request.task,
@@ -630,12 +646,17 @@ pub async fn ai_run(
                 record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
             }
             let _ = state.activity.finish(&request.request_id);
+            emit_activity_changed(&app);
+            if request.record_history {
+                emit_history_changed(&app);
+            }
             return Err(error);
         }
     };
     let mut last_progress = 0;
     let activity = state.activity.clone();
     let activity_request_id = request.request_id.clone();
+    let activity_app = app.clone();
     let completion = state
         .client
         .stream_completion(
@@ -649,6 +670,7 @@ pub async fn ai_run(
                         &activity_request_id,
                         ActivityProgress::streaming(received_characters),
                     );
+                    emit_activity_changed(&activity_app);
                     let _ = on_event.send(AiStreamEvent::Progress {
                         request_id: request.request_id.clone(),
                         received_characters,
@@ -668,6 +690,10 @@ pub async fn ai_run(
                 record_history_error(&state, &request.request_id, RunStatus::Cancelled, &error);
             }
             let _ = state.activity.finish(&request.request_id);
+            emit_activity_changed(&app);
+            if request.record_history {
+                emit_history_changed(&app);
+            }
             return Err(error);
         }
         Err(error) => {
@@ -680,6 +706,10 @@ pub async fn ai_run(
                 record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
             }
             let _ = state.activity.finish(&request.request_id);
+            emit_activity_changed(&app);
+            if request.record_history {
+                emit_history_changed(&app);
+            }
             return Err(error);
         }
     };
@@ -716,6 +746,10 @@ pub async fn ai_run(
         );
     }
     let _ = state.activity.finish(&request.request_id);
+    emit_activity_changed(&app);
+    if request.record_history {
+        emit_history_changed(&app);
+    }
     Ok(AiRunResult {
         request_id: request.request_id,
         document_id: request.document_id,
@@ -730,13 +764,22 @@ pub async fn ai_run(
     })
 }
 
+fn emit_activity_changed(app: &AppHandle) {
+    let _ = app.emit(AI_ACTIVITY_CHANGED_EVENT, ());
+}
+
+fn emit_history_changed(app: &AppHandle) {
+    let _ = app.emit(AI_HISTORY_CHANGED_EVENT, ());
+}
+
 fn record_history_start(state: &AiState, request: &AiRunRequest, envelope: &AiDocumentEnvelope) {
-    let scope_json = serde_json::json!({
-        "kind": if request.selection.is_some() { "selection" } else { "document" },
-        "documentId": request.document_id,
-        "selection": request.selection,
-    })
-    .to_string();
+    let scope_json = serde_json::to_string(&request_scope(request)).unwrap_or_else(|_| {
+        serde_json::json!({
+            "kind": "document",
+            "documentId": request.document_id,
+        })
+        .to_string()
+    });
     let started_at = i64::try_from(unix_timestamp()).unwrap_or(i64::MAX);
     let run = StoredRun {
         id: request.request_id.clone(),
@@ -755,6 +798,16 @@ fn record_history_start(state: &AiState, request: &AiRunRequest, envelope: &AiDo
     if let Ok(store) = state.history.store() {
         let _ = store.insert_run(&run);
     }
+}
+
+fn request_scope(request: &AiRunRequest) -> AiRunScope {
+    request.scope.clone().unwrap_or_else(|| AiRunScope::Document {
+        target: AiDocumentRef {
+            document_id: request.document_id.clone(),
+            path: None,
+            label: request.document_id.clone(),
+        },
+    })
 }
 
 fn record_history_error(state: &AiState, request_id: &str, status: RunStatus, error: &AiError) {

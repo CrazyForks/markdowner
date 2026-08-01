@@ -45,6 +45,8 @@ let dragDropHandler:
   | undefined;
 
 vi.mock('./lib/desktop', () => ({
+  AI_ACTIVITY_CHANGED_EVENT: 'markdowner://ai-activity-changed',
+  AI_HISTORY_CHANGED_EVENT: 'markdowner://ai-history-changed',
   bootstrap: bootstrapMock,
   activeDocumentDiskSource: activeDocumentDiskSourceMock,
   importTheme: importThemeMock,
@@ -68,6 +70,16 @@ vi.mock('./lib/desktop', () => ({
   loadDraftBackups: loadDraftBackupsMock,
   saveDraftBackups: saveDraftBackupsMock,
   aiCancel: vi.fn(),
+  aiListActive: vi.fn().mockResolvedValue([]),
+  aiHistoryPage: vi.fn().mockResolvedValue({
+    items: [],
+    page: 0,
+    pageSize: 20,
+    total: 0,
+  }),
+  aiHistoryDetail: vi.fn().mockResolvedValue(null),
+  aiHistoryDelete: vi.fn().mockResolvedValue(false),
+  aiHistoryClear: vi.fn().mockResolvedValue(0),
   aiDeleteKey: vi.fn(),
   aiDiscardResult: vi.fn(),
   aiKeyStatus: vi.fn().mockResolvedValue({
