@@ -75,6 +75,8 @@ pub struct EditableSegment {
 pub struct ProtectionPolicy {
     #[serde(default)]
     pub allow_literal_changes: bool,
+    #[serde(default)]
+    pub translate_frontmatter_values: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1193,7 +1195,7 @@ fn segment_source(
             continue;
         }
 
-        let frontmatter_marker = in_frontmatter && line.trim() == "---";
+        let frontmatter_marker = in_frontmatter && matches!(line.trim(), "---" | "...");
         let ranges = protected_ranges_for_line(line, in_frontmatter, frontmatter_marker, policy);
         add_segment(
             source,
@@ -1308,6 +1310,54 @@ fn protected_ranges_for_line(
     }
 
     let mut ranges = Vec::new();
+    if in_frontmatter {
+        let Some(colon) = line.find(':') else {
+            return protect_entire_line(line, ProtectedKind::Literal);
+        };
+        let key = line[..colon].trim();
+        if !policy.translate_frontmatter_values || !matches!(key, "title" | "description") {
+            return protect_entire_line(line, ProtectedKind::Literal);
+        }
+
+        ranges.push(LocalProtectedRange {
+            start: 0,
+            end: colon + 1,
+            kind: ProtectedKind::FrontmatterKey,
+        });
+        let value_start = colon + 1;
+        let leading_space_count = line[value_start..]
+            .bytes()
+            .take_while(|byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        if leading_space_count > 0 {
+            ranges.push(LocalProtectedRange {
+                start: value_start,
+                end: value_start + leading_space_count,
+                kind: ProtectedKind::MarkdownMarker,
+            });
+        }
+        let line_content_end = line.strip_suffix("\r\n").map_or_else(
+            || line.strip_suffix('\n').map_or(line.len(), str::len),
+            str::len,
+        );
+        let value_content_start = value_start + leading_space_count;
+        if line_content_end > value_content_start + 1 {
+            let first = line.as_bytes()[value_content_start];
+            let last = line.as_bytes()[line_content_end - 1];
+            if first == last && matches!(first, b'\'' | b'"') {
+                ranges.push(LocalProtectedRange {
+                    start: value_content_start,
+                    end: value_content_start + 1,
+                    kind: ProtectedKind::MarkdownMarker,
+                });
+                ranges.push(LocalProtectedRange {
+                    start: line_content_end - 1,
+                    end: line_content_end,
+                    kind: ProtectedKind::MarkdownMarker,
+                });
+            }
+        }
+    }
     if let Some(marker_end) = markdown_prefix_end(line) {
         ranges.push(LocalProtectedRange {
             start: 0,
@@ -1319,16 +1369,6 @@ fn protected_ranges_for_line(
                 start: marker_end + task_marker.start(),
                 end: marker_end + task_marker.end(),
                 kind: ProtectedKind::MarkdownMarker,
-            });
-        }
-    }
-    if in_frontmatter && let Some(colon) = line.find(':') {
-        let key = &line[..colon];
-        if !key.trim().is_empty() && !key.chars().any(char::is_whitespace) {
-            ranges.push(LocalProtectedRange {
-                start: 0,
-                end: colon + 1,
-                kind: ProtectedKind::FrontmatterKey,
             });
         }
     }
@@ -1441,6 +1481,14 @@ fn protected_ranges_for_line(
         });
     }
     ranges
+}
+
+fn protect_entire_line(line: &str, kind: ProtectedKind) -> Vec<LocalProtectedRange> {
+    vec![LocalProtectedRange {
+        start: 0,
+        end: line.len(),
+        kind,
+    }]
 }
 
 fn merge_local_ranges(

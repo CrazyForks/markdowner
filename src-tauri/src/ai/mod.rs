@@ -7,9 +7,9 @@ use std::{
 };
 
 use markdowner_core::ai_document::{
-    AiDocumentEnvelope, ByteRange, PrdResponse, SelectionResponse, TranslationResponse,
-    ValidatedDocument, ValidationError, validate_batched_translation, validate_prd_response,
-    validate_selection_response, validate_translation,
+    AiDocumentEnvelope, ByteRange, PrdResponse, ProtectionPolicy, SelectionResponse,
+    TranslationResponse, ValidatedDocument, ValidationError, validate_batched_translation,
+    validate_prd_response, validate_selection_response, validate_translation,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, ipc::Channel};
@@ -962,9 +962,13 @@ pub async fn ai_run(
     on_event: Channel<AiStreamEvent>,
 ) -> Result<AiRunResult, AiError> {
     validate_run_request(&request)?;
-    let envelope =
-        AiDocumentEnvelope::new(&request.document_id, &request.source, request.selection)
-            .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+    let envelope = AiDocumentEnvelope::with_policy(
+        &request.document_id,
+        &request.source,
+        request.selection,
+        protection_policy_for_task(request.task),
+    )
+    .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
     if let Some(interview_id) = request.interview_id.as_deref() {
         let interview_context = prepare_interview_generation(&state, &request, &envelope, interview_id)?;
         request.instruction = Some(match request.instruction.take() {
@@ -1196,8 +1200,13 @@ async fn run_chunked_translation(
         );
         emit_activity_changed(app);
         let chunk_document_id = format!("{}#chunk-{}", request.document_id, chunk.index);
-        let chunk_envelope = AiDocumentEnvelope::new(&chunk_document_id, &chunk.source, None)
-            .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+        let chunk_envelope = AiDocumentEnvelope::with_policy(
+            &chunk_document_id,
+            &chunk.source,
+            None,
+            protection_policy_for_task(AiTask::Translation),
+        )
+        .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
         let document = serde_json::to_value(&chunk_envelope).map_err(|_| {
             AiError::new(
                 "invalid_document",
@@ -1492,6 +1501,13 @@ fn request_scope(request: &AiRunRequest) -> AiRunScope {
             label: request.document_id.clone(),
         },
     })
+}
+
+fn protection_policy_for_task(task: AiTask) -> ProtectionPolicy {
+    ProtectionPolicy {
+        translate_frontmatter_values: task == AiTask::Translation,
+        ..ProtectionPolicy::default()
+    }
 }
 
 fn record_history_error(state: &AiState, request_id: &str, status: RunStatus, error: &AiError) {

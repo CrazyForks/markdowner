@@ -1,6 +1,6 @@
 use markdowner_core::ai_document::{
     AiDocumentEnvelope, ByteRange, OperationKind, PrdFinding, PrdOperation, PrdResponse,
-    SelectionResponse, TranslationResponse, TranslationSegment, ValidationIssueCode,
+    ProtectionPolicy, SelectionResponse, TranslationResponse, TranslationSegment, ValidationIssueCode,
     markdown_block_ranges, validate_prd_response, validate_selection_response,
     validate_translation,
 };
@@ -83,6 +83,54 @@ fn translation_identity_preserves_every_source_byte() {
     assert!(validated.validation.passed);
     assert_eq!(validated.proposed_markdown, source);
     assert_eq!(validated.detected_source_language.as_deref(), Some("en"));
+}
+
+#[test]
+fn obsidian_frontmatter_is_task_aware_and_round_trips_exactly() {
+    let source = include_str!("../../../tests/fixtures/obsidian-frontmatter.md");
+    let default_envelope = AiDocumentEnvelope::new("obsidian-default", source, None)
+        .expect("default envelope");
+    assert!(default_envelope.protected.iter().any(|token| {
+        token.original
+            .contains("title: \"AI가 코드를 짜주는 시대에, 우리는 왜 개발자를 찾을까요?\"")
+    }));
+
+    let translation_envelope = AiDocumentEnvelope::with_policy(
+        "obsidian-translation",
+        source,
+        None,
+        ProtectionPolicy {
+            translate_frontmatter_values: true,
+            ..ProtectionPolicy::default()
+        },
+    )
+    .expect("translation envelope");
+    let editable = translation_envelope
+        .segments
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect::<String>();
+    assert!(editable.contains("AI가 코드를 짜주는 시대에, 우리는 왜 개발자를 찾을까요?"));
+    assert!(editable.contains("More"));
+    assert!(translation_envelope
+        .protected
+        .iter()
+        .any(|token| token.original.contains("source: \"https://medium.com/")));
+    assert!(translation_envelope
+        .protected
+        .iter()
+        .any(|token| token.original.contains("[[Career]]")));
+    assert!(translation_envelope
+        .protected
+        .iter()
+        .any(|token| token.original.contains("published: 2026-07-14")));
+
+    let validated = validate_translation(
+        &translation_envelope,
+        translated_identity(&translation_envelope),
+    )
+    .expect("identity translation");
+    assert_eq!(validated.proposed_markdown, source);
 }
 
 #[test]
