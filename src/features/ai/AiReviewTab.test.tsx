@@ -18,6 +18,7 @@ const request: AiRunRequest = {
   instruction: null,
   zdrOnly: true,
   maxOutputTokens: 4096,
+  recordHistory: true,
 };
 
 const runResult: AiRunResult = {

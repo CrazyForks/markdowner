@@ -479,6 +479,8 @@ describe('AI settings', () => {
       aiTranslationTargetLanguage: 'en',
       aiZdrOnly: true,
       aiCloudDisclosureAccepted: false,
+      aiDefaultScope: 'document',
+      aiHistoryEnabled: true,
     });
   });
 
@@ -492,6 +494,8 @@ describe('AI settings', () => {
       aiTranslationTargetLanguage: false,
       aiZdrOnly: 'no',
       aiCloudDisclosureAccepted: true,
+      aiDefaultScope: 'invalid',
+      aiHistoryEnabled: 'no',
     });
 
     await expect(loadSettings()).resolves.toMatchObject({
@@ -502,6 +506,8 @@ describe('AI settings', () => {
       aiTranslationTargetLanguage: 'en',
       aiZdrOnly: true,
       aiCloudDisclosureAccepted: true,
+      aiDefaultScope: 'document',
+      aiHistoryEnabled: true,
     });
   });
 });

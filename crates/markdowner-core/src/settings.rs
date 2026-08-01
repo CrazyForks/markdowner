@@ -74,6 +74,17 @@ where
     Ok(normalize_target_language(value))
 }
 
+fn deserialize_ai_default_scope<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value.as_str() {
+        Some("workspace") => "workspace".to_string(),
+        _ => "document".to_string(),
+    })
+}
+
 fn normalize_hex_color(value: serde_json::Value, fallback: &str) -> String {
     value
         .as_str()
@@ -184,6 +195,10 @@ pub struct Settings {
     pub ai_zdr_only: bool,
     #[serde(deserialize_with = "deserialize_bool_or_false")]
     pub ai_cloud_disclosure_accepted: bool,
+    #[serde(deserialize_with = "deserialize_ai_default_scope")]
+    pub ai_default_scope: String,
+    #[serde(deserialize_with = "deserialize_bool_or_true")]
+    pub ai_history_enabled: bool,
 }
 
 impl Default for Settings {
@@ -242,6 +257,8 @@ impl Default for Settings {
             ai_translation_target_language: default_ai_translation_target_language(),
             ai_zdr_only: true,
             ai_cloud_disclosure_accepted: false,
+            ai_default_scope: "document".to_string(),
+            ai_history_enabled: true,
         }
     }
 }
@@ -648,7 +665,9 @@ mod tests {
             "aiCustomPromptModel": "vendor/model",
             "aiTranslationTargetLanguage": false,
             "aiZdrOnly": "yes",
-            "aiCloudDisclosureAccepted": true
+            "aiCloudDisclosureAccepted": true,
+            "aiDefaultScope": "invalid",
+            "aiHistoryEnabled": "no"
         }))
         .expect("settings parse");
 
@@ -658,6 +677,8 @@ mod tests {
         assert_eq!(parsed.ai_translation_target_language, "en");
         assert!(parsed.ai_zdr_only);
         assert!(parsed.ai_cloud_disclosure_accepted);
+        assert_eq!(parsed.ai_default_scope, "document");
+        assert!(parsed.ai_history_enabled);
         assert!(parsed.auto_save);
 
         let serialized = serde_json::to_value(parsed).expect("settings serialize");
@@ -667,5 +688,7 @@ mod tests {
         assert_eq!(serialized["aiTranslationTargetLanguage"], "en");
         assert_eq!(serialized["aiZdrOnly"], true);
         assert_eq!(serialized["aiCloudDisclosureAccepted"], true);
+        assert_eq!(serialized["aiDefaultScope"], "document");
+        assert_eq!(serialized["aiHistoryEnabled"], true);
     }
 }

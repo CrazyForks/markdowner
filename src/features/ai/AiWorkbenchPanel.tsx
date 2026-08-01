@@ -15,6 +15,7 @@ import {
 } from '@/lib/desktop';
 import type { Settings } from '@/lib/settings';
 
+import { AiScopePicker } from './AiScopePicker';
 import {
   detectDocumentLanguage,
   estimateAiRun,
@@ -25,12 +26,14 @@ import {
 } from './model';
 import type {
   AiByteRange,
+  AiDocumentRef,
   AiKeyStatus,
   AiModel,
   AiModelOption,
   AiModelPricing,
   AiRunRequest,
   AiRunResult,
+  AiRunScope,
   AiStreamEvent,
   AiTask,
 } from './types';
@@ -52,7 +55,13 @@ export interface AiWorkbenchServices {
 
 export interface AiWorkbenchPanelProps {
   documentId: string;
+  documentPath?: string | null;
+  documentLabel?: string;
   source: string;
+  openDocuments?: readonly AiDocumentRef[];
+  documentSources?: Readonly<Record<string, string>>;
+  workspaceRoot?: string | null;
+  workspaceDocumentCount?: number;
   selection: AiByteRange | null;
   settings: Settings;
   onSettingsChange: (settings: Settings) => void;
@@ -75,10 +84,18 @@ const DEFAULT_SERVICES: AiWorkbenchServices = {
 
 const selectClass =
   'h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const EMPTY_DOCUMENTS: readonly AiDocumentRef[] = [];
+const EMPTY_DOCUMENT_SOURCES: Readonly<Record<string, string>> = {};
 
 export function AiWorkbenchPanel({
   documentId,
+  documentPath = null,
+  documentLabel = 'Current document',
   source,
+  openDocuments = EMPTY_DOCUMENTS,
+  documentSources = EMPTY_DOCUMENT_SOURCES,
+  workspaceRoot = null,
+  workspaceDocumentCount = 0,
   selection,
   settings,
   onSettingsChange,
@@ -89,7 +106,20 @@ export function AiWorkbenchPanel({
   services = DEFAULT_SERVICES,
 }: AiWorkbenchPanelProps) {
   const [task, setTask] = useState<AiTask>('prd');
-  const [scope, setScope] = useState<'document' | 'selection'>('document');
+  const currentDocument = useMemo<AiDocumentRef>(
+    () => ({ documentId, path: documentPath, label: documentLabel }),
+    [documentId, documentLabel, documentPath],
+  );
+  const [runScope, setRunScope] = useState<AiRunScope>(() =>
+    settings.aiDefaultScope === 'workspace' && workspaceRoot
+      ? {
+          kind: 'workspace',
+          rootPath: workspaceRoot,
+          target: currentDocument,
+          documentCount: workspaceDocumentCount,
+        }
+      : { kind: 'document', target: currentDocument },
+  );
   const [models, setModels] = useState<AiModel[]>([]);
   const [model, setModel] = useState(settings.aiPrdModel);
   const [modelQuery, setModelQuery] = useState('');
@@ -160,8 +190,22 @@ export function AiWorkbenchPanel({
   ]);
 
   useEffect(() => {
-    if (!selection && scope === 'selection') setScope('document');
-  }, [scope, selection]);
+    setRunScope((current) => {
+      if (current.kind === 'workspace') {
+        if (!workspaceRoot) return { kind: 'document', target: currentDocument };
+        return {
+          kind: 'workspace',
+          rootPath: workspaceRoot,
+          target: task === 'translation' ? null : current.target ?? currentDocument,
+          documentCount: workspaceDocumentCount,
+        };
+      }
+      const targetAvailable = [currentDocument, ...openDocuments].some(
+        (document) => document.documentId === current.target.documentId,
+      );
+      return targetAvailable ? current : { kind: 'document', target: currentDocument };
+    });
+  }, [currentDocument, openDocuments, task, workspaceDocumentCount, workspaceRoot]);
 
   const modelOptions = useMemo(() => orderModels(models, task), [models, task]);
   const visibleModelOptions = useMemo(
@@ -227,14 +271,16 @@ export function AiWorkbenchPanel({
     };
   }, [configured, selectedModelId, services, settings.aiZdrOnly]);
 
+  const targetDocument =
+    runScope.kind === 'document' ? runScope.target : runScope.target ?? currentDocument;
   const scopedSource =
-    scope === 'selection' && selection
-      ? sourceForByteRange(source, selection)
-      : source;
+    targetDocument.documentId === documentId
+      ? source
+      : documentSources[targetDocument.documentId] ?? '';
   const estimate = pricedSelectedModel
     ? estimateAiRun({
         source: scopedSource,
-        scope,
+        scope: 'document',
         model: pricedSelectedModel,
         maxOutputTokens: 4_096,
       })
@@ -242,7 +288,7 @@ export function AiWorkbenchPanel({
   const gate =
     estimate && selectedModel
       ? resolveRunGate({
-          scope,
+          scope: 'document',
           inputTokens: estimate.inputTokens,
           contextLength: selectedModel.contextLength,
           maxCostUsd: estimate.maxCostUsd,
@@ -275,7 +321,8 @@ export function AiWorkbenchPanel({
     !pricingLoading &&
     configured &&
     disclosureAccepted &&
-    source.length > 0 &&
+    runScope.kind === 'document' &&
+    scopedSource.length > 0 &&
     selectedModel?.enabled === true &&
     gate?.kind !== 'blocked' &&
     (gate?.kind !== 'confirm' || confirmed) &&
@@ -316,15 +363,17 @@ export function AiWorkbenchPanel({
     const requestId = createRequestId();
     const request: AiRunRequest = {
       requestId,
-      documentId,
-      source,
-      selection: scope === 'selection' ? selection : null,
+      documentId: targetDocument.documentId,
+      source: scopedSource,
+      selection: targetDocument.documentId === documentId ? selection : null,
       task,
       model: selectedModel.id,
       targetLanguage: targetRequired ? targetLanguage : null,
       instruction: instruction.trim() || null,
       zdrOnly: settings.aiZdrOnly,
       maxOutputTokens: 4_096,
+      recordHistory: settings.aiHistoryEnabled,
+      scope: runScope,
     };
     setRunningRequestId(requestId);
     setShowActivityLink(false);
@@ -452,24 +501,23 @@ export function AiWorkbenchPanel({
           </select>
         </div>
 
-        <div className="grid gap-1.5">
-          <Label htmlFor="ai-scope">Scope</Label>
-          <select
-            id="ai-scope"
-            aria-label="AI scope"
-            className={selectClass}
-            value={scope}
-            disabled={Boolean(runningRequestId)}
-            onChange={(event) =>
-              setScope(event.target.value as 'document' | 'selection')
-            }
-          >
-            <option value="document">Current document</option>
-            <option value="selection" disabled={!selection}>
-              Current selection
-            </option>
-          </select>
-        </div>
+        <AiScopePicker
+          value={runScope}
+          task={task}
+          currentDocument={currentDocument}
+          openDocuments={openDocuments}
+          workspaceRoot={workspaceRoot}
+          workspaceFileCount={workspaceDocumentCount}
+          disabled={Boolean(runningRequestId)}
+          onChange={setRunScope}
+        />
+
+        {runScope.kind === 'workspace' ? (
+          <p className="text-xs text-muted-foreground">
+            Workspace execution will read only the selected Markdown scope and will
+            never modify files without review.
+          </p>
+        ) : null}
 
         <div className="grid gap-1.5">
           <div className="flex items-center justify-between gap-2">
@@ -753,13 +801,6 @@ function createRequestId(): string {
     return crypto.randomUUID();
   }
   return `ai-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function sourceForByteRange(source: string, range: AiByteRange): string {
-  const bytes = new TextEncoder().encode(source);
-  const start = Math.max(0, Math.min(bytes.length, range.start));
-  const end = Math.max(start, Math.min(bytes.length, range.end));
-  return new TextDecoder('utf-8', { fatal: false }).decode(bytes.slice(start, end));
 }
 
 function errorMessage(reason: unknown): string {

@@ -394,4 +394,56 @@ describe('AiWorkbenchPanel', () => {
     ).toBeInTheDocument();
     expect(run).toHaveBeenCalledTimes(1);
   });
+
+  it('runs against an explicitly selected open document and its draft', async () => {
+    const run = vi.fn(
+      () =>
+        new Promise<never>(() => {
+          // Keep the request active so only its input contract is under test.
+        }),
+    );
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-current"
+        documentPath="/vault/current.md"
+        documentLabel="current.md"
+        source="# Current"
+        openDocuments={[
+          { documentId: 'doc-current', path: '/vault/current.md', label: 'current.md' },
+          { documentId: 'doc-other', path: '/vault/other.md', label: 'other.md' },
+        ]}
+        documentSources={{ 'doc-other': '# Other draft' }}
+        selection={null}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+        }}
+        onSettingsChange={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({ configured: true, maskedLabel: '••••secret' }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          run,
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Document' }), {
+      target: { value: 'doc-other' },
+    });
+    const runButton = screen.getByRole('button', { name: 'Run' });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: 'doc-other',
+        source: '# Other draft',
+        recordHistory: true,
+        scope: expect.objectContaining({ kind: 'document' }),
+      }),
+      expect.any(Function),
+    );
+  });
 });

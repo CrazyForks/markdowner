@@ -5,7 +5,66 @@ import { OpenRouterSettings } from './OpenRouterSettings';
 
 afterEach(() => cleanup());
 
+const defaultProps = {
+  prdModel: 'z-ai/glm-5.2',
+  translationModel: 'z-ai/glm-5.2',
+  customPromptModel: 'z-ai/glm-5.2',
+  translationTargetLanguage: 'ko',
+  defaultScope: 'document' as const,
+  historyEnabled: true,
+  onPrdModelChange: vi.fn(),
+  onTranslationModelChange: vi.fn(),
+  onCustomPromptModelChange: vi.fn(),
+  onTranslationTargetLanguageChange: vi.fn(),
+  onDefaultScopeChange: vi.fn(),
+  onHistoryEnabledChange: vi.fn(),
+};
+
 describe('OpenRouterSettings', () => {
+  it('groups connection, defaults, and history and privacy controls', async () => {
+    const onDefaultScopeChange = vi.fn();
+    const onHistoryEnabledChange = vi.fn();
+    render(
+      <OpenRouterSettings
+        {...defaultProps}
+        zdrOnly
+        disclosureAccepted
+        prdModel="z-ai/glm-5.2"
+        translationModel="z-ai/glm-5.2"
+        customPromptModel="z-ai/glm-5.2"
+        translationTargetLanguage="ko"
+        defaultScope="document"
+        historyEnabled
+        onZdrOnlyChange={vi.fn()}
+        onDisclosureAcceptedChange={vi.fn()}
+        onPrdModelChange={vi.fn()}
+        onTranslationModelChange={vi.fn()}
+        onCustomPromptModelChange={vi.fn()}
+        onTranslationTargetLanguageChange={vi.fn()}
+        onDefaultScopeChange={onDefaultScopeChange}
+        onHistoryEnabledChange={onHistoryEnabledChange}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({ configured: false, maskedLabel: null }),
+          saveKey: vi.fn(),
+          verifyKey: vi.fn(),
+          deleteKey: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'OpenRouter Connection' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Defaults' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'History & Privacy' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Default AI scope' }), {
+      target: { value: 'workspace' },
+    });
+    expect(onDefaultScopeChange).toHaveBeenCalledWith('workspace');
+
+    fireEvent.click(screen.getByRole('switch', { name: /Keep local AI history/i }));
+    expect(onHistoryEnabledChange).toHaveBeenCalledWith(false);
+  });
+
   it('keeps the key write-only and returns to onboarding after delete', async () => {
     const saveKey = vi.fn().mockResolvedValue({
       configured: true,
@@ -27,6 +86,7 @@ describe('OpenRouterSettings', () => {
     });
     render(
       <OpenRouterSettings
+        {...defaultProps}
         zdrOnly
         disclosureAccepted
         onZdrOnlyChange={vi.fn()}
@@ -63,6 +123,7 @@ describe('OpenRouterSettings', () => {
   it('warns when zero data retention is disabled', async () => {
     render(
       <OpenRouterSettings
+        {...defaultProps}
         zdrOnly={false}
         disclosureAccepted
         onZdrOnlyChange={vi.fn()}

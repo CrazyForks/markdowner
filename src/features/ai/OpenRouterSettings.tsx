@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, KeyRound, LoaderCircle, ShieldCheck, Trash2 } from 'lucide-react';
+import { CheckCircle2, KeyRound, LoaderCircle, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,8 +24,20 @@ export interface OpenRouterSettingsServices {
 export interface OpenRouterSettingsProps {
   zdrOnly: boolean;
   disclosureAccepted: boolean;
+  prdModel: string;
+  translationModel: string;
+  customPromptModel: string;
+  translationTargetLanguage: string;
+  defaultScope: 'document' | 'workspace';
+  historyEnabled: boolean;
   onZdrOnlyChange: (enabled: boolean) => void;
   onDisclosureAcceptedChange: (accepted: boolean) => void;
+  onPrdModelChange: (model: string) => void;
+  onTranslationModelChange: (model: string) => void;
+  onCustomPromptModelChange: (model: string) => void;
+  onTranslationTargetLanguageChange: (language: string) => void;
+  onDefaultScopeChange: (scope: 'document' | 'workspace') => void;
+  onHistoryEnabledChange: (enabled: boolean) => void;
   services?: OpenRouterSettingsServices;
 }
 
@@ -39,8 +51,20 @@ const DEFAULT_SERVICES: OpenRouterSettingsServices = {
 export function OpenRouterSettings({
   zdrOnly,
   disclosureAccepted,
+  prdModel,
+  translationModel,
+  customPromptModel,
+  translationTargetLanguage,
+  defaultScope,
+  historyEnabled,
   onZdrOnlyChange,
   onDisclosureAcceptedChange,
+  onPrdModelChange,
+  onTranslationModelChange,
+  onCustomPromptModelChange,
+  onTranslationTargetLanguageChange,
+  onDefaultScopeChange,
+  onHistoryEnabledChange,
   services = DEFAULT_SERVICES,
 }: OpenRouterSettingsProps) {
   const [status, setStatus] = useState<AiKeyStatus>({
@@ -131,12 +155,11 @@ export function OpenRouterSettings({
             id="openrouter-settings-heading"
             className="flex items-center gap-2 text-sm font-semibold"
           >
-            <KeyRound className="size-4" />
-            AI &amp; OpenRouter
+            <Sparkles className="size-4" />
+            AI Feature Settings
           </h3>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            The API key is stored in macOS Keychain and is never read back into the
-            editor.
+            Configure OpenRouter, task defaults, local history, and cloud privacy.
           </p>
         </div>
         {status.configured ? (
@@ -146,6 +169,14 @@ export function OpenRouterSettings({
           </span>
         ) : null}
       </div>
+
+      <div className="flex items-center gap-2">
+        <KeyRound className="size-4 text-muted-foreground" />
+        <h4 className="text-sm font-medium">OpenRouter Connection</h4>
+      </div>
+      <p className="-mt-3 text-xs leading-relaxed text-muted-foreground">
+        The API key is stored in macOS Keychain and is never read back into the editor.
+      </p>
 
       {loading ? (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -214,6 +245,81 @@ export function OpenRouterSettings({
         </div>
       </div>
 
+      <div className="border-t border-border pt-4">
+        <h4 className="text-sm font-medium">Task Defaults</h4>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          GLM 5.2 is the default. Kimi K3 is available explicitly; Markdowner never
+          falls back to another model automatically.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ModelDefaultSelect
+          id="ai-prd-default-model"
+          label="PRD default model"
+          value={prdModel}
+          onChange={onPrdModelChange}
+        />
+        <ModelDefaultSelect
+          id="ai-translation-default-model"
+          label="Translation default model"
+          value={translationModel}
+          onChange={onTranslationModelChange}
+        />
+        <ModelDefaultSelect
+          id="ai-custom-default-model"
+          label="Custom prompt default model"
+          value={customPromptModel}
+          onChange={onCustomPromptModelChange}
+        />
+        <div className="grid gap-1.5">
+          <Label htmlFor="ai-default-target-language">Translation target</Label>
+          <Input
+            id="ai-default-target-language"
+            value={translationTargetLanguage}
+            onChange={(event) => onTranslationTargetLanguageChange(event.target.value)}
+            placeholder="BCP 47 code, e.g. ko"
+          />
+        </div>
+        <div className="grid gap-1.5 sm:col-span-2">
+          <Label htmlFor="ai-default-scope">Default AI scope</Label>
+          <select
+            id="ai-default-scope"
+            aria-label="Default AI scope"
+            className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-[18rem]"
+            value={defaultScope}
+            onChange={(event) =>
+              onDefaultScopeChange(event.target.value as 'document' | 'workspace')
+            }
+          >
+            <option value="document">Current document</option>
+            <option value="workspace">Current workspace</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="border-t border-border pt-4">
+        <h4 className="text-sm font-medium">History &amp; Privacy</h4>
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+        <Label
+          htmlFor="ai-history-enabled"
+          className="flex flex-col items-start gap-1 text-left"
+        >
+          <span>Keep local AI history</span>
+          <span className="text-xs font-normal leading-relaxed text-muted-foreground">
+            Store up to 500 local run records. Source document text is not copied into
+            history.
+          </span>
+        </Label>
+        <Switch
+          id="ai-history-enabled"
+          checked={historyEnabled}
+          onCheckedChange={onHistoryEnabledChange}
+        />
+      </div>
+
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
         <Label
           htmlFor="ai-cloud-disclosure"
@@ -262,6 +368,43 @@ export function OpenRouterSettings({
         {error || message}
       </p>
     </section>
+  );
+}
+
+const PINNED_MODEL_CHOICES = [
+  { id: 'z-ai/glm-5.2', label: 'GLM 5.2' },
+  { id: 'moonshotai/kimi-k3', label: 'Kimi K3' },
+] as const;
+
+function ModelDefaultSelect({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const known = PINNED_MODEL_CHOICES.some((choice) => choice.id === value);
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <select
+        id={id}
+        className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {!known ? <option value={value}>{value} · unavailable</option> : null}
+        {PINNED_MODEL_CHOICES.map((choice) => (
+          <option key={choice.id} value={choice.id}>
+            {choice.label} · {choice.id}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 

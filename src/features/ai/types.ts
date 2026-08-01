@@ -1,6 +1,21 @@
 export type AiTask = 'prd' | 'translation' | 'custom';
 export type AiScope = 'document' | 'selection';
 
+export interface AiDocumentRef {
+  documentId: string;
+  path: string | null;
+  label: string;
+}
+
+export type AiRunScope =
+  | { kind: 'document'; target: AiDocumentRef }
+  | {
+      kind: 'workspace';
+      rootPath: string;
+      target: AiDocumentRef | null;
+      documentCount: number;
+    };
+
 export interface AiModelPricing {
   /** USD per token. */
   prompt: number | null;
@@ -56,6 +71,8 @@ export interface AiRunRequest {
   instruction: string | null;
   zdrOnly: boolean;
   maxOutputTokens: number;
+  recordHistory: boolean;
+  scope?: AiRunScope;
 }
 
 export interface AiUsage {

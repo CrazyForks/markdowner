@@ -1498,11 +1498,35 @@ export function SettingsPanel({
         <OpenRouterSettings
           zdrOnly={settings.aiZdrOnly}
           disclosureAccepted={settings.aiCloudDisclosureAccepted}
+          prdModel={settings.aiPrdModel}
+          translationModel={settings.aiTranslationModel}
+          customPromptModel={settings.aiCustomPromptModel}
+          translationTargetLanguage={settings.aiTranslationTargetLanguage}
+          defaultScope={settings.aiDefaultScope}
+          historyEnabled={settings.aiHistoryEnabled}
           onZdrOnlyChange={(aiZdrOnly) =>
             onSettingsChange({ ...settings, aiZdrOnly })
           }
           onDisclosureAcceptedChange={(aiCloudDisclosureAccepted) =>
             onSettingsChange({ ...settings, aiCloudDisclosureAccepted })
+          }
+          onPrdModelChange={(aiPrdModel) =>
+            onSettingsChange({ ...settings, aiPrdModel })
+          }
+          onTranslationModelChange={(aiTranslationModel) =>
+            onSettingsChange({ ...settings, aiTranslationModel })
+          }
+          onCustomPromptModelChange={(aiCustomPromptModel) =>
+            onSettingsChange({ ...settings, aiCustomPromptModel })
+          }
+          onTranslationTargetLanguageChange={(aiTranslationTargetLanguage) =>
+            onSettingsChange({ ...settings, aiTranslationTargetLanguage })
+          }
+          onDefaultScopeChange={(aiDefaultScope) =>
+            onSettingsChange({ ...settings, aiDefaultScope })
+          }
+          onHistoryEnabledChange={(aiHistoryEnabled) =>
+            onSettingsChange({ ...settings, aiHistoryEnabled })
           }
         />
 

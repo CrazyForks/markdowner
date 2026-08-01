@@ -61,6 +61,7 @@ import {
   type AiReview,
 } from '@/features/ai/review';
 import type {
+  AiDocumentRef,
   AiRunRequest,
   AiRunResult,
 } from '@/features/ai/types';
@@ -6407,6 +6408,29 @@ export default function App() {
     documentStats,
   });
   const { documentMeta, openEditorItems, tabStripItems, statusBarModel } = shellChromeModel;
+  const aiOpenDocuments = useMemo<AiDocumentRef[]>(
+    () =>
+      tabs
+        .filter((tab) => tab.kind === 'document' && !tab.missing)
+        .map((tab) => ({
+          documentId: tab.id,
+          path: tab.path,
+          label: tab.path ? displayWorkspacePath(tab.path, snapshot.rootDir) : tab.name,
+        })),
+    [snapshot.rootDir, tabs],
+  );
+  const aiDocumentSources = useMemo(
+    () =>
+      Object.fromEntries(
+        tabs
+          .filter((tab) => tab.kind === 'document' && !tab.missing)
+          .map((tab) => [
+            tab.id,
+            tab.id === activeTabId ? localDraft : tab.draft,
+          ]),
+      ),
+    [activeTabId, localDraft, tabs],
+  );
   const sidebarContentRows =
     sidebarPanel === 'files'
       ? visibleWorkspaceTreeRowCount
@@ -6686,6 +6710,16 @@ export default function App() {
                   : snapshot.activeDocumentPath ?? 'active-document'
               }
               source={localDraft}
+              documentPath={activeTab?.kind === 'document' ? activeTab.path : null}
+              documentLabel={
+                activeTab?.kind === 'document' && activeTab.path
+                  ? displayWorkspacePath(activeTab.path, snapshot.rootDir)
+                  : activeTab?.name ?? 'Current document'
+              }
+              openDocuments={aiOpenDocuments}
+              documentSources={aiDocumentSources}
+              workspaceRoot={snapshot.rootDir}
+              workspaceDocumentCount={snapshot.workspaceDocuments.length}
               selection={null}
               settings={settings}
               onSettingsChange={handleSettingsChange}

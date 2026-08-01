@@ -91,6 +91,7 @@ describe('buildOpenTabsPayload', () => {
       instruction: null,
       zdrOnly: true,
       maxOutputTokens: 4096,
+      recordHistory: true,
     };
     const result: AiRunResult = {
       requestId: 'request-1',

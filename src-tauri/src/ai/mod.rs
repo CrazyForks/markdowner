@@ -370,6 +370,12 @@ pub struct AiRunRequest {
     pub instruction: Option<String>,
     pub zdr_only: bool,
     pub max_output_tokens: u32,
+    #[serde(default = "default_record_history")]
+    pub record_history: bool,
+}
+
+fn default_record_history() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -600,7 +606,9 @@ pub async fn ai_run(
         started_at: i64::try_from(unix_timestamp()).unwrap_or(i64::MAX),
         cancelable: true,
     })?;
-    record_history_start(&state, &request, &envelope);
+    if request.record_history {
+        record_history_start(&state, &request, &envelope);
+    }
     let completion_request = AiCompletionRequest {
         task: request.task,
         model: request.model.clone(),
@@ -618,7 +626,9 @@ pub async fn ai_run(
     let secret = match state.keychain.read_secret() {
         Ok(secret) => secret,
         Err(error) => {
-            record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+            if request.record_history {
+                record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+            }
             let _ = state.activity.finish(&request.request_id);
             return Err(error);
         }
@@ -654,7 +664,9 @@ pub async fn ai_run(
             let _ = on_event.send(AiStreamEvent::Cancelled {
                 request_id: request.request_id.clone(),
             });
-            record_history_error(&state, &request.request_id, RunStatus::Cancelled, &error);
+            if request.record_history {
+                record_history_error(&state, &request.request_id, RunStatus::Cancelled, &error);
+            }
             let _ = state.activity.finish(&request.request_id);
             return Err(error);
         }
@@ -664,7 +676,9 @@ pub async fn ai_run(
                 code: error.code.clone(),
                 message: error.message.clone(),
             });
-            record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+            if request.record_history {
+                record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+            }
             let _ = state.activity.finish(&request.request_id);
             return Err(error);
         }
@@ -692,7 +706,7 @@ pub async fn ai_run(
         .usage
         .as_ref()
         .and_then(|usage| serde_json::to_string(usage).ok());
-    if let Ok(store) = state.history.store() {
+    if request.record_history && let Ok(store) = state.history.store() {
         let _ = store.finish_run_with_usage(
             &request.request_id,
             RunStatus::Completed,

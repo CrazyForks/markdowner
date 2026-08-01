@@ -123,6 +123,7 @@ export function AiSelectionPopover({
       instruction: prompt.trim(),
       zdrOnly: settings.aiZdrOnly,
       maxOutputTokens: 4_096,
+      recordHistory: settings.aiHistoryEnabled,
     };
     setRunningRequestId(requestId);
     setStatus('Sending the selected text to OpenRouter…');

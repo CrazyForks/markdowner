@@ -230,6 +230,23 @@ describe('SettingsPanel update section', () => {
     );
   });
 
+  it('persists AI Feature default scope and history controls', () => {
+    const onSettingsChange = vi.fn();
+    renderPanel({ onSettingsChange });
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Default AI scope' }), {
+      target: { value: 'workspace' },
+    });
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ aiDefaultScope: 'workspace' }),
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: /Keep local AI history/i }));
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ aiHistoryEnabled: false }),
+    );
+  });
+
   it('persists A3 size and landscape orientation', () => {
     const onSettingsChange = vi.fn();
     renderPanel({ onSettingsChange });

@@ -132,6 +132,8 @@ export interface Settings extends InlineStyleColorSettings {
   aiTranslationTargetLanguage: string;
   aiZdrOnly: boolean;
   aiCloudDisclosureAccepted: boolean;
+  aiDefaultScope: 'document' | 'workspace';
+  aiHistoryEnabled: boolean;
 }
 
 export interface DiagnosticsLogStatus {
@@ -268,6 +270,8 @@ export const DEFAULT_SETTINGS: Settings = {
   aiTranslationTargetLanguage: defaultAiTranslationTargetLanguage(),
   aiZdrOnly: true,
   aiCloudDisclosureAccepted: false,
+  aiDefaultScope: 'document',
+  aiHistoryEnabled: true,
 };
 
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>;
@@ -581,6 +585,12 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   if (typeof merged.aiCloudDisclosureAccepted !== 'boolean') {
     merged.aiCloudDisclosureAccepted =
       DEFAULT_SETTINGS.aiCloudDisclosureAccepted;
+  }
+  if (merged.aiDefaultScope !== 'document' && merged.aiDefaultScope !== 'workspace') {
+    merged.aiDefaultScope = DEFAULT_SETTINGS.aiDefaultScope;
+  }
+  if (typeof merged.aiHistoryEnabled !== 'boolean') {
+    merged.aiHistoryEnabled = DEFAULT_SETTINGS.aiHistoryEnabled;
   }
   merged.keybindingOverrides = normalizeKeybindingOverrides(merged.keybindingOverrides);
   merged.ignoreList = normalizeIgnoreList(merged.ignoreList);
