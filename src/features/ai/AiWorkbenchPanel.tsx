@@ -12,6 +12,7 @@ import {
   aiModelPricing,
   aiRun,
   openExternalUrlInNewWindow,
+  readTextFiles,
 } from '@/lib/desktop';
 import type { Settings } from '@/lib/settings';
 
@@ -52,6 +53,9 @@ export interface AiWorkbenchServices {
   ) => Promise<AiRunResult>;
   cancel: (requestId: string) => Promise<boolean>;
   openActivity?: () => Promise<void>;
+  readDocuments?: (
+    paths: readonly string[],
+  ) => Promise<Array<{ path: string; contents: string }>>;
 }
 
 export interface AiWorkbenchPanelProps {
@@ -63,6 +67,7 @@ export interface AiWorkbenchPanelProps {
   documentSources?: Readonly<Record<string, string>>;
   workspaceRoot?: string | null;
   workspaceDocumentCount?: number;
+  workspaceDocumentPaths?: readonly string[];
   selection: AiByteRange | null;
   settings: Settings;
   onSettingsChange: (settings: Settings) => void;
@@ -84,12 +89,14 @@ const DEFAULT_SERVICES: AiWorkbenchServices = {
   cancel: aiCancel,
   openActivity: () =>
     openExternalUrlInNewWindow('https://openrouter.ai/activity'),
+  readDocuments: readTextFiles,
 };
 
 const selectClass =
   'h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';
 const EMPTY_DOCUMENTS: readonly AiDocumentRef[] = [];
 const EMPTY_DOCUMENT_SOURCES: Readonly<Record<string, string>> = {};
+const EMPTY_DOCUMENT_PATHS: readonly string[] = [];
 
 export function AiWorkbenchPanel({
   documentId,
@@ -100,6 +107,7 @@ export function AiWorkbenchPanel({
   documentSources = EMPTY_DOCUMENT_SOURCES,
   workspaceRoot = null,
   workspaceDocumentCount = 0,
+  workspaceDocumentPaths = EMPTY_DOCUMENT_PATHS,
   selection,
   settings,
   onSettingsChange,
@@ -328,14 +336,15 @@ export function AiWorkbenchPanel({
     !pricingLoading &&
     configured &&
     disclosureAccepted &&
-    runScope.kind === 'document' &&
+    (runScope.kind === 'document' ||
+      (task === 'translation' && workspaceDocumentPaths.length > 0)) &&
     scopedSource.length > 0 &&
     selectedModel?.enabled === true &&
     gate?.kind !== 'blocked' &&
     (gate?.kind !== 'confirm' || confirmed) &&
     (!requiresInstruction || instruction.trim().length > 0) &&
     (!targetRequired || targetLanguage.trim().length > 0) &&
-    !sameLanguage;
+    !(runScope.kind === 'document' && sameLanguage);
 
   const chooseTargetLanguage = (language: string) => {
     setTargetLanguage(language);
@@ -367,6 +376,10 @@ export function AiWorkbenchPanel({
 
   const handleRun = async () => {
     if (!canRun || !selectedModel) return;
+    if (task === 'translation' && runScope.kind === 'workspace') {
+      await handleWorkspaceTranslation(selectedModel.id);
+      return;
+    }
     const requestId = createRequestId();
     const request: AiRunRequest = {
       requestId,
@@ -427,6 +440,79 @@ export function AiWorkbenchPanel({
         setError(errorMessage(reason));
         setStatus('');
       }
+    } finally {
+      setRunningRequestId(null);
+    }
+  };
+
+  const handleWorkspaceTranslation = async (selectedModelId: string) => {
+    const readDocuments = services.readDocuments ?? DEFAULT_SERVICES.readDocuments;
+    if (!readDocuments) return;
+    const batchId = createRequestId();
+    setRunningRequestId(batchId);
+    setShowActivityLink(false);
+    setError('');
+    setStatus(`Loading ${workspaceDocumentPaths.length} Markdown files…`);
+    try {
+      const loaded = await readDocuments(workspaceDocumentPaths);
+      if (loaded.length === 0) {
+        throw new Error('No readable Markdown files were found in this workspace.');
+      }
+      for (let index = 0; index < loaded.length; index += 1) {
+        const document = loaded[index];
+        const openDocument = openDocuments.find(
+          (candidate) => candidate.path === document.path,
+        );
+        const latestSource = openDocument
+          ? documentSources[openDocument.documentId] ?? document.contents
+          : document.path === documentPath
+            ? source
+            : document.contents;
+        const requestId = `${batchId}:${index + 1}`;
+        const request: AiRunRequest = {
+          requestId,
+          documentId: openDocument?.documentId ?? document.path,
+          source: latestSource,
+          selection: null,
+          task: 'translation',
+          model: selectedModelId,
+          targetLanguage,
+          instruction: instruction.trim() || null,
+          zdrOnly: settings.aiZdrOnly,
+          maxOutputTokens: 4_096,
+          recordHistory: settings.aiHistoryEnabled,
+          scope: {
+            ...runScope,
+            target: {
+              documentId: openDocument?.documentId ?? document.path,
+              path: document.path,
+              label: fileLabel(document.path),
+            },
+          },
+        };
+        setRunningRequestId(requestId);
+        setStatus(
+          `Translating ${index + 1} of ${loaded.length} · ${fileLabel(document.path)}`,
+        );
+        onStart?.(request);
+        try {
+          const result = await services.run(request, (event) => {
+            if (event.type === 'progress') {
+              setStatus(
+                `Translating ${index + 1} of ${loaded.length} · ${event.receivedCharacters} characters`,
+              );
+            }
+          });
+          onResult(result, request);
+        } catch (reason) {
+          onFailure?.(request, reason);
+          throw reason;
+        }
+      }
+      setStatus(`${loaded.length} translation proposals are ready for review.`);
+    } catch (reason) {
+      setError(errorMessage(reason));
+      setStatus('');
     } finally {
       setRunningRequestId(null);
     }
@@ -712,6 +798,12 @@ export function AiWorkbenchPanel({
           </div>
         ) : null}
 
+        {task === 'translation' && runScope.kind === 'workspace' ? (
+          <p className="text-xs text-muted-foreground">
+            {workspaceDocumentPaths.length.toLocaleString()} Markdown files will run sequentially. Each file opens its own Review result.
+          </p>
+        ) : null}
+
         {gate?.reason ? (
           <div
             role={gate.kind === 'blocked' ? 'alert' : undefined}
@@ -826,6 +918,10 @@ function createRequestId(): string {
     return crypto.randomUUID();
   }
   return `ai-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function fileLabel(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
 function errorMessage(reason: unknown): string {

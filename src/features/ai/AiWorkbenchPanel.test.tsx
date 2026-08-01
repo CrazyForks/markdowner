@@ -446,4 +446,65 @@ describe('AiWorkbenchPanel', () => {
       expect.any(Function),
     );
   });
+
+  it('translates workspace Markdown files sequentially without changing the selected model', async () => {
+    const run = vi.fn().mockImplementation(async (request) => ({
+      requestId: request.requestId,
+      documentId: request.documentId,
+      task: request.task,
+      model: request.model,
+      generationId: null,
+      result: null,
+      validationIssues: [],
+      rawDiagnostic: null,
+      usage: null,
+      retryAfterSeconds: null,
+    }));
+    const onResult = vi.fn();
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-current"
+        documentPath="/vault/current.md"
+        source="# Current draft"
+        workspaceRoot="/vault"
+        workspaceDocumentCount={2}
+        workspaceDocumentPaths={['/vault/current.md', '/vault/other.md']}
+        selection={null}
+        settings={{ ...DEFAULT_SETTINGS, aiCloudDisclosureAccepted: true }}
+        onSettingsChange={vi.fn()}
+        onResult={onResult}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({ configured: true, maskedLabel: '••••secret' }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          run,
+          cancel: vi.fn(),
+          readDocuments: vi.fn().mockResolvedValue([
+            { path: '/vault/current.md', contents: '# Stale disk copy' },
+            { path: '/vault/other.md', contents: '# Other document' },
+          ]),
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI task' }), {
+      target: { value: 'translation' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Scope' }), {
+      target: { value: 'workspace' },
+    });
+    const runButton = await screen.findByRole('button', { name: 'Run' });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    expect(run.mock.calls.map(([request]) => request.model)).toEqual([
+      'z-ai/glm-5.2',
+      'z-ai/glm-5.2',
+    ]);
+    expect(run.mock.calls[0][0]).toMatchObject({
+      source: '# Current draft',
+      scope: { kind: 'workspace' },
+    });
+    expect(onResult).toHaveBeenCalledTimes(2);
+  });
 });

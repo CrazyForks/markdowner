@@ -6720,6 +6720,7 @@ export default function App() {
               documentSources={aiDocumentSources}
               workspaceRoot={snapshot.rootDir}
               workspaceDocumentCount={snapshot.workspaceDocuments.length}
+              workspaceDocumentPaths={snapshot.workspaceDocuments}
               selection={null}
               settings={settings}
               onSettingsChange={handleSettingsChange}
