@@ -20,11 +20,14 @@ use self::{
     activity::{
         ActiveAiRun, ActiveStatus, ActivityProgress, ActivityRegistry, AiDocumentRef, AiRunScope,
     },
-    history::{HistoryPage, HistoryRepository, RunStatus, StoredRun},
+    history::{HistoryPage, HistoryRepository, RunStatus, StoredRun, StoredRunDetail},
+    interview::{
+        InterviewSession, InterviewStatus, PRD_INTERVIEW_PROMPT_VERSION,
+    },
     keychain::{AiKeyStatus, KeychainService},
     openrouter::{
         AiCompletionRequest, AiKeyMetadata, AiModel, AiModelPricing, AiTask, AiUsage,
-        OpenRouterClient, PROMPT_VERSION, redact_sensitive,
+        OpenRouterClient, PROMPT_VERSION, PrdInterviewCompletionRequest, redact_sensitive,
     },
 };
 
@@ -32,6 +35,7 @@ pub mod activity;
 #[cfg(test)]
 mod evaluation;
 pub mod history;
+pub mod interview;
 pub mod keychain;
 pub mod openrouter;
 
@@ -377,6 +381,47 @@ pub struct AiRunRequest {
     pub record_history: bool,
     #[serde(default)]
     pub scope: Option<AiRunScope>,
+    #[serde(default)]
+    pub interview_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInterviewStartRequest {
+    pub request_id: String,
+    pub document_id: String,
+    pub source: String,
+    pub model: String,
+    pub instruction: Option<String>,
+    pub zdr_only: bool,
+    pub max_output_tokens: u32,
+    pub scope: Option<AiRunScope>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInterviewContinueRequest {
+    pub request_id: String,
+    pub source: String,
+    pub answer: Option<String>,
+    pub instruction: Option<String>,
+    pub zdr_only: bool,
+    pub max_output_tokens: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInterviewUpdateAnswerRequest {
+    pub request_id: String,
+    pub position: u32,
+    pub answer: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInterviewFinishRequest {
+    pub request_id: String,
+    pub answer: Option<String>,
 }
 
 fn default_record_history() -> bool {
@@ -528,8 +573,330 @@ pub fn ai_history_page(
 pub fn ai_history_detail(
     state: State<'_, AiState>,
     request_id: String,
-) -> Result<Option<StoredRun>, AiError> {
+) -> Result<Option<StoredRunDetail>, AiError> {
     state.history.store()?.detail(&request_id)
+}
+
+#[tauri::command]
+pub async fn ai_interview_start(
+    app: AppHandle,
+    state: State<'_, AiState>,
+    request: AiInterviewStartRequest,
+) -> Result<InterviewSession, AiError> {
+    validate_interview_start(&request)?;
+    let scope = request.scope.clone().unwrap_or_else(|| AiRunScope::Document {
+        target: AiDocumentRef {
+            document_id: request.document_id.clone(),
+            path: None,
+            label: request.document_id.clone(),
+        },
+    });
+    let envelope = AiDocumentEnvelope::new(&request.document_id, &request.source, None)
+        .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+    let permit = state
+        .scheduler
+        .acquire(&request.document_id, &request.request_id)
+        .await?;
+    let mut session = InterviewSession {
+        request_id: request.request_id.clone(),
+        document_id: request.document_id.clone(),
+        model: request.model.clone(),
+        scope: scope.clone(),
+        source_hash: envelope.revision_hash.clone(),
+        status: InterviewStatus::AwaitingModel,
+        turns: Vec::new(),
+    };
+    let run = StoredRun {
+        id: request.request_id.clone(),
+        task: AiTask::Prd,
+        model: request.model.clone(),
+        status: RunStatus::Running,
+        scope_json: serde_json::to_string(&scope)
+            .map_err(|_| AiError::new("invalid_scope", "Could not save the PRD interview scope."))?,
+        source_hash: envelope.revision_hash.clone(),
+        prompt_version: PRD_INTERVIEW_PROMPT_VERSION.to_string(),
+        result_json: None,
+        error_json: None,
+        usage_json: None,
+        started_at: i64::try_from(unix_timestamp()).unwrap_or(i64::MAX),
+        finished_at: None,
+    };
+    state
+        .history
+        .store()?
+        .create_interview(&run, InterviewStatus::AwaitingModel.as_str())?;
+    emit_history_changed(&app);
+    start_interview_activity(&state, &app, &session)?;
+    let completion = generate_interview_turn(
+        &state,
+        &session,
+        &envelope,
+        request.instruction.as_deref(),
+        request.zdr_only,
+        request.max_output_tokens,
+        &permit.cancellation_token(),
+    )
+    .await;
+    let _ = state.activity.finish(&request.request_id);
+    emit_activity_changed(&app);
+    let model_turn = completion?;
+    session.apply_model_turn(model_turn)?;
+    let turn = session.to_stored_turn(0)?;
+    state.history.store()?.append_interview_turn(
+        &request.request_id,
+        &turn,
+        InterviewStatus::AwaitingAnswer.as_str(),
+    )?;
+    emit_history_changed(&app);
+    Ok(session)
+}
+
+#[tauri::command]
+pub async fn ai_interview_answer(
+    app: AppHandle,
+    state: State<'_, AiState>,
+    request: AiInterviewContinueRequest,
+) -> Result<InterviewSession, AiError> {
+    continue_interview(app, state, request, false).await
+}
+
+#[tauri::command]
+pub async fn ai_interview_skip(
+    app: AppHandle,
+    state: State<'_, AiState>,
+    request: AiInterviewContinueRequest,
+) -> Result<InterviewSession, AiError> {
+    continue_interview(app, state, request, true).await
+}
+
+#[tauri::command]
+pub fn ai_interview_update_answer(
+    app: AppHandle,
+    state: State<'_, AiState>,
+    request: AiInterviewUpdateAnswerRequest,
+) -> Result<InterviewSession, AiError> {
+    if request.answer.trim().is_empty() {
+        return Err(AiError::new("answer_required", "Enter an answer before saving."));
+    }
+    let store = state.history.store()?;
+    store.update_interview_answer(
+        &request.request_id,
+        request.position,
+        request.answer.trim(),
+    )?;
+    emit_history_changed(&app);
+    load_interview(store, &request.request_id)
+}
+
+#[tauri::command]
+pub fn ai_interview_finish(
+    app: AppHandle,
+    state: State<'_, AiState>,
+    request: AiInterviewFinishRequest,
+) -> Result<InterviewSession, AiError> {
+    let store = state.history.store()?;
+    let mut session = load_interview(store, &request.request_id)?;
+    if session.status != InterviewStatus::AwaitingAnswer {
+        return Err(AiError::new(
+            "invalid_interview_transition",
+            "Resume the PRD interview before finishing it.",
+        ));
+    }
+    let current = session.current_turn().ok_or_else(|| {
+        AiError::new("interview_turn_not_found", "The current PRD question is missing.")
+    })?;
+    let position = current.position;
+    let answer = request.answer.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    store.finish_interview(
+        &request.request_id,
+        position,
+        answer,
+        answer.is_none(),
+        InterviewStatus::ReadyToGenerate.as_str(),
+    )?;
+    session.answer(answer.unwrap_or_default(), true)?;
+    emit_history_changed(&app);
+    Ok(session)
+}
+
+#[tauri::command]
+pub fn ai_interview_resume(
+    state: State<'_, AiState>,
+    request_id: String,
+) -> Result<Option<InterviewSession>, AiError> {
+    let Some(stored) = state.history.store()?.interview(&request_id)? else {
+        return Ok(None);
+    };
+    InterviewSession::from_stored(stored).map(Some)
+}
+
+async fn continue_interview(
+    app: AppHandle,
+    state: State<'_, AiState>,
+    request: AiInterviewContinueRequest,
+    skip: bool,
+) -> Result<InterviewSession, AiError> {
+    if request.max_output_tokens == 0 || request.max_output_tokens > 100_000 {
+        return Err(AiError::new(
+            "invalid_output_limit",
+            "Maximum output tokens must be between 1 and 100,000.",
+        ));
+    }
+    let store = state.history.store()?;
+    let mut session = load_interview(store, &request.request_id)?;
+    if session.status != InterviewStatus::AwaitingAnswer {
+        return Err(AiError::new(
+            "invalid_interview_transition",
+            "Resume the PRD interview before answering it.",
+        ));
+    }
+    let envelope = AiDocumentEnvelope::new(&session.document_id, &request.source, None)
+        .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+    if envelope.revision_hash != session.source_hash {
+        return Err(AiError::new(
+            "stale_document",
+            "The document changed after this interview started. Start a new interview for the current draft.",
+        ));
+    }
+    let current_position = session
+        .current_turn()
+        .map(|turn| turn.position)
+        .ok_or_else(|| AiError::new("interview_turn_not_found", "The current PRD question is missing."))?;
+    let persisted_answer = if skip {
+        session.skip()?;
+        None
+    } else {
+        let answer = request.answer.as_deref().map(str::trim).unwrap_or_default();
+        session.answer(answer, false)?;
+        Some(answer.to_string())
+    };
+    let permit = state
+        .scheduler
+        .acquire(&session.document_id, &request.request_id)
+        .await?;
+    start_interview_activity(&state, &app, &session)?;
+    let completion = generate_interview_turn(
+        &state,
+        &session,
+        &envelope,
+        request.instruction.as_deref(),
+        request.zdr_only,
+        request.max_output_tokens,
+        &permit.cancellation_token(),
+    )
+    .await;
+    let _ = state.activity.finish(&request.request_id);
+    emit_activity_changed(&app);
+    let model_turn = completion?;
+    session.apply_model_turn(model_turn)?;
+    let next_position = session
+        .turns
+        .last()
+        .map(|turn| turn.position)
+        .ok_or_else(|| AiError::new("interview_turn_not_found", "The next PRD question is missing."))?;
+    let next_turn = session.to_stored_turn(next_position)?;
+    store.answer_and_append_interview_turn(
+        &request.request_id,
+        current_position,
+        persisted_answer.as_deref(),
+        skip,
+        &next_turn,
+        InterviewStatus::AwaitingAnswer.as_str(),
+    )?;
+    emit_history_changed(&app);
+    Ok(session)
+}
+
+fn validate_interview_start(request: &AiInterviewStartRequest) -> Result<(), AiError> {
+    if request.request_id.trim().is_empty() || request.document_id.trim().is_empty() {
+        return Err(AiError::new(
+            "invalid_request",
+            "The PRD interview and document IDs are required.",
+        ));
+    }
+    if request.source.trim().is_empty() {
+        return Err(AiError::new(
+            "empty_document",
+            "Add PRD text before starting an interview.",
+        ));
+    }
+    if request.model.trim().is_empty()
+        || request.model.len() > 200
+        || request.model.chars().any(char::is_whitespace)
+    {
+        return Err(AiError::new("invalid_model", "Select a valid OpenRouter model."));
+    }
+    if request.max_output_tokens == 0 || request.max_output_tokens > 100_000 {
+        return Err(AiError::new(
+            "invalid_output_limit",
+            "Maximum output tokens must be between 1 and 100,000.",
+        ));
+    }
+    Ok(())
+}
+
+fn load_interview(
+    store: &history::HistoryStore,
+    request_id: &str,
+) -> Result<InterviewSession, AiError> {
+    let stored = store.interview(request_id)?.ok_or_else(|| {
+        AiError::new("interview_not_found", "The PRD interview is no longer available.")
+    })?;
+    InterviewSession::from_stored(stored)
+}
+
+fn start_interview_activity(
+    state: &AiState,
+    app: &AppHandle,
+    session: &InterviewSession,
+) -> Result<(), AiError> {
+    state.activity.start(ActiveAiRun {
+        request_id: session.request_id.clone(),
+        task: AiTask::Prd,
+        model: session.model.clone(),
+        scope: session.scope.clone(),
+        status: ActiveStatus::Running,
+        progress: ActivityProgress {
+            stage: "interviewing".to_string(),
+            label: Some("Preparing the next question".to_string()),
+            ..ActivityProgress::default()
+        },
+        started_at: i64::try_from(unix_timestamp()).unwrap_or(i64::MAX),
+        cancelable: true,
+    })?;
+    emit_activity_changed(app);
+    Ok(())
+}
+
+async fn generate_interview_turn(
+    state: &AiState,
+    session: &InterviewSession,
+    envelope: &AiDocumentEnvelope,
+    instruction: Option<&str>,
+    zdr_only: bool,
+    max_output_tokens: u32,
+    cancellation: &CancellationToken,
+) -> Result<interview::ModelTurn, AiError> {
+    let document = serde_json::to_value(envelope).map_err(|_| {
+        AiError::new(
+            "invalid_document",
+            "Could not prepare the document for the PRD interview.",
+        )
+    })?;
+    let request = PrdInterviewCompletionRequest {
+        model: session.model.clone(),
+        document,
+        interview_history: session.history_data(),
+        instruction: instruction.map(str::to_string),
+        zdr_only,
+        max_output_tokens,
+    };
+    let secret = state.keychain.read_secret()?;
+    let (turn, _) = state
+        .client
+        .stream_interview_turn(&secret, &request, cancellation, |_| {})
+        .await?;
+    Ok(turn)
 }
 
 #[tauri::command]
@@ -589,18 +956,26 @@ pub fn ai_discard_result(state: State<'_, AiState>, request_id: String) {
 pub async fn ai_run(
     app: AppHandle,
     state: State<'_, AiState>,
-    request: AiRunRequest,
+    mut request: AiRunRequest,
     on_event: Channel<AiStreamEvent>,
 ) -> Result<AiRunResult, AiError> {
     validate_run_request(&request)?;
+    let envelope =
+        AiDocumentEnvelope::new(&request.document_id, &request.source, request.selection)
+            .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+    if let Some(interview_id) = request.interview_id.as_deref() {
+        let interview_context = prepare_interview_generation(&state, &request, &envelope, interview_id)?;
+        request.instruction = Some(match request.instruction.take() {
+            Some(instruction) => format!("{instruction}\n\n{interview_context}"),
+            None => interview_context,
+        });
+    }
+    let should_record = request.record_history || request.interview_id.is_some();
     let permit = state
         .scheduler
         .acquire(&request.document_id, &request.request_id)
         .await?;
     let cancellation = permit.cancellation_token();
-    let envelope =
-        AiDocumentEnvelope::new(&request.document_id, &request.source, request.selection)
-            .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
     let document = serde_json::to_value(&envelope).map_err(|_| {
         AiError::new(
             "invalid_document",
@@ -621,8 +996,10 @@ pub async fn ai_run(
         cancelable: true,
     })?;
     emit_activity_changed(&app);
-    if request.record_history {
-        record_history_start(&state, &request, &envelope);
+    if should_record {
+        if request.interview_id.is_none() {
+            record_history_start(&state, &request, &envelope);
+        }
         emit_history_changed(&app);
     }
     let completion_request = AiCompletionRequest {
@@ -642,12 +1019,13 @@ pub async fn ai_run(
     let secret = match state.keychain.read_secret() {
         Ok(secret) => secret,
         Err(error) => {
-            if request.record_history {
+            if should_record {
                 record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+                restore_interview_for_retry(&state, request.interview_id.as_deref());
             }
             let _ = state.activity.finish(&request.request_id);
             emit_activity_changed(&app);
-            if request.record_history {
+            if should_record {
                 emit_history_changed(&app);
             }
             return Err(error);
@@ -686,12 +1064,13 @@ pub async fn ai_run(
             let _ = on_event.send(AiStreamEvent::Cancelled {
                 request_id: request.request_id.clone(),
             });
-            if request.record_history {
+            if should_record {
                 record_history_error(&state, &request.request_id, RunStatus::Cancelled, &error);
+                restore_interview_for_retry(&state, request.interview_id.as_deref());
             }
             let _ = state.activity.finish(&request.request_id);
             emit_activity_changed(&app);
-            if request.record_history {
+            if should_record {
                 emit_history_changed(&app);
             }
             return Err(error);
@@ -702,12 +1081,13 @@ pub async fn ai_run(
                 code: error.code.clone(),
                 message: error.message.clone(),
             });
-            if request.record_history {
+            if should_record {
                 record_history_error(&state, &request.request_id, RunStatus::Failed, &error);
+                restore_interview_for_retry(&state, request.interview_id.as_deref());
             }
             let _ = state.activity.finish(&request.request_id);
             emit_activity_changed(&app);
-            if request.record_history {
+            if should_record {
                 emit_history_changed(&app);
             }
             return Err(error);
@@ -736,7 +1116,7 @@ pub async fn ai_run(
         .usage
         .as_ref()
         .and_then(|usage| serde_json::to_string(usage).ok());
-    if request.record_history && let Ok(store) = state.history.store() {
+    if should_record && let Ok(store) = state.history.store() {
         let _ = store.finish_run_with_usage(
             &request.request_id,
             RunStatus::Completed,
@@ -744,10 +1124,13 @@ pub async fn ai_run(
             None,
             history_usage.as_deref(),
         );
+        if let Some(interview_id) = request.interview_id.as_deref() {
+            let _ = store.set_interview_status(interview_id, InterviewStatus::Completed.as_str());
+        }
     }
     let _ = state.activity.finish(&request.request_id);
     emit_activity_changed(&app);
-    if request.record_history {
+    if should_record {
         emit_history_changed(&app);
     }
     Ok(AiRunResult {
@@ -814,6 +1197,57 @@ fn record_history_error(state: &AiState, request_id: &str, status: RunStatus, er
     let error_json = serde_json::to_string(error).ok();
     if let Ok(store) = state.history.store() {
         let _ = store.finish_run(request_id, status, None, error_json.as_deref());
+    }
+}
+
+fn prepare_interview_generation(
+    state: &AiState,
+    request: &AiRunRequest,
+    envelope: &AiDocumentEnvelope,
+    interview_id: &str,
+) -> Result<String, AiError> {
+    if request.task != AiTask::Prd || interview_id != request.request_id {
+        return Err(AiError::new(
+            "invalid_interview_generation",
+            "A finished PRD interview must generate through its original request.",
+        ));
+    }
+    let store = state.history.store()?;
+    let session = load_interview(store, interview_id)?;
+    if session.status != InterviewStatus::ReadyToGenerate {
+        return Err(AiError::new(
+            "interview_not_finished",
+            "Confirm that the PRD interview is sufficient before generating.",
+        ));
+    }
+    if session.document_id != request.document_id || session.source_hash != envelope.revision_hash {
+        return Err(AiError::new(
+            "stale_document",
+            "The document changed after this interview started. Start a new interview for the current draft.",
+        ));
+    }
+    if session.model != request.model {
+        return Err(AiError::new(
+            "interview_model_changed",
+            "Use the same model selected when the PRD interview started.",
+        ));
+    }
+    store.set_interview_status(interview_id, InterviewStatus::Generating.as_str())?;
+    let history = serde_json::to_string(&session.history_data()).map_err(|_| {
+        AiError::new(
+            "invalid_interview_history",
+            "Could not prepare the PRD interview answers for generation.",
+        )
+    })?;
+    Ok(format!(
+        "Use the following user-confirmed PRD interview as data when improving the document. Do not invent missing answers.\n<interview_history>\n{history}\n</interview_history>"
+    ))
+}
+
+fn restore_interview_for_retry(state: &AiState, interview_id: Option<&str>) {
+    let Some(interview_id) = interview_id else { return };
+    if let Ok(store) = state.history.store() {
+        let _ = store.set_interview_status(interview_id, InterviewStatus::ReadyToGenerate.as_str());
     }
 }
 

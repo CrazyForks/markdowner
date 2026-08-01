@@ -71,6 +71,14 @@ CREATE TABLE IF NOT EXISTS ai_translation_chunks (
 );
 "#;
 
+const MIGRATION_2: &str = r#"
+CREATE TABLE IF NOT EXISTS ai_interviews (
+    run_id TEXT PRIMARY KEY REFERENCES ai_runs(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
@@ -96,6 +104,40 @@ pub struct StoredRun {
     pub usage_json: Option<String>,
     pub started_at: i64,
     pub finished_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredInterviewTurn {
+    pub position: u32,
+    pub question: String,
+    pub rationale: String,
+    pub unresolved_area: String,
+    pub answer: Option<String>,
+    pub skipped: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredRunDetail {
+    #[serde(flatten)]
+    pub run: StoredRun,
+    pub interview_turns: Vec<StoredInterviewTurn>,
+}
+
+impl std::ops::Deref for StoredRunDetail {
+    type Target = StoredRun;
+
+    fn deref(&self) -> &Self::Target {
+        &self.run
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredInterview {
+    pub run: StoredRun,
+    pub status: String,
+    pub turns: Vec<StoredInterviewTurn>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -186,6 +228,113 @@ impl HistoryStore {
         Ok(())
     }
 
+    pub fn create_interview(&self, run: &StoredRun, status: &str) -> Result<(), AiError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(|_| history_unavailable())?;
+        insert_run(&transaction, run)?;
+        transaction
+            .execute(
+                "INSERT INTO ai_interviews (run_id, status, updated_at) VALUES (?1, ?2, ?3)",
+                params![run.id, status, unix_timestamp()],
+            )
+            .map_err(|_| history_unavailable())?;
+        transaction.commit().map_err(|_| history_unavailable())
+    }
+
+    pub fn append_interview_turn(
+        &self,
+        run_id: &str,
+        turn: &StoredInterviewTurn,
+        status: &str,
+    ) -> Result<(), AiError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(|_| history_unavailable())?;
+        insert_interview_turn(&transaction, run_id, turn)?;
+        update_interview_status(&transaction, run_id, status)?;
+        transaction.commit().map_err(|_| history_unavailable())
+    }
+
+    pub fn answer_and_append_interview_turn(
+        &self,
+        run_id: &str,
+        position: u32,
+        answer: Option<&str>,
+        skipped: bool,
+        next_turn: &StoredInterviewTurn,
+        status: &str,
+    ) -> Result<(), AiError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(|_| history_unavailable())?;
+        update_interview_answer(&transaction, run_id, position, answer, skipped)?;
+        insert_interview_turn(&transaction, run_id, next_turn)?;
+        update_interview_status(&transaction, run_id, status)?;
+        transaction.commit().map_err(|_| history_unavailable())
+    }
+
+    pub fn update_interview_answer(
+        &self,
+        run_id: &str,
+        position: u32,
+        answer: &str,
+    ) -> Result<(), AiError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(|_| history_unavailable())?;
+        update_interview_answer(&transaction, run_id, position, Some(answer), false)?;
+        transaction.commit().map_err(|_| history_unavailable())
+    }
+
+    pub fn finish_interview(
+        &self,
+        run_id: &str,
+        position: u32,
+        answer: Option<&str>,
+        skipped: bool,
+        status: &str,
+    ) -> Result<(), AiError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(|_| history_unavailable())?;
+        update_interview_answer(&transaction, run_id, position, answer, skipped)?;
+        update_interview_status(&transaction, run_id, status)?;
+        transaction.commit().map_err(|_| history_unavailable())
+    }
+
+    pub fn set_interview_status(&self, run_id: &str, status: &str) -> Result<(), AiError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(|_| history_unavailable())?;
+        update_interview_status(&transaction, run_id, status)?;
+        transaction.commit().map_err(|_| history_unavailable())
+    }
+
+    pub fn interview(&self, run_id: &str) -> Result<Option<StoredInterview>, AiError> {
+        let connection = self.connection()?;
+        let run = connection
+            .query_row(
+                r#"SELECT id, task, model, status, scope_json, source_hash,
+                          prompt_version, result_json, error_json, usage_json,
+                          started_at, finished_at
+                   FROM ai_runs WHERE id = ?1"#,
+                [run_id],
+                stored_run_from_row,
+            )
+            .optional()
+            .map_err(|_| history_unavailable())?;
+        let Some(run) = run else { return Ok(None) };
+        let status = connection
+            .query_row(
+                "SELECT status FROM ai_interviews WHERE run_id = ?1",
+                [run_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| history_unavailable())?;
+        let Some(status) = status else { return Ok(None) };
+        Ok(Some(StoredInterview {
+            turns: interview_turns(&connection, run_id)?,
+            run,
+            status,
+        }))
+    }
+
     pub fn finish_run(
         &self,
         id: &str,
@@ -267,9 +416,9 @@ impl HistoryStore {
         })
     }
 
-    pub fn detail(&self, id: &str) -> Result<Option<StoredRun>, AiError> {
+    pub fn detail(&self, id: &str) -> Result<Option<StoredRunDetail>, AiError> {
         let connection = self.connection()?;
-        connection
+        let run = connection
             .query_row(
                 r#"SELECT id, task, model, status, scope_json, source_hash,
                           prompt_version, result_json, error_json, usage_json,
@@ -279,7 +428,12 @@ impl HistoryStore {
                 stored_run_from_row,
             )
             .optional()
-            .map_err(|_| history_unavailable())
+            .map_err(|_| history_unavailable())?;
+        let Some(run) = run else { return Ok(None) };
+        Ok(Some(StoredRunDetail {
+            interview_turns: interview_turns(&connection, id)?,
+            run,
+        }))
     }
 
     pub fn delete(&self, id: &str) -> Result<bool, AiError> {
@@ -315,8 +469,17 @@ fn migrate_and_recover(connection: &mut Connection) -> Result<(), AiError> {
         .execute_batch(MIGRATION_1)
         .map_err(|_| history_unavailable())?;
     transaction
+        .execute_batch(MIGRATION_2)
+        .map_err(|_| history_unavailable())?;
+    transaction
         .execute(
             "INSERT OR IGNORE INTO ai_schema_migrations (version, applied_at) VALUES (1, ?1)",
+            [unix_timestamp()],
+        )
+        .map_err(|_| history_unavailable())?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO ai_schema_migrations (version, applied_at) VALUES (2, ?1)",
             [unix_timestamp()],
         )
         .map_err(|_| history_unavailable())?;
@@ -330,6 +493,129 @@ fn migrate_and_recover(connection: &mut Connection) -> Result<(), AiError> {
         .map_err(|_| history_unavailable())?;
     prune_runs(&transaction)?;
     transaction.commit().map_err(|_| history_unavailable())
+}
+
+fn insert_run(transaction: &Transaction<'_>, run: &StoredRun) -> Result<(), AiError> {
+    transaction
+        .execute(
+            r#"INSERT INTO ai_runs (
+                id, task, model, status, scope_json, source_hash,
+                prompt_version, result_json, error_json, usage_json,
+                started_at, finished_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"#,
+            params![
+                run.id,
+                task_name(run.task),
+                run.model,
+                status_name(run.status),
+                run.scope_json,
+                run.source_hash,
+                run.prompt_version,
+                run.result_json,
+                run.error_json,
+                run.usage_json,
+                run.started_at,
+                run.finished_at,
+            ],
+        )
+        .map_err(|_| history_unavailable())?;
+    Ok(())
+}
+
+fn insert_interview_turn(
+    transaction: &Transaction<'_>,
+    run_id: &str,
+    turn: &StoredInterviewTurn,
+) -> Result<(), AiError> {
+    transaction
+        .execute(
+            r#"INSERT INTO ai_interview_turns (
+                run_id, position, question, rationale, unresolved_area,
+                answer, skipped, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)"#,
+            params![
+                run_id,
+                turn.position,
+                turn.question,
+                turn.rationale,
+                turn.unresolved_area,
+                turn.answer,
+                turn.skipped,
+                unix_timestamp(),
+            ],
+        )
+        .map_err(|_| history_unavailable())?;
+    Ok(())
+}
+
+fn update_interview_answer(
+    transaction: &Transaction<'_>,
+    run_id: &str,
+    position: u32,
+    answer: Option<&str>,
+    skipped: bool,
+) -> Result<(), AiError> {
+    let changed = transaction
+        .execute(
+            r#"UPDATE ai_interview_turns
+               SET answer = ?3, skipped = ?4, updated_at = ?5
+               WHERE run_id = ?1 AND position = ?2"#,
+            params![run_id, position, answer, skipped, unix_timestamp()],
+        )
+        .map_err(|_| history_unavailable())?;
+    if changed == 0 {
+        return Err(AiError::new(
+            "interview_turn_not_found",
+            "The current PRD interview question is no longer available.",
+        ));
+    }
+    Ok(())
+}
+
+fn update_interview_status(
+    transaction: &Transaction<'_>,
+    run_id: &str,
+    status: &str,
+) -> Result<(), AiError> {
+    let changed = transaction
+        .execute(
+            "UPDATE ai_interviews SET status = ?2, updated_at = ?3 WHERE run_id = ?1",
+            params![run_id, status, unix_timestamp()],
+        )
+        .map_err(|_| history_unavailable())?;
+    if changed == 0 {
+        return Err(AiError::new(
+            "interview_not_found",
+            "The PRD interview is no longer available.",
+        ));
+    }
+    Ok(())
+}
+
+fn interview_turns(
+    connection: &Connection,
+    run_id: &str,
+) -> Result<Vec<StoredInterviewTurn>, AiError> {
+    let mut statement = connection
+        .prepare(
+            r#"SELECT position, question, rationale, unresolved_area, answer, skipped
+               FROM ai_interview_turns WHERE run_id = ?1 ORDER BY position ASC"#,
+        )
+        .map_err(|_| history_unavailable())?;
+    let rows = statement
+        .query_map([run_id], |row| {
+            Ok(StoredInterviewTurn {
+                position: row.get(0)?,
+                question: row.get(1)?,
+                rationale: row.get(2)?,
+                unresolved_area: row.get(3)?,
+                answer: row.get(4)?,
+                skipped: row.get(5)?,
+            })
+        })
+        .map_err(|_| history_unavailable())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|_| history_unavailable())
 }
 
 fn prune_runs(transaction: &Transaction<'_>) -> Result<(), AiError> {
