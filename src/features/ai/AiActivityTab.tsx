@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { LoaderCircle, Square } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -7,13 +8,17 @@ export function AiActivityTab({
   runs,
   loading = false,
   error = null,
+  nowSeconds,
   onCancel,
 }: {
   runs: readonly AiActiveRun[];
   loading?: boolean;
   error?: string | null;
+  nowSeconds?: number;
   onCancel: (requestId: string) => void;
 }) {
+  const now = useLiveNow(nowSeconds);
+
   if (loading && runs.length === 0) {
     return (
       <p className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
@@ -53,11 +58,18 @@ export function AiActivityTab({
           <p className="mt-2 truncate text-xs text-muted-foreground">
             {scopeLabel(run)}
           </p>
+          <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">
+            <time dateTime={new Date(run.startedAt * 1_000).toISOString()}>
+              Started {formatStartTime(run.startedAt)}
+            </time>
+            {' · '}
+            {formatElapsed(now - run.startedAt)} elapsed
+          </p>
           <div className="mt-3 flex items-end justify-between gap-3">
-            <div>
-              {run.progress.chunkCompleted !== null && run.progress.chunkTotal !== null ? (
-                <p className="text-lg font-semibold tabular-nums">
-                  {run.progress.chunkCompleted} / {run.progress.chunkTotal}
+            <div className="min-w-0 flex-1">
+              {progressLabel(run) ? (
+                <p className="truncate text-xs font-medium tabular-nums">
+                  {progressLabel(run)}
                 </p>
               ) : run.progress.receivedCharacters > 0 ? (
                 <p className="text-sm font-medium tabular-nums">
@@ -66,12 +78,7 @@ export function AiActivityTab({
               ) : (
                 <p className="text-sm font-medium capitalize">{run.progress.stage || 'Preparing'}</p>
               )}
-              {run.progress.fileCompleted !== null && run.progress.fileTotal !== null ? (
-                <p className="text-[11px] text-muted-foreground">
-                  {run.progress.fileCompleted} of {run.progress.fileTotal} files
-                  {run.progress.label ? ` · ${run.progress.label}` : ''}
-                </p>
-              ) : null}
+              <ActivityProgressBar run={run} />
             </div>
             <Button
               type="button"
@@ -90,6 +97,69 @@ export function AiActivityTab({
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
+}
+
+function useLiveNow(nowSeconds: number | undefined): number {
+  const [clock, setClock] = useState(() => Math.floor(Date.now() / 1_000));
+  useEffect(() => {
+    if (nowSeconds !== undefined) return undefined;
+    const timer = window.setInterval(() => {
+      setClock(Math.floor(Date.now() / 1_000));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [nowSeconds]);
+  return nowSeconds ?? clock;
+}
+
+function ActivityProgressBar({ run }: { run: AiActiveRun }) {
+  const completed = run.progress.chunkCompleted ?? run.progress.fileCompleted;
+  const total = run.progress.chunkTotal ?? run.progress.fileTotal;
+  if (completed === null || total === null || total <= 0) return null;
+  const bounded = Math.max(0, Math.min(completed, total));
+  return (
+    <div
+      role="progressbar"
+      aria-label={`${taskLabel(run.task)} progress`}
+      aria-valuemin={0}
+      aria-valuemax={total}
+      aria-valuenow={bounded}
+      className="mt-2 h-1 overflow-hidden rounded-full bg-muted"
+    >
+      <div
+        className="h-full rounded-full bg-primary transition-[width] duration-300"
+        style={{ width: `${(bounded / total) * 100}%` }}
+      />
+    </div>
+  );
+}
+
+function progressLabel(run: AiActiveRun): string {
+  const parts: string[] = [];
+  if (run.progress.fileCompleted !== null && run.progress.fileTotal !== null) {
+    parts.push(`Files ${run.progress.fileCompleted}/${run.progress.fileTotal}`);
+  }
+  if (run.progress.chunkCompleted !== null && run.progress.chunkTotal !== null) {
+    parts.push(`Chunks ${run.progress.chunkCompleted}/${run.progress.chunkTotal}`);
+  }
+  if (run.progress.label) parts.push(run.progress.label);
+  return parts.join(' · ');
+}
+
+function formatStartTime(startedAt: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(startedAt * 1_000));
+}
+
+function formatElapsed(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safe / 3_600);
+  const minutes = Math.floor((safe % 3_600) / 60);
+  const remainder = safe % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${remainder}s`;
+  return `${remainder}s`;
 }
 
 export function taskLabel(task: AiTask): string {

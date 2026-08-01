@@ -79,6 +79,7 @@ export interface AiWorkbenchPanelProps {
   interviewServices?: AiPrdInterviewServices;
   guidedPrd?: boolean;
   showHeader?: boolean;
+  resumeInterviewRequest?: { requestId: string; documentId: string } | null;
 }
 
 const DEFAULT_SERVICES: AiWorkbenchServices = {
@@ -119,6 +120,7 @@ export function AiWorkbenchPanel({
   interviewServices,
   guidedPrd = false,
   showHeader = true,
+  resumeInterviewRequest = null,
 }: AiWorkbenchPanelProps) {
   const [task, setTask] = useState<AiTask>('prd');
   const currentDocument = useMemo<AiDocumentRef>(
@@ -157,6 +159,16 @@ export function AiWorkbenchPanel({
   const [showActivityLink, setShowActivityLink] = useState(false);
   const [translationResume, setTranslationResume] =
     useState<TranslationResumeRecord | null>(() => loadTranslationResume());
+
+  useEffect(() => {
+    if (!resumeInterviewRequest) return;
+    const target = [currentDocument, ...openDocuments].find(
+      (document) => document.documentId === resumeInterviewRequest.documentId,
+    );
+    if (!target) return;
+    setTask('prd');
+    setRunScope({ kind: 'document', target });
+  }, [currentDocument, openDocuments, resumeInterviewRequest]);
 
   const persistTranslationResume = (record: TranslationResumeRecord | null) => {
     setTranslationResume(record);
@@ -710,7 +722,7 @@ export function AiWorkbenchPanel({
           <div className="rounded-md border border-dashed border-border px-3 py-3">
             <p className="text-sm font-medium">Connect OpenRouter to use AI tools.</p>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Add a key in Settings → AI &amp; OpenRouter. Markdowner never sends a
+              Add a key in Settings → AI Feature Settings. Markdowner never sends a
               document automatically.
             </p>
             {onOpenSettings ? (
@@ -1041,6 +1053,11 @@ export function AiWorkbenchPanel({
             zdrOnly={settings.aiZdrOnly}
             recordHistory={settings.aiHistoryEnabled}
             disabled={!canRun}
+            resumeRequestId={
+              resumeInterviewRequest?.documentId === targetDocument.documentId
+                ? resumeInterviewRequest.requestId
+                : null
+            }
             services={interviewServices}
             onStart={onStart}
             onFailure={onFailure}

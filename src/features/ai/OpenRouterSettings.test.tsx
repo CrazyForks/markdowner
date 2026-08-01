@@ -55,6 +55,18 @@ describe('OpenRouterSettings', () => {
     expect(screen.getByRole('heading', { name: 'OpenRouter Connection' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Task Defaults' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'History & Privacy' })).toBeInTheDocument();
+    expect(screen.getByTestId('settings-ai-connection')).toHaveAttribute(
+      'aria-labelledby',
+      'openrouter-connection-heading',
+    );
+    expect(screen.getByTestId('settings-ai-defaults')).toHaveAttribute(
+      'aria-labelledby',
+      'ai-task-defaults-heading',
+    );
+    expect(screen.getByTestId('settings-ai-privacy')).toHaveAttribute(
+      'aria-labelledby',
+      'ai-history-privacy-heading',
+    );
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Default AI scope' }), {
       target: { value: 'workspace' },

@@ -24,6 +24,10 @@ export function AiFeaturePanel({
   ...newRequestProps
 }: AiFeaturePanelProps) {
   const [tab, setTab] = useState<AiFeatureTab>('new');
+  const [resumeInterview, setResumeInterview] = useState<{
+    requestId: string;
+    documentId: string;
+  } | null>(null);
   const runtime = useAiRuntime({
     historyEnabled: newRequestProps.settings.aiHistoryEnabled,
     services: runtimeServices,
@@ -80,7 +84,12 @@ export function AiFeaturePanel({
               <span className="text-muted-foreground">View activity</span>
             </button>
           ) : null}
-          <AiWorkbenchPanel {...newRequestProps} showHeader={false} guidedPrd />
+          <AiWorkbenchPanel
+            {...newRequestProps}
+            showHeader={false}
+            guidedPrd
+            resumeInterviewRequest={resumeInterview}
+          />
         </div>
       ) : tab === 'activity' ? (
         <div role="tabpanel" aria-label="Activity" className="min-h-0 flex-1 overflow-y-auto">
@@ -99,6 +108,14 @@ export function AiFeaturePanel({
             error={runtime.historyError}
             onPageChange={runtime.setHistoryPage}
             onReload={runtime.reloadHistory}
+            resumableDocumentIds={[
+              newRequestProps.documentId,
+              ...(newRequestProps.openDocuments ?? []).map((document) => document.documentId),
+            ]}
+            onResumeInterview={(requestId, documentId) => {
+              setResumeInterview({ requestId, documentId });
+              setTab('new');
+            }}
             services={historyServices}
           />
         </div>

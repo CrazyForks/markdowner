@@ -43,4 +43,41 @@ describe('useAiRuntime', () => {
       expect(cleanupHistory).toHaveBeenCalledTimes(1);
     });
   });
+
+  it('clamps an empty page after history deletion to the last available page', async () => {
+    const services: AiRuntimeServices = {
+      listActive: vi.fn().mockResolvedValue([]),
+      historyPage: vi.fn(async (page) => ({
+        items: page === 1 ? [{
+          id: 'run-21',
+          task: 'translation' as const,
+          model: 'z-ai/glm-5.2',
+          status: 'completed' as const,
+          scopeJson: '{}',
+          sourceHash: 'hash',
+          promptVersion: 'v1',
+          resultJson: null,
+          errorJson: null,
+          usageJson: null,
+          startedAt: 1,
+          finishedAt: 2,
+        }] : [],
+        page,
+        pageSize: 20,
+        total: 21,
+      })),
+      listen: vi.fn().mockResolvedValue(vi.fn()),
+    };
+
+    const { result } = renderHook(() =>
+      useAiRuntime({ historyEnabled: true, services }),
+    );
+    await waitFor(() => expect(services.historyPage).toHaveBeenCalledWith(0, 20));
+
+    act(() => result.current.setHistoryPage(2));
+
+    await waitFor(() => expect(result.current.historyPageIndex).toBe(1));
+    await waitFor(() => expect(services.historyPage).toHaveBeenLastCalledWith(1, 20));
+    expect(result.current.history.items[0]?.id).toBe('run-21');
+  });
 });

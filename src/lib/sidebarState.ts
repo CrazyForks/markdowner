@@ -167,7 +167,7 @@ function sidebarPanelAnnouncement(
     case 'outline':
       return 'Outline sidebar shown';
     case 'ai':
-      return 'AI workbench shown';
+      return 'AI Feature shown';
   }
 }
 

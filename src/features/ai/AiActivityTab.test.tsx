@@ -33,12 +33,16 @@ describe('AiActivityTab', () => {
       cancelable: true,
     };
 
-    render(<AiActivityTab runs={[run]} onCancel={onCancel} />);
+    render(<AiActivityTab runs={[run]} nowSeconds={134} onCancel={onCancel} />);
 
     expect(screen.getByRole('heading', { name: 'Translate document' })).toBeInTheDocument();
     expect(screen.getByText('z-ai/glm-5.2')).toBeInTheDocument();
-    expect(screen.getByText('3 / 8')).toBeInTheDocument();
-    expect(screen.getByText(/2 of 5 files/i)).toBeInTheDocument();
+    expect(screen.getByText('Files 2/5 · Chunks 3/8 · Architecture')).toBeInTheDocument();
+    expect(screen.getByText(/2m 4s elapsed/i)).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Translate document progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '3',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Translate document' }));
     expect(onCancel).toHaveBeenCalledWith('run-1');
   });

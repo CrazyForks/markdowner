@@ -75,4 +75,40 @@ describe('AiHistoryTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear history' }));
     await waitFor(() => expect(clear).toHaveBeenCalledTimes(1));
   });
+
+  it('offers an interrupted PRD interview as a resumable history action', async () => {
+    const interrupted: AiHistoryDetail = {
+      ...run,
+      status: 'interrupted',
+      finishedAt: 140,
+      scopeJson: JSON.stringify({
+        kind: 'document',
+        target: { documentId: 'doc-1', path: '/PRD.md', label: 'PRD.md' },
+      }),
+    };
+    const onResumeInterview = vi.fn();
+
+    render(
+      <AiHistoryTab
+        history={{ items: [interrupted], page: 0, pageSize: 20, total: 1 }}
+        loading={false}
+        error={null}
+        onPageChange={vi.fn()}
+        onReload={vi.fn()}
+        onResumeInterview={onResumeInterview}
+        resumableDocumentIds={['doc-1']}
+        services={{
+          detail: vi.fn().mockResolvedValue(interrupted),
+          deleteRun: vi.fn(),
+          clear: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Open run run-1/i }));
+    expect(await screen.findByRole('button', { name: 'Resume PRD interview' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume PRD interview' }));
+
+    expect(onResumeInterview).toHaveBeenCalledWith('run-1', 'doc-1');
+  });
 });

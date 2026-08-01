@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Plus,
   RefreshCw,
+  Sparkles,
   Terminal,
   Trash2,
   X,
@@ -425,6 +426,13 @@ export function SettingsPanel({
     handleSettingChange('ignoreList', [...DEFAULT_IGNORE_LIST]);
   };
 
+  const handleOpenAiFeatureSettings = () => {
+    document.getElementById('settings-ai-feature')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  };
+
   const fontSizeValue = settings.editorFontSize || DEFAULT_SETTINGS.editorFontSize;
   const lineHeightValue = settings.editorLineHeight || DEFAULT_SETTINGS.editorLineHeight;
   const outlineFontSizeValue = settings.outlineFontSize || DEFAULT_SETTINGS.outlineFontSize;
@@ -439,13 +447,26 @@ export function SettingsPanel({
       data-testid="settings-panel"
       className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
     >
-      <header className="shrink-0 border-b border-border px-6 py-4">
-        <h2 id="settings-panel-heading" className="text-base font-semibold">
-          Settings
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Configure your Markdowner workspace preferences.
-        </p>
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-6 py-4">
+        <div className="min-w-0">
+          <h2 id="settings-panel-heading" className="text-base font-semibold">
+            Settings
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Configure your Markdowner workspace preferences.
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          aria-label="Open AI Feature settings"
+          onClick={handleOpenAiFeatureSettings}
+        >
+          <Sparkles />
+          AI Feature
+        </Button>
       </header>
       <div
         data-testid="settings-panel-body"

@@ -58,7 +58,10 @@ function services(): AiPrdInterviewServices {
   };
 }
 
-function renderInterview(interviewServices = services()) {
+function renderInterview(
+  interviewServices = services(),
+  resumeRequestId: string | null = null,
+) {
   const onResult = vi.fn();
   render(
     <AiPrdInterview
@@ -70,6 +73,7 @@ function renderInterview(interviewServices = services()) {
       zdrOnly
       recordHistory
       disabled={false}
+      resumeRequestId={resumeRequestId}
       services={interviewServices}
       onResult={onResult}
     />,
@@ -130,5 +134,18 @@ describe('AiPrdInterview', () => {
 
     expect(await screen.findByText('Who owns launch approval?')).toBeVisible();
     expect(interviewServices.resumeInterview).toHaveBeenCalledWith('interview-1');
+  });
+
+  it('resumes the interview selected from History without a prior local marker', async () => {
+    const interviewServices = services();
+    vi.mocked(interviewServices.resumeInterview).mockResolvedValue(
+      session('Which approval is still unresolved?'),
+    );
+
+    renderInterview(interviewServices, 'interview-1');
+
+    expect(await screen.findByText('Which approval is still unresolved?')).toBeVisible();
+    expect(interviewServices.resumeInterview).toHaveBeenCalledWith('interview-1');
+    expect(localStorage.getItem('markdowner.ai.prd-interview.doc-1')).toBe('interview-1');
   });
 });

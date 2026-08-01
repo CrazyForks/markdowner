@@ -230,6 +230,19 @@ describe('SettingsPanel update section', () => {
     );
   });
 
+  it('provides a dedicated navigation action for AI Feature settings', () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open AI Feature settings' }));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  });
+
   it('persists AI Feature default scope and history controls', () => {
     const onSettingsChange = vi.fn();
     renderPanel({ onSettingsChange });

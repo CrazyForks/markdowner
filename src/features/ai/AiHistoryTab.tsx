@@ -32,6 +32,8 @@ export function AiHistoryTab({
   error,
   onPageChange,
   onReload,
+  onResumeInterview,
+  resumableDocumentIds = [],
   services = DEFAULT_SERVICES,
 }: {
   history: AiHistoryPage;
@@ -39,6 +41,8 @@ export function AiHistoryTab({
   error: string | null;
   onPageChange: (page: number) => void;
   onReload: () => void | Promise<void>;
+  onResumeInterview?: (requestId: string, documentId: string) => void;
+  resumableDocumentIds?: readonly string[];
   services?: AiHistoryServices;
 }) {
   const [detail, setDetail] = useState<AiHistoryDetail | null>(null);
@@ -101,26 +105,38 @@ export function AiHistoryTab({
         </Button>
       </div>
 
-      {loading && history.items.length === 0 ? (
-        <p className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
-          <LoaderCircle className="size-3.5 animate-spin" /> Loading history…
-        </p>
-      ) : history.items.length === 0 ? (
-        <p className="p-3 text-sm text-muted-foreground">No saved AI runs yet.</p>
-      ) : (
-        <ul className="flex flex-col divide-y divide-border">
-          {history.items.map((run) => (
-            <HistoryRow
-              key={run.id}
-              run={run}
-              onOpen={() => void openDetail(run.id)}
-              onDelete={() => void deleteRun(run.id)}
-            />
-          ))}
-        </ul>
-      )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {loading && history.items.length === 0 ? (
+          <p className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
+            <LoaderCircle className="size-3.5 animate-spin" /> Loading history…
+          </p>
+        ) : history.items.length === 0 ? (
+          <p className="p-3 text-sm text-muted-foreground">No saved AI runs yet.</p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-border">
+            {history.items.map((run) => (
+              <HistoryRow
+                key={run.id}
+                run={run}
+                onOpen={() => void openDetail(run.id)}
+                onDelete={() => void deleteRun(run.id)}
+              />
+            ))}
+          </ul>
+        )}
 
-      <div className="mt-auto flex items-center justify-between border-t border-border px-3 py-2">
+        {detailLoading ? (
+          <p className="p-3 text-xs text-muted-foreground">Loading run detail…</p>
+        ) : detail ? (
+          <HistoryDetail
+            detail={detail}
+            resumableDocumentIds={resumableDocumentIds}
+            onResumeInterview={onResumeInterview}
+          />
+        ) : null}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-border px-3 py-2">
         <Button
           type="button"
           size="sm"
@@ -146,11 +162,6 @@ export function AiHistoryTab({
         </Button>
       </div>
 
-      {detailLoading ? (
-        <p className="p-3 text-xs text-muted-foreground">Loading run detail…</p>
-      ) : detail ? (
-        <HistoryDetail detail={detail} />
-      ) : null}
       {error || actionError ? (
         <p role="alert" className="px-3 pb-3 text-xs text-destructive">
           {actionError || error}
@@ -196,13 +207,27 @@ function HistoryRow({
   );
 }
 
-function HistoryDetail({ detail }: { detail: AiHistoryDetail }) {
+function HistoryDetail({
+  detail,
+  resumableDocumentIds,
+  onResumeInterview,
+}: {
+  detail: AiHistoryDetail;
+  resumableDocumentIds: readonly string[];
+  onResumeInterview?: (requestId: string, documentId: string) => void;
+}) {
   const scope = parseObject(detail.scopeJson);
   const result = parseObject(detail.resultJson);
   const error = parseObject(detail.errorJson);
   const usage = parseObject(detail.usageJson);
   const duration =
     detail.finishedAt === null ? null : Math.max(0, detail.finishedAt - detail.startedAt);
+  const documentId = scopeDocumentId(scope);
+  const resumable =
+    detail.task === 'prd' &&
+    (detail.status === 'running' || detail.status === 'interrupted') &&
+    documentId !== null;
+  const documentIsOpen = documentId !== null && resumableDocumentIds.includes(documentId);
   return (
     <section aria-label="AI history detail" className="border-t border-border p-3 text-xs">
       <h3 className="text-sm font-semibold">{taskLabel(detail.task)}</h3>
@@ -212,6 +237,21 @@ function HistoryDetail({ detail }: { detail: AiHistoryDetail }) {
         <dt className="text-muted-foreground">Scope</dt><dd>{scopeLabel(scope)}</dd>
         <dt className="text-muted-foreground">Duration</dt><dd>{duration === null ? 'In progress' : `${duration} seconds`}</dd>
       </dl>
+      {resumable && documentIsOpen && onResumeInterview ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="mt-3"
+          onClick={() => onResumeInterview(detail.id, documentId)}
+        >
+          Resume PRD interview
+        </Button>
+      ) : resumable ? (
+        <p className="mt-3 rounded-md border border-border bg-muted/30 p-2 text-muted-foreground">
+          Open the interview document to resume this session.
+        </p>
+      ) : null}
       {detail.interviewTurns?.length ? (
         <div className="mt-3">
           <h4 className="font-medium">Interview</h4>
@@ -236,6 +276,12 @@ function HistoryDetail({ detail }: { detail: AiHistoryDetail }) {
       ) : null}
     </section>
   );
+}
+
+function scopeDocumentId(scope: Record<string, unknown> | null): string | null {
+  const target = scope?.target;
+  if (!target || typeof target !== 'object' || !('documentId' in target)) return null;
+  return typeof target.documentId === 'string' ? target.documentId : null;
 }
 
 function DetailJson({ heading, value, preferred }: { heading: string; value: Record<string, unknown>; preferred: string }) {

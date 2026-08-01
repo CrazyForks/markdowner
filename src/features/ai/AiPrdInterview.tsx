@@ -60,6 +60,7 @@ export function AiPrdInterview({
   zdrOnly,
   recordHistory,
   disabled,
+  resumeRequestId = null,
   services = DEFAULT_SERVICES,
   onStart,
   onFailure,
@@ -73,6 +74,7 @@ export function AiPrdInterview({
   zdrOnly: boolean;
   recordHistory: boolean;
   disabled: boolean;
+  resumeRequestId?: string | null;
   services?: AiPrdInterviewServices;
   onStart?: (request: AiRunRequest) => void;
   onFailure?: (request: AiRunRequest, reason: unknown) => void;
@@ -91,7 +93,7 @@ export function AiPrdInterview({
 
   useEffect(() => {
     let cancelled = false;
-    const requestId = localStorage.getItem(storageKey);
+    const requestId = resumeRequestId ?? localStorage.getItem(storageKey);
     if (!requestId) return;
     setBusy(true);
     services
@@ -99,6 +101,7 @@ export function AiPrdInterview({
       .then((resumed) => {
         if (cancelled) return;
         if (resumed && resumed.documentId === documentId && resumed.status !== 'completed') {
+          localStorage.setItem(storageKey, requestId);
           setSession(resumed);
         } else {
           localStorage.removeItem(storageKey);
@@ -113,7 +116,7 @@ export function AiPrdInterview({
     return () => {
       cancelled = true;
     };
-  }, [documentId, services, storageKey]);
+  }, [documentId, resumeRequestId, services, storageKey]);
 
   const current = session?.turns[session.turns.length - 1] ?? null;
   const priorTurns = session?.turns.slice(0, -1) ?? [];
@@ -199,13 +202,13 @@ export function AiPrdInterview({
       source,
       selection: null,
       task: 'prd',
-      model,
+      model: session.model,
       targetLanguage: null,
       instruction,
       zdrOnly,
       maxOutputTokens: 4_096,
       recordHistory,
-      scope,
+      scope: session.scope,
       interviewId: session.requestId,
     };
     try {

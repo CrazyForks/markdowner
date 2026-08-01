@@ -138,7 +138,7 @@ describe('sidebar state persistence', () => {
     });
   });
 
-  it('opens and announces the AI workbench panel', () => {
+  it('opens and announces the AI Feature panel', () => {
     expect(
       resolveSidebarPanelState({
         currentOpen: false,
@@ -149,7 +149,7 @@ describe('sidebar state persistence', () => {
     ).toEqual({
       panel: 'ai',
       isOpen: true,
-      announcement: 'AI workbench shown',
+      announcement: 'AI Feature shown',
     });
   });
 

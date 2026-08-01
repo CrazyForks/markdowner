@@ -145,9 +145,10 @@ export function OpenRouterSettings({
 
   return (
     <section
+      id="settings-ai-feature"
       aria-labelledby="openrouter-settings-heading"
       data-testid="settings-openrouter"
-      className="flex min-w-0 flex-col gap-4"
+      className="flex min-w-0 scroll-mt-4 flex-col gap-4"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
@@ -170,196 +171,218 @@ export function OpenRouterSettings({
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2">
-        <KeyRound className="size-4 text-muted-foreground" />
-        <h4 className="text-sm font-medium">OpenRouter Connection</h4>
-      </div>
-      <p className="-mt-3 text-xs leading-relaxed text-muted-foreground">
-        The API key is stored in macOS Keychain and is never read back into the editor.
-      </p>
-
-      {loading ? (
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <LoaderCircle className="size-3.5 animate-spin" />
-          Checking Keychain…
-        </p>
-      ) : status.configured ? (
-        <div className="rounded-md border border-border bg-muted/30 p-3">
-          <p className="text-sm font-medium">
-            {metadata?.label
-              ? `Connected as ${metadata.label}`
-              : `Connected · ${connectedLabel}`}
-          </p>
-          {metadata ? (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {formatCreditMetadata(metadata)}
-            </p>
-          ) : (
-            <p className="mt-1 font-mono text-xs text-muted-foreground">
-              {status.maskedLabel}
-            </p>
-          )}
+      <section
+        aria-labelledby="openrouter-connection-heading"
+        data-testid="settings-ai-connection"
+        className="flex flex-col gap-3 rounded-xl border border-border bg-muted/15 p-4"
+      >
+        <div className="flex items-center gap-2">
+          <KeyRound className="size-4 text-muted-foreground" />
+          <h4 id="openrouter-connection-heading" className="text-sm font-medium">
+            OpenRouter Connection
+          </h4>
         </div>
-      ) : (
-        <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
-          Connect OpenRouter to use AI tools.
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          The API key is stored in macOS Keychain and is never read back into the editor.
         </p>
-      )}
 
-      <div className="grid gap-2">
-        <Label htmlFor="openrouter-api-key">
-          {status.configured ? 'Replace OpenRouter API key' : 'OpenRouter API key'}
-        </Label>
-        <Input
-          id="openrouter-api-key"
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="sk-or-…"
-          disabled={busy}
-        />
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void handleSaveAndVerify()}
-            disabled={busy || !draft.trim()}
-          >
-            {busy ? <LoaderCircle className="animate-spin" /> : <ShieldCheck />}
-            Save and verify
-          </Button>
-          {status.configured ? (
+        {loading ? (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <LoaderCircle className="size-3.5 animate-spin" />
+            Checking Keychain…
+          </p>
+        ) : status.configured ? (
+          <div className="rounded-md border border-border bg-background/70 p-3">
+            <p className="text-sm font-medium">
+              {metadata?.label
+                ? `Connected as ${metadata.label}`
+                : `Connected · ${connectedLabel}`}
+            </p>
+            {metadata ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formatCreditMetadata(metadata)}
+              </p>
+            ) : (
+              <p className="mt-1 font-mono text-xs text-muted-foreground">
+                {status.maskedLabel}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+            Connect OpenRouter to use AI tools.
+          </p>
+        )}
+
+        <div className="grid gap-2">
+          <Label htmlFor="openrouter-api-key">
+            {status.configured ? 'Replace OpenRouter API key' : 'OpenRouter API key'}
+          </Label>
+          <Input
+            id="openrouter-api-key"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="sk-or-…"
+            disabled={busy}
+          />
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              onClick={() => void handleDelete()}
-              disabled={busy}
+              onClick={() => void handleSaveAndVerify()}
+              disabled={busy || !draft.trim()}
             >
-              <Trash2 />
-              Delete key
+              {busy ? <LoaderCircle className="animate-spin" /> : <ShieldCheck />}
+              Save and verify
             </Button>
-          ) : null}
+            {status.configured ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void handleDelete()}
+                disabled={busy}
+              >
+                <Trash2 />
+                Delete key
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div className="border-t border-border pt-4">
-        <h4 className="text-sm font-medium">Task Defaults</h4>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          GLM 5.2 is the default. Kimi K3 is available explicitly; Markdowner never
-          falls back to another model automatically.
-        </p>
-      </div>
+      <section
+        aria-labelledby="ai-task-defaults-heading"
+        data-testid="settings-ai-defaults"
+        className="flex flex-col gap-3 rounded-xl border border-border bg-muted/15 p-4"
+      >
+        <div>
+          <h4 id="ai-task-defaults-heading" className="text-sm font-medium">
+            Task Defaults
+          </h4>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            GLM 5.2 is the default. Kimi K3 is available explicitly; Markdowner never
+            falls back to another model automatically.
+          </p>
+        </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <ModelDefaultSelect
-          id="ai-prd-default-model"
-          label="PRD default model"
-          value={prdModel}
-          onChange={onPrdModelChange}
-        />
-        <ModelDefaultSelect
-          id="ai-translation-default-model"
-          label="Translation default model"
-          value={translationModel}
-          onChange={onTranslationModelChange}
-        />
-        <ModelDefaultSelect
-          id="ai-custom-default-model"
-          label="Custom prompt default model"
-          value={customPromptModel}
-          onChange={onCustomPromptModelChange}
-        />
-        <div className="grid gap-1.5">
-          <Label htmlFor="ai-default-target-language">Translation target</Label>
-          <Input
-            id="ai-default-target-language"
-            value={translationTargetLanguage}
-            onChange={(event) => onTranslationTargetLanguageChange(event.target.value)}
-            placeholder="BCP 47 code, e.g. ko"
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ModelDefaultSelect
+            id="ai-prd-default-model"
+            label="PRD default model"
+            value={prdModel}
+            onChange={onPrdModelChange}
+          />
+          <ModelDefaultSelect
+            id="ai-translation-default-model"
+            label="Translation default model"
+            value={translationModel}
+            onChange={onTranslationModelChange}
+          />
+          <ModelDefaultSelect
+            id="ai-custom-default-model"
+            label="Custom prompt default model"
+            value={customPromptModel}
+            onChange={onCustomPromptModelChange}
+          />
+          <div className="grid gap-1.5">
+            <Label htmlFor="ai-default-target-language">Translation target</Label>
+            <Input
+              id="ai-default-target-language"
+              value={translationTargetLanguage}
+              onChange={(event) => onTranslationTargetLanguageChange(event.target.value)}
+              placeholder="BCP 47 code, e.g. ko"
+            />
+          </div>
+          <div className="grid gap-1.5 sm:col-span-2">
+            <Label htmlFor="ai-default-scope">Default AI scope</Label>
+            <select
+              id="ai-default-scope"
+              aria-label="Default AI scope"
+              className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-[18rem]"
+              value={defaultScope}
+              onChange={(event) =>
+                onDefaultScopeChange(event.target.value as 'document' | 'workspace')
+              }
+            >
+              <option value="document">Current document</option>
+              <option value="workspace">Current workspace</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section
+        aria-labelledby="ai-history-privacy-heading"
+        data-testid="settings-ai-privacy"
+        className="flex flex-col gap-4 rounded-xl border border-border bg-muted/15 p-4"
+      >
+        <h4 id="ai-history-privacy-heading" className="text-sm font-medium">
+          History &amp; Privacy
+        </h4>
+
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+          <Label
+            htmlFor="ai-history-enabled"
+            className="flex flex-col items-start gap-1 text-left"
+          >
+            <span>Keep local AI history</span>
+            <span className="text-xs font-normal leading-relaxed text-muted-foreground">
+              Store up to 500 local run records. Source document text is not copied into
+              history.
+            </span>
+          </Label>
+          <Switch
+            id="ai-history-enabled"
+            checked={historyEnabled}
+            onCheckedChange={onHistoryEnabledChange}
           />
         </div>
-        <div className="grid gap-1.5 sm:col-span-2">
-          <Label htmlFor="ai-default-scope">Default AI scope</Label>
-          <select
-            id="ai-default-scope"
-            aria-label="Default AI scope"
-            className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-[18rem]"
-            value={defaultScope}
-            onChange={(event) =>
-              onDefaultScopeChange(event.target.value as 'document' | 'workspace')
-            }
+
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+          <Label
+            htmlFor="ai-cloud-disclosure"
+            className="flex flex-col items-start gap-1 text-left"
           >
-            <option value="document">Current document</option>
-            <option value="workspace">Current workspace</option>
-          </select>
+            <span>Allow cloud AI processing</span>
+            <span className="text-xs font-normal leading-relaxed text-muted-foreground">
+              Document content is sent to OpenRouter and the selected model provider only
+              when you press Run.
+            </span>
+          </Label>
+          <Switch
+            id="ai-cloud-disclosure"
+            checked={disclosureAccepted}
+            onCheckedChange={onDisclosureAcceptedChange}
+          />
         </div>
-      </div>
 
-      <div className="border-t border-border pt-4">
-        <h4 className="text-sm font-medium">History &amp; Privacy</h4>
-      </div>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+          <Label
+            htmlFor="ai-zdr-only"
+            className="flex flex-col items-start gap-1 text-left"
+          >
+            <span>Zero Data Retention endpoints only</span>
+            <span className="text-xs font-normal leading-relaxed text-muted-foreground">
+              Requests fail instead of silently relaxing this provider policy.
+            </span>
+          </Label>
+          <Switch id="ai-zdr-only" checked={zdrOnly} onCheckedChange={onZdrOnlyChange} />
+        </div>
 
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
-        <Label
-          htmlFor="ai-history-enabled"
-          className="flex flex-col items-start gap-1 text-left"
-        >
-          <span>Keep local AI history</span>
-          <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-            Store up to 500 local run records. Source document text is not copied into
-            history.
-          </span>
-        </Label>
-        <Switch
-          id="ai-history-enabled"
-          checked={historyEnabled}
-          onCheckedChange={onHistoryEnabledChange}
-        />
-      </div>
-
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
-        <Label
-          htmlFor="ai-cloud-disclosure"
-          className="flex flex-col items-start gap-1 text-left"
-        >
-          <span>Allow cloud AI processing</span>
-          <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-            Document content is sent to OpenRouter and the selected model provider only
-            when you press Run.
-          </span>
-        </Label>
-        <Switch
-          id="ai-cloud-disclosure"
-          checked={disclosureAccepted}
-          onCheckedChange={onDisclosureAcceptedChange}
-        />
-      </div>
-
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
-        <Label
-          htmlFor="ai-zdr-only"
-          className="flex flex-col items-start gap-1 text-left"
-        >
-          <span>Zero Data Retention endpoints only</span>
-          <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-            Requests fail instead of silently relaxing this provider policy.
-          </span>
-        </Label>
-        <Switch id="ai-zdr-only" checked={zdrOnly} onCheckedChange={onZdrOnlyChange} />
-      </div>
-
-      {!zdrOnly ? (
-        <p
-          role="alert"
-          className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200"
-        >
-          Zero Data Retention is off. Selected providers may retain document input and
-          output under their own policies.
-        </p>
-      ) : null}
+        {!zdrOnly ? (
+          <p
+            role="alert"
+            className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200"
+          >
+            Zero Data Retention is off. Selected providers may retain document input and
+            output under their own policies.
+          </p>
+        ) : null}
+      </section>
 
       <p
         aria-live="polite"

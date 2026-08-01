@@ -68,7 +68,14 @@ export function useAiRuntime({
       }
       setHistoryLoading(true);
       try {
-        setHistory(await services.historyPage(page, 20));
+        const next = await services.historyPage(page, 20);
+        const lastPage = Math.max(0, Math.ceil(next.total / next.pageSize) - 1);
+        if (page > lastPage) {
+          historyPageRef.current = lastPage;
+          setHistoryPageIndex(lastPage);
+          return;
+        }
+        setHistory(next);
         setHistoryError(null);
       } catch (reason) {
         setHistoryError(errorMessage(reason));
