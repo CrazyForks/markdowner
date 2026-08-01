@@ -73,6 +73,54 @@ export interface AiRunRequest {
   maxOutputTokens: number;
   recordHistory: boolean;
   scope?: AiRunScope;
+  interviewId?: string | null;
+}
+
+export type AiInterviewStatus =
+  | 'awaiting_model'
+  | 'awaiting_answer'
+  | 'ready_to_generate'
+  | 'generating'
+  | 'completed';
+
+export interface AiPrdInterviewTurn {
+  id: string;
+  position: number;
+  question: string;
+  rationale: string;
+  unresolvedArea: string;
+  answer: string | null;
+  skipped: boolean;
+}
+
+export interface AiInterviewSession {
+  requestId: string;
+  documentId: string;
+  model: string;
+  scope: AiRunScope;
+  sourceHash: string;
+  status: AiInterviewStatus;
+  turns: AiPrdInterviewTurn[];
+}
+
+export interface AiInterviewStartRequest {
+  requestId: string;
+  documentId: string;
+  source: string;
+  model: string;
+  instruction: string | null;
+  zdrOnly: boolean;
+  maxOutputTokens: number;
+  scope: AiRunScope;
+}
+
+export interface AiInterviewContinueRequest {
+  requestId: string;
+  source: string;
+  answer: string | null;
+  instruction: string | null;
+  zdrOnly: boolean;
+  maxOutputTokens: number;
 }
 
 export interface AiUsage {
@@ -175,6 +223,7 @@ export interface AiActiveRun {
 }
 
 export interface AiInterviewTurn {
+  id?: string;
   position: number;
   question: string;
   answer: string | null;

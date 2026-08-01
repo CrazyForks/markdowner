@@ -16,6 +16,7 @@ import {
 import type { Settings } from '@/lib/settings';
 
 import { AiScopePicker } from './AiScopePicker';
+import { AiPrdInterview, type AiPrdInterviewServices } from './AiPrdInterview';
 import {
   detectDocumentLanguage,
   estimateAiRun,
@@ -70,6 +71,8 @@ export interface AiWorkbenchPanelProps {
   onFailure?: (request: AiRunRequest, reason: unknown) => void;
   onResult: (result: AiRunResult, request: AiRunRequest) => void;
   services?: AiWorkbenchServices;
+  interviewServices?: AiPrdInterviewServices;
+  guidedPrd?: boolean;
   showHeader?: boolean;
 }
 
@@ -105,6 +108,8 @@ export function AiWorkbenchPanel({
   onFailure,
   onResult,
   services = DEFAULT_SERVICES,
+  interviewServices,
+  guidedPrd = false,
   showHeader = true,
 }: AiWorkbenchPanelProps) {
   const [task, setTask] = useState<AiTask>('prd');
@@ -753,7 +758,24 @@ export function AiWorkbenchPanel({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2">
+        {guidedPrd && task === 'prd' && selectedModel ? (
+          <AiPrdInterview
+            documentId={targetDocument.documentId}
+            source={scopedSource}
+            model={selectedModel.id}
+            instruction={instruction.trim() || null}
+            scope={runScope}
+            zdrOnly={settings.aiZdrOnly}
+            recordHistory={settings.aiHistoryEnabled}
+            disabled={!canRun}
+            services={interviewServices}
+            onStart={onStart}
+            onFailure={onFailure}
+            onResult={onResult}
+          />
+        ) : null}
+
+        {!guidedPrd || task !== 'prd' ? <div className="flex items-center gap-2">
           {runningRequestId ? (
             <Button type="button" variant="destructive" onClick={() => void handleCancel()}>
               <Square />
@@ -775,15 +797,15 @@ export function AiWorkbenchPanel({
               </>
             )}
           </span>
-        </div>
+        </div> : null}
 
-        <p
+        {!guidedPrd || task !== 'prd' ? <p
           aria-live="polite"
           className={error ? 'min-h-5 text-xs text-destructive' : 'min-h-5 text-xs text-muted-foreground'}
         >
           {error || status}
-        </p>
-        {showActivityLink ? (
+        </p> : null}
+        {(!guidedPrd || task !== 'prd') && showActivityLink ? (
           <Button
             type="button"
             size="sm"

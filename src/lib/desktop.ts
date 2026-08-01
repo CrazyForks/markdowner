@@ -6,6 +6,9 @@ import type {
   AiActiveRun,
   AiHistoryDetail,
   AiHistoryPage,
+  AiInterviewContinueRequest,
+  AiInterviewSession,
+  AiInterviewStartRequest,
   AiModel,
   AiModelPricing,
   AiRunRequest,
@@ -453,6 +456,49 @@ export async function aiHistoryDelete(requestId: string): Promise<boolean> {
 
 export async function aiHistoryClear(): Promise<number> {
   return invoke<number>('ai_history_clear');
+}
+
+export async function aiInterviewStart(
+  request: AiInterviewStartRequest,
+): Promise<AiInterviewSession> {
+  return invoke<AiInterviewSession>('ai_interview_start', { request });
+}
+
+export async function aiInterviewAnswer(
+  request: AiInterviewContinueRequest,
+): Promise<AiInterviewSession> {
+  return invoke<AiInterviewSession>('ai_interview_answer', { request });
+}
+
+export async function aiInterviewSkip(
+  request: AiInterviewContinueRequest,
+): Promise<AiInterviewSession> {
+  return invoke<AiInterviewSession>('ai_interview_skip', { request });
+}
+
+export async function aiInterviewUpdateAnswer(
+  requestId: string,
+  position: number,
+  answer: string,
+): Promise<AiInterviewSession> {
+  return invoke<AiInterviewSession>('ai_interview_update_answer', {
+    request: { requestId, position, answer },
+  });
+}
+
+export async function aiInterviewFinish(
+  requestId: string,
+  answer: string | null,
+): Promise<AiInterviewSession> {
+  return invoke<AiInterviewSession>('ai_interview_finish', {
+    request: { requestId, answer },
+  });
+}
+
+export async function aiInterviewResume(
+  requestId: string,
+): Promise<AiInterviewSession | null> {
+  return invoke<AiInterviewSession | null>('ai_interview_resume', { requestId });
 }
 
 export async function aiRenderSelectedOperations(

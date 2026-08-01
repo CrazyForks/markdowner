@@ -80,7 +80,7 @@ export function AiFeaturePanel({
               <span className="text-muted-foreground">View activity</span>
             </button>
           ) : null}
-          <AiWorkbenchPanel {...newRequestProps} showHeader={false} />
+          <AiWorkbenchPanel {...newRequestProps} showHeader={false} guidedPrd />
         </div>
       ) : tab === 'activity' ? (
         <div role="tabpanel" aria-label="Activity" className="min-h-0 flex-1 overflow-y-auto">
