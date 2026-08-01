@@ -21,7 +21,10 @@ use self::{
         ActiveAiRun, ActiveStatus, ActivityProgress, ActivityRegistry, AiDocumentRef, AiRunScope,
     },
     chunking::{plan_translation_chunks, subdivide_translation_chunk},
-    history::{HistoryPage, HistoryRepository, RunStatus, StoredRun, StoredRunDetail},
+    history::{
+        HistoryPage, HistoryRepository, RunStatus, StoredRun, StoredRunDetail,
+        StoredTranslationChunk,
+    },
     interview::{
         InterviewSession, InterviewStatus, PRD_INTERVIEW_PROMPT_VERSION,
     },
@@ -385,6 +388,17 @@ pub struct AiRunRequest {
     pub scope: Option<AiRunScope>,
     #[serde(default)]
     pub interview_id: Option<String>,
+    #[serde(default)]
+    pub resume: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TranslationCheckpointResult {
+    proposed_markdown: String,
+    detected_source_language: Option<String>,
+    target_language: String,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -969,6 +983,9 @@ pub async fn ai_run(
         protection_policy_for_task(request.task),
     )
     .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+    if request.resume {
+        prepare_translation_resume(&state, &request, &envelope)?;
+    }
     if let Some(interview_id) = request.interview_id.as_deref() {
         let interview_context = prepare_interview_generation(&state, &request, &envelope, interview_id)?;
         request.instruction = Some(match request.instruction.take() {
@@ -981,6 +998,9 @@ pub async fn ai_run(
         .scheduler
         .acquire(&request.document_id, &request.request_id)
         .await?;
+    if request.resume {
+        state.history.store()?.resume_run(&request.request_id)?;
+    }
     let cancellation = permit.cancellation_token();
     let document = serde_json::to_value(&envelope).map_err(|_| {
         AiError::new(
@@ -1003,7 +1023,7 @@ pub async fn ai_run(
     })?;
     emit_activity_changed(&app);
     if should_record {
-        if request.interview_id.is_none() {
+        if request.interview_id.is_none() && !request.resume {
             record_history_start(&state, &request, &envelope);
         }
         emit_history_changed(&app);
@@ -1178,7 +1198,7 @@ async fn run_chunked_translation(
     cancellation: CancellationToken,
     secret: String,
 ) -> Result<AiRunResult, AiError> {
-    let should_record = request.record_history || request.interview_id.is_some();
+    let should_record = request.record_history || request.interview_id.is_some() || request.resume;
     let mut queue = VecDeque::from(plan_translation_chunks(&request.source, 12_000)?);
     let mut total_chunks = u32::try_from(queue.len()).unwrap_or(u32::MAX);
     let mut completed_chunks = 0_u32;
@@ -1188,6 +1208,22 @@ async fn run_chunked_translation(
     let mut detected_source_language = None;
     let mut warnings = Vec::new();
     let target_language = request.target_language.clone().unwrap_or_default();
+    let completed_checkpoints = if request.resume {
+        match state
+            .history
+            .store()
+            .and_then(|store| {
+                store.completed_translation_chunks(&request.request_id, &request.document_id)
+            }) {
+            Ok(checkpoints) => checkpoints,
+            Err(error) => {
+                finish_translation_error(app, state, &request, should_record, &error, &on_event);
+                return Err(error);
+            }
+        }
+    } else {
+        Vec::new()
+    };
 
     while let Some(chunk) = queue.pop_front() {
         let label = chunk
@@ -1207,6 +1243,87 @@ async fn run_chunked_translation(
             protection_policy_for_task(AiTask::Translation),
         )
         .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+        if let Some(checkpoint) = completed_checkpoints.iter().find(|checkpoint| {
+            usize::try_from(checkpoint.source_start).ok() == Some(chunk.source_range.start)
+                && usize::try_from(checkpoint.source_end).ok() == Some(chunk.source_range.end)
+        }) {
+            if checkpoint.source_hash != chunk_envelope.revision_hash {
+                let error = AiError::new(
+                    "stale_translation_source",
+                    "The source changed after this translation checkpoint was saved. Start a new translation.",
+                );
+                finish_translation_error(app, state, &request, should_record, &error, &on_event);
+                return Err(error);
+            }
+            let checkpoint_result: TranslationCheckpointResult =
+                match serde_json::from_str(&checkpoint.result_json) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        let error = AiError::new(
+                            "translation_resume_unavailable",
+                            "A saved translation checkpoint could not be restored.",
+                        );
+                        finish_translation_error(
+                            app,
+                            state,
+                            &request,
+                            should_record,
+                            &error,
+                            &on_event,
+                        );
+                        return Err(error);
+                    }
+                };
+            if checkpoint_result.target_language != target_language {
+                let error = AiError::new(
+                    "translation_resume_settings_changed",
+                    "The target language changed after this translation started. Start a new translation.",
+                );
+                finish_translation_error(app, state, &request, should_record, &error, &on_event);
+                return Err(error);
+            }
+            detected_source_language = detected_source_language
+                .or(checkpoint_result.detected_source_language);
+            warnings.extend(checkpoint_result.warnings);
+            translated.push((chunk.source_range.start, checkpoint_result.proposed_markdown));
+            usage = merge_usage(
+                usage,
+                checkpoint
+                    .usage_json
+                    .as_deref()
+                    .and_then(|value| serde_json::from_str(value).ok()),
+            );
+            completed_chunks = completed_chunks.saturating_add(1);
+            continue;
+        }
+        if completed_checkpoints.iter().any(|checkpoint| {
+            usize::try_from(checkpoint.source_start)
+                .is_ok_and(|start| start >= chunk.source_range.start)
+                && usize::try_from(checkpoint.source_end)
+                    .is_ok_and(|end| end <= chunk.source_range.end)
+        }) {
+            let split = match subdivide_translation_chunk(&chunk) {
+                Ok(split) => split,
+                Err(error) => {
+                    finish_translation_error(
+                        app,
+                        state,
+                        &request,
+                        should_record,
+                        &error,
+                        &on_event,
+                    );
+                    return Err(error);
+                }
+            };
+            total_chunks = total_chunks
+                .saturating_sub(1)
+                .saturating_add(u32::try_from(split.len()).unwrap_or(u32::MAX));
+            for child in split.into_iter().rev() {
+                queue.push_front(child);
+            }
+            continue;
+        }
         let document = serde_json::to_value(&chunk_envelope).map_err(|_| {
             AiError::new(
                 "invalid_document",
@@ -1298,6 +1415,30 @@ async fn run_chunked_translation(
         detected_source_language = detected_source_language
             .or_else(|| chunk_result.detected_source_language.clone());
         warnings.extend(chunk_result.warnings.clone());
+        let checkpoint_result = TranslationCheckpointResult {
+            proposed_markdown: chunk_result.proposed_markdown.clone(),
+            detected_source_language: chunk_result.detected_source_language.clone(),
+            target_language: target_language.clone(),
+            warnings: chunk_result.warnings.clone(),
+        };
+        if should_record && let Ok(store) = state.history.store() {
+            let stored = StoredTranslationChunk {
+                document_id: request.document_id.clone(),
+                file_index: 0,
+                chunk_index: u32::try_from(chunk.source_range.start).unwrap_or(u32::MAX),
+                source_start: u32::try_from(chunk.source_range.start).unwrap_or(u32::MAX),
+                source_end: u32::try_from(chunk.source_range.end).unwrap_or(u32::MAX),
+                heading: chunk.heading.clone(),
+                source_hash: chunk_envelope.revision_hash.clone(),
+                result_json: serde_json::to_string(&checkpoint_result)
+                    .unwrap_or_else(|_| "{}".to_string()),
+                usage_json: completion
+                    .usage
+                    .as_ref()
+                    .and_then(|value| serde_json::to_string(value).ok()),
+            };
+            let _ = store.save_translation_chunk(&request.request_id, &stored);
+        }
         translated.push((chunk.source_range.start, chunk_result.proposed_markdown));
         generation_id = completion.generation_id.or(generation_id);
         usage = merge_usage(usage, completion.usage);
@@ -1501,6 +1642,36 @@ fn request_scope(request: &AiRunRequest) -> AiRunScope {
             label: request.document_id.clone(),
         },
     })
+}
+
+fn prepare_translation_resume(
+    state: &AiState,
+    request: &AiRunRequest,
+    envelope: &AiDocumentEnvelope,
+) -> Result<(), AiError> {
+    if request.task != AiTask::Translation || !request.record_history {
+        return Err(AiError::new(
+            "translation_resume_unavailable",
+            "Translation resume requires local AI history.",
+        ));
+    }
+    let store = state.history.store()?;
+    let stored = store.detail(&request.request_id)?.ok_or_else(|| {
+        AiError::new(
+            "translation_resume_unavailable",
+            "The saved translation is no longer available.",
+        )
+    })?;
+    if stored.task != AiTask::Translation
+        || stored.model != request.model
+        || stored.source_hash != envelope.revision_hash
+    {
+        return Err(AiError::new(
+            "stale_translation_source",
+            "The source or model changed after this translation started. Start a new translation.",
+        ));
+    }
+    Ok(())
 }
 
 fn protection_policy_for_task(task: AiTask) -> ProtectionPolicy {
@@ -1708,7 +1879,8 @@ fn validation_issues(error: ValidationError) -> Vec<AiValidationIssue> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AiState, CatalogCache, RequestScheduler, SchemaFailure, classify_schema_error,
+        AiRunRequest, AiState, CatalogCache, RequestScheduler, SchemaFailure,
+        classify_schema_error, prepare_translation_resume, record_history_start,
         openrouter::{AiModel, AiModelPricing, AiTask},
         validate_provider_result,
     };
@@ -1782,6 +1954,51 @@ mod tests {
         let state = AiState::new(directory.path().to_path_buf()).unwrap();
 
         assert!(!state.history.is_available());
+    }
+
+    #[test]
+    fn translation_resume_rejects_a_changed_source_before_network_use() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = AiState::new(directory.path().to_path_buf()).unwrap();
+        let request = AiRunRequest {
+            request_id: "resume-run".to_string(),
+            document_id: "doc-1".to_string(),
+            source: "# Original".to_string(),
+            selection: None,
+            task: AiTask::Translation,
+            model: "z-ai/glm-5.2".to_string(),
+            target_language: Some("ko".to_string()),
+            instruction: None,
+            zdr_only: true,
+            max_output_tokens: 4096,
+            record_history: true,
+            scope: None,
+            interview_id: None,
+            resume: true,
+        };
+        let original = AiDocumentEnvelope::with_policy(
+            &request.document_id,
+            &request.source,
+            None,
+            super::protection_policy_for_task(AiTask::Translation),
+        )
+        .unwrap();
+        record_history_start(&state, &request, &original);
+
+        assert!(prepare_translation_resume(&state, &request, &original).is_ok());
+        let changed = AiDocumentEnvelope::with_policy(
+            &request.document_id,
+            "# Changed",
+            None,
+            super::protection_policy_for_task(AiTask::Translation),
+        )
+        .unwrap();
+        assert_eq!(
+            prepare_translation_resume(&state, &request, &changed)
+                .unwrap_err()
+                .code,
+            "stale_translation_source"
+        );
     }
 
     #[test]
