@@ -496,6 +496,35 @@ pub fn validate_translation(
     })
 }
 
+pub fn validate_batched_translation(
+    envelope: &AiDocumentEnvelope,
+    proposed_markdown: String,
+    detected_source_language: Option<String>,
+    target_language: String,
+    warnings: Vec<String>,
+) -> Result<ValidatedDocument, ValidationError> {
+    validate_markdown_structure(&envelope.source, &proposed_markdown)?;
+    Ok(ValidatedDocument {
+        source_revision_hash: envelope.revision_hash.clone(),
+        proposed_markdown,
+        validation: ValidationReport {
+            passed: true,
+            issues: Vec::new(),
+        },
+        operations: Vec::new(),
+        hunks: Vec::new(),
+        summary: None,
+        findings: Vec::new(),
+        assumptions: Vec::new(),
+        detected_source_language,
+        target_language: Some(target_language),
+        warnings,
+        source: envelope.source.clone(),
+        scope: envelope.scope(),
+        segments: envelope.segments.clone(),
+    })
+}
+
 pub fn validate_prd_response(
     envelope: &AiDocumentEnvelope,
     response: PrdResponse,
@@ -923,6 +952,151 @@ fn markdown_fence_lines(source: &str) -> Vec<&str> {
         .map(str::trim_start)
         .filter(|line| line.starts_with("```") || line.starts_with("~~~"))
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownBlockKind {
+    FrontMatter,
+    Heading,
+    FencedCode,
+    Table,
+    List,
+    Paragraph,
+    Blank,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownBlockRange {
+    pub range: ByteRange,
+    pub kind: MarkdownBlockKind,
+    pub heading: Option<String>,
+}
+
+/// Returns a complete, ordered partition of the Markdown source suitable for
+/// structure-aware batching. Ranges always land on UTF-8 and authored line
+/// boundaries; fenced code, leading front matter, tables, and list runs stay
+/// indivisible.
+pub fn markdown_block_ranges(source: &str) -> Vec<MarkdownBlockRange> {
+    if source.is_empty() {
+        return Vec::new();
+    }
+    let lines = line_ranges(source, 0);
+    let mut blocks = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let start_index = index;
+        let line = line_content(source, lines[index]);
+        let (kind, heading) = if index == 0 && line == "---" {
+            index += 1;
+            while index < lines.len() {
+                let candidate = line_content(source, lines[index]);
+                index += 1;
+                if candidate == "---" || candidate == "..." {
+                    break;
+                }
+            }
+            (MarkdownBlockKind::FrontMatter, None)
+        } else if let Some(marker) = fence_marker(line.trim_start()) {
+            index += 1;
+            while index < lines.len() {
+                let candidate = line_content(source, lines[index]);
+                index += 1;
+                if candidate.trim_start().starts_with(marker) {
+                    break;
+                }
+            }
+            (MarkdownBlockKind::FencedCode, None)
+        } else if heading_text(line).is_some() {
+            index += 1;
+            (
+                MarkdownBlockKind::Heading,
+                heading_text(line).map(str::to_string),
+            )
+        } else if is_table_start(source, &lines, index) {
+            index += 2;
+            while index < lines.len() && line_content(source, lines[index]).contains('|') {
+                index += 1;
+            }
+            (MarkdownBlockKind::Table, None)
+        } else if is_list_line(line) {
+            index += 1;
+            while index < lines.len() {
+                let candidate = line_content(source, lines[index]);
+                if candidate.trim().is_empty() || is_list_line(candidate) || candidate.starts_with("  ") {
+                    index += 1;
+                } else {
+                    break;
+                }
+            }
+            (MarkdownBlockKind::List, None)
+        } else if line.trim().is_empty() {
+            index += 1;
+            while index < lines.len() && line_content(source, lines[index]).trim().is_empty() {
+                index += 1;
+            }
+            (MarkdownBlockKind::Blank, None)
+        } else {
+            index += 1;
+            while index < lines.len() {
+                let candidate = line_content(source, lines[index]);
+                if candidate.trim().is_empty()
+                    || heading_text(candidate).is_some()
+                    || fence_marker(candidate.trim_start()).is_some()
+                    || is_list_line(candidate)
+                    || is_table_start(source, &lines, index)
+                {
+                    break;
+                }
+                index += 1;
+            }
+            (MarkdownBlockKind::Paragraph, None)
+        };
+        let range = ByteRange {
+            start: lines[start_index].start,
+            end: lines[index.saturating_sub(1)].end,
+        };
+        blocks.push(MarkdownBlockRange {
+            range,
+            kind,
+            heading,
+        });
+    }
+    blocks
+}
+
+fn line_content(source: &str, range: ByteRange) -> &str {
+    source[range.start..range.end]
+        .strip_suffix('\n')
+        .unwrap_or(&source[range.start..range.end])
+        .strip_suffix('\r')
+        .unwrap_or_else(|| {
+            source[range.start..range.end]
+                .strip_suffix('\n')
+                .unwrap_or(&source[range.start..range.end])
+        })
+}
+
+fn heading_text(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let marker_end = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (marker_end > 0 && marker_end <= 6 && trimmed.as_bytes().get(marker_end) == Some(&b' '))
+        .then(|| trimmed[marker_end + 1..].trim())
+}
+
+fn is_list_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("- ")
+        || trimmed.starts_with("* ")
+        || trimmed.starts_with("+ ")
+        || trimmed
+            .split_once(['.', ')'])
+            .is_some_and(|(number, rest)| !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()) && rest.starts_with(' '))
+}
+
+fn is_table_start(source: &str, lines: &[ByteRange], index: usize) -> bool {
+    index + 1 < lines.len()
+        && line_content(source, lines[index]).contains('|')
+        && is_table_delimiter(line_content(source, lines[index + 1]))
 }
 
 #[derive(Debug, Clone)]

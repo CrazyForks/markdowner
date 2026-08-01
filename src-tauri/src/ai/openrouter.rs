@@ -65,6 +65,7 @@ pub struct SseComplete {
     pub content: String,
     pub generation_id: Option<String>,
     pub usage: Option<AiUsage>,
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Default)]
@@ -73,6 +74,7 @@ pub struct SseDecoder {
     content: String,
     generation_id: Option<String>,
     usage: Option<AiUsage>,
+    finish_reason: Option<String>,
     done: bool,
 }
 
@@ -106,6 +108,7 @@ impl SseDecoder {
             content: self.content,
             generation_id: self.generation_id,
             usage: self.usage,
+            finish_reason: self.finish_reason,
         })
     }
 
@@ -162,6 +165,12 @@ impl SseDecoder {
             .and_then(Value::as_str)
         {
             self.content.push_str(content);
+        }
+        if let Some(finish_reason) = payload
+            .pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str)
+        {
+            self.finish_reason = Some(finish_reason.to_string());
         }
         if let Some(usage) = payload.get("usage") {
             self.usage = parse_usage(usage);
@@ -1019,9 +1028,24 @@ mod tests {
         let complete = decoder.finish().unwrap();
         assert_eq!(complete.content, r#"{"schema_version":1}"#);
         assert_eq!(complete.generation_id.as_deref(), Some("gen-1"));
+        assert_eq!(complete.finish_reason, None);
         let usage = complete.usage.unwrap();
         assert_eq!(usage.total_tokens, 13);
         assert!(!usage.cost_calculated);
+    }
+
+    #[test]
+    fn decoder_captures_length_finish_reason() {
+        let mut decoder = SseDecoder::default();
+        decoder
+            .push(
+                b"data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"segments\\\":[\"},\"finish_reason\":\"length\"}]}\n\n",
+            )
+            .unwrap();
+
+        let complete = decoder.finish().unwrap();
+
+        assert_eq!(complete.finish_reason.as_deref(), Some("length"));
     }
 
     #[test]

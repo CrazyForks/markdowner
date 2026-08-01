@@ -1,7 +1,8 @@
 use markdowner_core::ai_document::{
     AiDocumentEnvelope, ByteRange, OperationKind, PrdFinding, PrdOperation, PrdResponse,
     SelectionResponse, TranslationResponse, TranslationSegment, ValidationIssueCode,
-    validate_prd_response, validate_selection_response, validate_translation,
+    markdown_block_ranges, validate_prd_response, validate_selection_response,
+    validate_translation,
 };
 use serde::Deserialize;
 
@@ -347,4 +348,32 @@ fn provider_responses_accept_the_prd_snake_case_schema() {
     assert_eq!(translation.segments[0].translated_text, "번역");
     assert_eq!(prd.operations[0].target_segment_id, "segment-1");
     assert_eq!(selection.replacement_text, "Rewritten");
+}
+
+#[test]
+fn markdown_block_ranges_partition_frontmatter_tables_and_fences_exactly() {
+    let source = concat!(
+        "---\r\n",
+        "title: Test\r\n",
+        "---\r\n",
+        "# Heading\r\n\r\n",
+        "| A | B |\r\n",
+        "| - | - |\r\n",
+        "| 1 | 2 |\r\n\r\n",
+        "```rust\r\n",
+        "fn main() {}\r\n",
+        "```\r\n",
+    );
+
+    let blocks = markdown_block_ranges(source);
+    let reconstructed = blocks
+        .iter()
+        .map(|block| &source[block.range.start..block.range.end])
+        .collect::<String>();
+
+    assert_eq!(reconstructed, source);
+    assert!(blocks.iter().any(|block| block.heading.as_deref() == Some("Heading")));
+    assert!(blocks.iter().all(|block| {
+        source.is_char_boundary(block.range.start) && source.is_char_boundary(block.range.end)
+    }));
 }

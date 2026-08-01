@@ -53,7 +53,6 @@ pub struct ActivityProgress {
 }
 
 impl ActivityProgress {
-    #[cfg(test)]
     pub fn translation(
         file_completed: u32,
         file_total: u32,

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fmt, fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -8,8 +8,8 @@ use std::{
 
 use markdowner_core::ai_document::{
     AiDocumentEnvelope, ByteRange, PrdResponse, SelectionResponse, TranslationResponse,
-    ValidatedDocument, ValidationError, validate_prd_response, validate_selection_response,
-    validate_translation,
+    ValidatedDocument, ValidationError, validate_batched_translation, validate_prd_response,
+    validate_selection_response, validate_translation,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, ipc::Channel};
@@ -20,6 +20,7 @@ use self::{
     activity::{
         ActiveAiRun, ActiveStatus, ActivityProgress, ActivityRegistry, AiDocumentRef, AiRunScope,
     },
+    chunking::{plan_translation_chunks, subdivide_translation_chunk},
     history::{HistoryPage, HistoryRepository, RunStatus, StoredRun, StoredRunDetail},
     interview::{
         InterviewSession, InterviewStatus, PRD_INTERVIEW_PROMPT_VERSION,
@@ -32,6 +33,7 @@ use self::{
 };
 
 pub mod activity;
+pub mod chunking;
 #[cfg(test)]
 mod evaluation;
 pub mod history;
@@ -1032,6 +1034,18 @@ pub async fn ai_run(
         }
     };
     let mut last_progress = 0;
+    if request.task == AiTask::Translation {
+        return run_chunked_translation(
+            &app,
+            &state,
+            request,
+            envelope,
+            on_event,
+            cancellation,
+            secret,
+        )
+        .await;
+    }
     let activity = state.activity.clone();
     let activity_request_id = request.request_id.clone();
     let activity_app = app.clone();
@@ -1093,8 +1107,12 @@ pub async fn ai_run(
             return Err(error);
         }
     };
-    let (result, validation_issues) =
-        validate_provider_result(&envelope, request.task, &completion.content);
+    let (result, validation_issues) = validate_provider_result(
+        &envelope,
+        request.task,
+        &completion.content,
+        completion.finish_reason.as_deref(),
+    );
     if let Some(validated) = &result {
         state
             .results
@@ -1145,6 +1163,289 @@ pub async fn ai_run(
         usage: completion.usage,
         retry_after_seconds: None,
     })
+}
+
+async fn run_chunked_translation(
+    app: &AppHandle,
+    state: &AiState,
+    request: AiRunRequest,
+    envelope: AiDocumentEnvelope,
+    on_event: Channel<AiStreamEvent>,
+    cancellation: CancellationToken,
+    secret: String,
+) -> Result<AiRunResult, AiError> {
+    let should_record = request.record_history || request.interview_id.is_some();
+    let mut queue = VecDeque::from(plan_translation_chunks(&request.source, 12_000)?);
+    let mut total_chunks = u32::try_from(queue.len()).unwrap_or(u32::MAX);
+    let mut completed_chunks = 0_u32;
+    let mut translated = Vec::new();
+    let mut usage: Option<AiUsage> = None;
+    let mut generation_id = None;
+    let mut detected_source_language = None;
+    let mut warnings = Vec::new();
+    let target_language = request.target_language.clone().unwrap_or_default();
+
+    while let Some(chunk) = queue.pop_front() {
+        let label = chunk
+            .heading
+            .clone()
+            .unwrap_or_else(|| format!("Chunk {}", completed_chunks + 1));
+        let _ = state.activity.progress(
+            &request.request_id,
+            ActivityProgress::translation(0, 1, completed_chunks, total_chunks, label),
+        );
+        emit_activity_changed(app);
+        let chunk_document_id = format!("{}#chunk-{}", request.document_id, chunk.index);
+        let chunk_envelope = AiDocumentEnvelope::new(&chunk_document_id, &chunk.source, None)
+            .map_err(|error| AiError::new("invalid_document", error.to_string()))?;
+        let document = serde_json::to_value(&chunk_envelope).map_err(|_| {
+            AiError::new(
+                "invalid_document",
+                "Could not prepare a translation chunk for OpenRouter.",
+            )
+        })?;
+        let completion_request = AiCompletionRequest {
+            task: AiTask::Translation,
+            model: request.model.clone(),
+            document,
+            selection: false,
+            target_language: request.target_language.clone(),
+            instruction: request.instruction.clone(),
+            zdr_only: request.zdr_only,
+            max_output_tokens: request.max_output_tokens,
+        };
+        let activity = state.activity.clone();
+        let request_id = request.request_id.clone();
+        let activity_app = app.clone();
+        let completed_for_progress = completed_chunks;
+        let completion = state
+            .client
+            .stream_completion(
+                &secret,
+                &completion_request,
+                &cancellation,
+                move |received_characters| {
+                    let _ = activity.progress(
+                        &request_id,
+                        ActivityProgress {
+                            stage: "translating".to_string(),
+                            file_completed: Some(0),
+                            file_total: Some(1),
+                            chunk_completed: Some(completed_for_progress),
+                            chunk_total: Some(total_chunks),
+                            label: Some("Receiving translation".to_string()),
+                            received_characters,
+                        },
+                    );
+                    emit_activity_changed(&activity_app);
+                },
+            )
+            .await;
+        let completion = match completion {
+            Ok(completion) => completion,
+            Err(error) => {
+                finish_translation_error(app, state, &request, should_record, &error, &on_event);
+                return Err(error);
+            }
+        };
+
+        let (chunk_result, chunk_issues) = validate_provider_result(
+            &chunk_envelope,
+            AiTask::Translation,
+            &completion.content,
+            completion.finish_reason.as_deref(),
+        );
+        if chunk_issues
+            .iter()
+            .any(|issue| issue.code == "response_truncated")
+        {
+            let split = match subdivide_translation_chunk(&chunk) {
+                Ok(split) => split,
+                Err(error) => {
+                    finish_translation_error(app, state, &request, should_record, &error, &on_event);
+                    return Err(error);
+                }
+            };
+            total_chunks = total_chunks
+                .saturating_sub(1)
+                .saturating_add(u32::try_from(split.len()).unwrap_or(u32::MAX));
+            for child in split.into_iter().rev() {
+                queue.push_front(child);
+            }
+            continue;
+        }
+        let Some(chunk_result) = chunk_result else {
+            let result = finish_invalid_translation(
+                app,
+                state,
+                request,
+                should_record,
+                completion,
+                chunk_issues,
+                &on_event,
+            );
+            return Ok(result);
+        };
+        detected_source_language = detected_source_language
+            .or_else(|| chunk_result.detected_source_language.clone());
+        warnings.extend(chunk_result.warnings.clone());
+        translated.push((chunk.source_range.start, chunk_result.proposed_markdown));
+        generation_id = completion.generation_id.or(generation_id);
+        usage = merge_usage(usage, completion.usage);
+        completed_chunks = completed_chunks.saturating_add(1);
+    }
+
+    translated.sort_by_key(|(start, _)| *start);
+    let proposed_markdown = translated
+        .into_iter()
+        .map(|(_, markdown)| markdown)
+        .collect::<String>();
+    let result = validate_batched_translation(
+        &envelope,
+        proposed_markdown,
+        detected_source_language,
+        target_language,
+        warnings,
+    )
+    .map_err(|error| AiError::new("translation_validation_failed", error.to_string()))?;
+    state
+        .results
+        .lock()
+        .map_err(|_| AiError::new("result_unavailable", "Could not retain the AI result."))?
+        .insert(request.request_id.clone(), result.clone());
+    let _ = on_event.send(AiStreamEvent::Completed {
+        request_id: request.request_id.clone(),
+        generation_id: generation_id.clone(),
+    });
+    if should_record && let Ok(store) = state.history.store() {
+        let history_result = serde_json::to_string(&result).ok();
+        let history_usage = usage.as_ref().and_then(|value| serde_json::to_string(value).ok());
+        let _ = store.finish_run_with_usage(
+            &request.request_id,
+            RunStatus::Completed,
+            history_result.as_deref(),
+            None,
+            history_usage.as_deref(),
+        );
+    }
+    let _ = state.activity.finish(&request.request_id);
+    emit_activity_changed(app);
+    if should_record {
+        emit_history_changed(app);
+    }
+    Ok(AiRunResult {
+        request_id: request.request_id,
+        document_id: request.document_id,
+        task: request.task,
+        model: request.model,
+        generation_id,
+        result: Some(result),
+        validation_issues: Vec::new(),
+        raw_diagnostic: None,
+        usage,
+        retry_after_seconds: None,
+    })
+}
+
+fn finish_invalid_translation(
+    app: &AppHandle,
+    state: &AiState,
+    request: AiRunRequest,
+    should_record: bool,
+    completion: openrouter::SseComplete,
+    validation_issues: Vec<AiValidationIssue>,
+    on_event: &Channel<AiStreamEvent>,
+) -> AiRunResult {
+    let _ = on_event.send(AiStreamEvent::Completed {
+        request_id: request.request_id.clone(),
+        generation_id: completion.generation_id.clone(),
+    });
+    if should_record && let Ok(store) = state.history.store() {
+        let history_usage = completion
+            .usage
+            .as_ref()
+            .and_then(|value| serde_json::to_string(value).ok());
+        let _ = store.finish_run_with_usage(
+            &request.request_id,
+            RunStatus::Completed,
+            None,
+            None,
+            history_usage.as_deref(),
+        );
+    }
+    let _ = state.activity.finish(&request.request_id);
+    emit_activity_changed(app);
+    if should_record {
+        emit_history_changed(app);
+    }
+    AiRunResult {
+        request_id: request.request_id,
+        document_id: request.document_id,
+        task: request.task,
+        model: request.model,
+        generation_id: completion.generation_id,
+        result: None,
+        validation_issues,
+        raw_diagnostic: Some(redact_sensitive(&completion.content, None)),
+        usage: completion.usage,
+        retry_after_seconds: None,
+    }
+}
+
+fn finish_translation_error(
+    app: &AppHandle,
+    state: &AiState,
+    request: &AiRunRequest,
+    should_record: bool,
+    error: &AiError,
+    on_event: &Channel<AiStreamEvent>,
+) {
+    let event = if error.code == "cancelled" {
+        AiStreamEvent::Cancelled {
+            request_id: request.request_id.clone(),
+        }
+    } else {
+        AiStreamEvent::Failed {
+            request_id: request.request_id.clone(),
+            code: error.code.clone(),
+            message: error.message.clone(),
+        }
+    };
+    let _ = on_event.send(event);
+    if should_record {
+        record_history_error(
+            state,
+            &request.request_id,
+            if error.code == "cancelled" {
+                RunStatus::Cancelled
+            } else {
+                RunStatus::Failed
+            },
+            error,
+        );
+    }
+    let _ = state.activity.finish(&request.request_id);
+    emit_activity_changed(app);
+    if should_record {
+        emit_history_changed(app);
+    }
+}
+
+fn merge_usage(current: Option<AiUsage>, next: Option<AiUsage>) -> Option<AiUsage> {
+    match (current, next) {
+        (None, next) => next,
+        (current, None) => current,
+        (Some(current), Some(next)) => Some(AiUsage {
+            prompt_tokens: current.prompt_tokens.saturating_add(next.prompt_tokens),
+            completion_tokens: current.completion_tokens.saturating_add(next.completion_tokens),
+            total_tokens: current.total_tokens.saturating_add(next.total_tokens),
+            cost_usd: match (current.cost_usd, next.cost_usd) {
+                (Some(left), Some(right)) => Some(left + right),
+                _ => None,
+            },
+            cost_calculated: current.cost_calculated && next.cost_calculated,
+        }),
+    }
 }
 
 fn emit_activity_changed(app: &AppHandle) {
@@ -1308,7 +1609,18 @@ fn validate_provider_result(
     envelope: &AiDocumentEnvelope,
     task: AiTask,
     content: &str,
+    finish_reason: Option<&str>,
 ) -> (Option<ValidatedDocument>, Vec<AiValidationIssue>) {
+    if finish_reason == Some("length") {
+        return (
+            None,
+            vec![AiValidationIssue {
+                code: "response_truncated".to_string(),
+                message: "The provider stopped because the output token limit was reached.".to_string(),
+                segment_id: None,
+            }],
+        );
+    }
     let validated = match task {
         AiTask::Translation => serde_json::from_str::<TranslationResponse>(content)
             .map_err(schema_error)
@@ -1340,11 +1652,26 @@ fn validate_provider_result(
 }
 
 fn schema_error(error: serde_json::Error) -> Vec<AiValidationIssue> {
+    let truncated = classify_schema_error(&error) == SchemaFailure::ResponseTruncated;
     vec![AiValidationIssue {
-        code: "invalid_schema".to_string(),
+        code: if truncated { "response_truncated" } else { "invalid_schema" }.to_string(),
         message: format!("The provider response did not match the required schema: {error}"),
         segment_id: None,
     }]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SchemaFailure {
+    ResponseTruncated,
+    InvalidSchema,
+}
+
+fn classify_schema_error(error: &serde_json::Error) -> SchemaFailure {
+    if error.is_eof() || error.to_string().contains("EOF while parsing a string") {
+        SchemaFailure::ResponseTruncated
+    } else {
+        SchemaFailure::InvalidSchema
+    }
 }
 
 fn validation_issues(error: ValidationError) -> Vec<AiValidationIssue> {
@@ -1365,7 +1692,7 @@ fn validation_issues(error: ValidationError) -> Vec<AiValidationIssue> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AiState, CatalogCache, RequestScheduler,
+        AiState, CatalogCache, RequestScheduler, SchemaFailure, classify_schema_error,
         openrouter::{AiModel, AiModelPricing, AiTask},
         validate_provider_result,
     };
@@ -1472,11 +1799,23 @@ mod tests {
     fn invalid_provider_schema_fails_closed_without_a_result() {
         let envelope = AiDocumentEnvelope::new("doc-1", "# PRD\n\nVague.", None).unwrap();
 
-        let (result, issues) = validate_provider_result(&envelope, AiTask::Prd, "not valid json");
+        let (result, issues) =
+            validate_provider_result(&envelope, AiTask::Prd, "not valid json", None);
 
         assert!(result.is_none());
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].code, "invalid_schema");
+    }
+
+    #[test]
+    fn json_string_eof_is_classified_as_truncation() {
+        let error = serde_json::from_str::<markdowner_core::ai_document::PrdResponse>(
+            r#"{"schema_version":1,"summary":"unfinished"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("EOF while parsing a string"));
+        assert_eq!(classify_schema_error(&error), SchemaFailure::ResponseTruncated);
     }
 
     #[test]
@@ -1490,7 +1829,8 @@ mod tests {
             "assumptions": []
         })
         .to_string();
-        let (prd_result, prd_issues) = validate_provider_result(&envelope, AiTask::Prd, &prd);
+        let (prd_result, prd_issues) =
+            validate_provider_result(&envelope, AiTask::Prd, &prd, None);
         assert!(prd_result.is_some());
         assert!(prd_issues.is_empty());
 
@@ -1510,7 +1850,7 @@ mod tests {
         })
         .to_string();
         let (translation_result, translation_issues) =
-            validate_provider_result(&envelope, AiTask::Translation, &translation);
+            validate_provider_result(&envelope, AiTask::Translation, &translation, None);
         assert!(translation_result.is_some());
         assert!(translation_issues.is_empty());
     }
@@ -1534,7 +1874,8 @@ mod tests {
         })
         .to_string();
 
-        let (result, issues) = validate_provider_result(&envelope, AiTask::Custom, &response);
+        let (result, issues) =
+            validate_provider_result(&envelope, AiTask::Custom, &response, None);
 
         assert_eq!(
             result.map(|result| result.proposed_markdown),
@@ -1562,7 +1903,8 @@ mod tests {
         })
         .to_string();
 
-        let (result, issues) = validate_provider_result(&envelope, AiTask::Custom, &response);
+        let (result, issues) =
+            validate_provider_result(&envelope, AiTask::Custom, &response, None);
 
         assert!(result.is_none());
         assert!(!issues.is_empty());
