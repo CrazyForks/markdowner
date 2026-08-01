@@ -1028,7 +1028,7 @@ describe('App recent documents', () => {
     render(<App />);
 
     fireEvent.click(
-      await screen.findByRole('button', { name: /^ai workbench$/i }),
+      await screen.findByRole('button', { name: /^ai feature/i }),
     );
     const runButton = await screen.findByRole('button', { name: /^run$/i });
     await waitFor(() => expect(runButton).toBeEnabled());
@@ -1075,7 +1075,7 @@ describe('App recent documents', () => {
     render(<App />);
 
     fireEvent.click(
-      await screen.findByRole('button', { name: /^ai workbench$/i }),
+      await screen.findByRole('button', { name: /^ai feature/i }),
     );
     const runButton = await screen.findByRole('button', { name: /^run$/i });
     await waitFor(() => expect(runButton).toBeEnabled());
@@ -7694,6 +7694,31 @@ describe('App recent documents', () => {
     expect(within(dialog).getByText('Toggle Outline')).toBeInTheDocument();
     expect(within(dialog).getByText('⌘⇧B')).toBeInTheDocument();
     expect(within(dialog).getByText('⌘⇧D')).toBeInTheDocument();
+  });
+
+  it('toggles AI Feature with Cmd+Shift+A and documents the shortcut', async () => {
+    window.localStorage.removeItem('markdowner.sidebarOpen');
+    bootstrapMock.mockResolvedValue(baseSnapshot());
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: 'A', metaKey: true, shiftKey: true });
+
+    const sidebar = await screen.findByRole('complementary', { name: 'AI Feature' });
+    expect(sidebar).not.toHaveClass('invisible');
+    expect(screen.getByRole('button', { name: 'AI Feature (Cmd+Shift+A)' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Meta+Shift+A Control+Shift+A',
+    );
+
+    fireEvent.keyDown(window, { key: '/', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: /keyboard shortcuts/i });
+    expect(within(dialog).getByText('Toggle AI Feature')).toBeInTheDocument();
+    expect(within(dialog).getByText('⌘⇧A')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'A', metaKey: true, shiftKey: true });
+    await waitFor(() => expect(sidebar).toHaveClass('invisible'));
   });
 
   it('announces mode changes through a hidden polite live region', async () => {

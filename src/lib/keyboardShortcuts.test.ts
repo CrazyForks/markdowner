@@ -234,6 +234,7 @@ describe('resolveShellShortcutAction', () => {
     [{ key: ',', metaKey: true }, { kind: 'toggleSettingsTab' }],
     [{ key: '/', metaKey: true }, { kind: 'toggleShortcuts' }],
     [{ key: 'd', metaKey: true, shiftKey: true }, { kind: 'openOutlinePanel' }],
+    [{ key: 'a', metaKey: true, shiftKey: true }, { kind: 'toggleAiFeature' }],
     [{ key: 'p', metaKey: true, shiftKey: true }, { kind: 'toggleCommandPalette' }],
     [{ key: 'p', metaKey: true }, { kind: 'toggleQuickOpen' }],
     [{ key: 'o', metaKey: true }, { kind: 'openDocument' }],

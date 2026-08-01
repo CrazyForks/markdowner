@@ -81,6 +81,7 @@ export type ShellShortcutAction =
   | { kind: 'saveAs' }
   | { kind: 'showExplorerPanel' }
   | { kind: 'toggleCommandPalette' }
+  | { kind: 'toggleAiFeature' }
   | { kind: 'toggleDocumentStats' }
   | { kind: 'toggleFocusMode' }
   | { kind: 'toggleQuickOpen' }
@@ -258,6 +259,9 @@ export function resolveShellShortcutAction(
   }
   if (matches('view.toggleSidebar')) {
     return { kind: 'toggleSidebar' };
+  }
+  if (matches('view.toggleAiFeature')) {
+    return { kind: 'toggleAiFeature' };
   }
   if (matches('app.openSettings')) {
     return { kind: 'toggleSettingsTab' };

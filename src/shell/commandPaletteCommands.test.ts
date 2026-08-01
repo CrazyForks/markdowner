@@ -21,6 +21,7 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     revealActiveFileInFinder: vi.fn(),
     revealProjectInFinder: vi.fn(),
     toggleSidebar: vi.fn(),
+    toggleAiFeature: vi.fn(),
     showExplorerPanel: vi.fn(),
     focusExplorerTree: vi.fn(),
     focusEditor: vi.fn(),
@@ -69,6 +70,26 @@ function commandIds(activeDocumentOpen = true) {
 }
 
 describe('buildCommandPaletteCommands', () => {
+  it('exposes the AI Feature sidebar toggle with its shortcut', () => {
+    const toggleAiFeature = vi.fn();
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: actions({ toggleAiFeature }),
+    });
+
+    const command = commands.find((candidate) => candidate.id === 'view.toggleAiFeature');
+    expect(command).toMatchObject({
+      category: 'View',
+      label: 'Toggle AI Feature',
+      shortcut: '⌘⇧A',
+    });
+    command?.run?.();
+    expect(toggleAiFeature).toHaveBeenCalledTimes(1);
+  });
+
   it('names the keymap command Show Keyboard Shortcuts (keymap)', () => {
     const commands = buildCommandPaletteCommands({
       activeDocumentOpen: true,
@@ -97,6 +118,7 @@ describe('buildCommandPaletteCommands', () => {
       'file.revealInFinder',
       'file.revealProjectInFinder',
       'view.toggleSidebar',
+      'view.toggleAiFeature',
       'view.showExplorer',
       'view.toggleOutline',
       'view.quickOpen',

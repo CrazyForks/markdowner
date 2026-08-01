@@ -5602,7 +5602,7 @@ export default function App() {
     applySidebarPanelState('ai', 'show');
     announceShell(
       sourceTab
-        ? 'AI Workbench opened for the current source. Review the request and run again.'
+        ? 'AI Feature opened for the current source. Review the request and run again.'
         : 'The source document is closed. Reopen it before running again.',
     );
   });
@@ -5983,6 +5983,9 @@ export default function App() {
             return;
           case 'toggleCommandPalette':
             setIsCommandPaletteOpen((prev) => !prev);
+            return;
+          case 'toggleAiFeature':
+            handleOpenAiPanel();
             return;
           case 'toggleDocumentStats':
             setIsDocumentStatsOpen((prev) => !prev);
@@ -6514,6 +6517,7 @@ export default function App() {
         })();
       },
       toggleSidebar: () => handleToggleSidebar(),
+      toggleAiFeature: () => handleOpenAiPanel(),
       showExplorerPanel: () => handleShowExplorerPanel(),
       focusExplorerTree,
       focusEditor: focusEditorSurface,

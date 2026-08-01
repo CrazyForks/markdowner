@@ -407,7 +407,7 @@ export function AiWorkbenchPanel({
           className="flex items-center gap-2 text-sm font-semibold"
         >
           <Sparkles className="size-4" />
-          AI Workbench
+          AI Feature
         </h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           Improve, translate, or transform the active Markdown document.

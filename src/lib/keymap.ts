@@ -36,6 +36,7 @@ export type ShellCommandId =
   | 'view.commandPalette'
   | 'view.documentStats'
   | 'view.toggleSidebar'
+  | 'view.toggleAiFeature'
   | 'view.showExplorerPanel'
   | 'view.openOutlinePanel'
   | 'view.typewriterMode'
@@ -61,6 +62,7 @@ export const DEFAULT_SHELL_BINDINGS: ShellBindings = {
   'view.commandPalette': { key: 'p', shift: true },
   'view.documentStats': { key: 'i', shift: true },
   'view.toggleSidebar': { key: 'b', shift: true },
+  'view.toggleAiFeature': { key: 'a', shift: true },
   'view.showExplorerPanel': { key: 'e', shift: true },
   'view.openOutlinePanel': { key: 'd', shift: true },
   'view.typewriterMode': { key: 'y', shift: true },
@@ -121,6 +123,7 @@ export const KEYMAP_ROWS: KeymapRow[] = [
   { id: 'fixed.fontSizeUp', label: 'Increase font size', section: 'Editor Modes', fixedKeys: '⌘+' },
   { id: 'fixed.fontSizeDown', label: 'Decrease font size', section: 'Editor Modes', fixedKeys: '⌘-' },
   { id: 'view.toggleSidebar', commandId: 'view.toggleSidebar', label: 'Toggle Sidebar', section: 'Sidebar' },
+  { id: 'view.toggleAiFeature', commandId: 'view.toggleAiFeature', label: 'Toggle AI Feature', section: 'Sidebar' },
   { id: 'view.showExplorerPanel', commandId: 'view.showExplorerPanel', label: 'Show Explorer panel', section: 'Sidebar' },
   { id: 'view.openOutlinePanel', commandId: 'view.openOutlinePanel', label: 'Toggle Outline', section: 'Sidebar' },
   { id: 'fixed.turnInto', label: 'Change block format (Turn into)', section: 'Editing (WYSIWYG)', fixedKeys: '⌘/', fixedBinding: { key: '/' } },

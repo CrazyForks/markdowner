@@ -36,6 +36,10 @@ describe('keymap descriptors', () => {
   it('binds new window to command-shift-n by default', () => {
     expect(DEFAULT_SHELL_BINDINGS['file.newWindow']).toEqual({ key: 'n', shift: true });
   });
+
+  it('binds AI Feature to command-shift-a by default', () => {
+    expect(DEFAULT_SHELL_BINDINGS['view.toggleAiFeature']).toEqual({ key: 'a', shift: true });
+  });
 });
 
 describe('resolveShellBindings', () => {

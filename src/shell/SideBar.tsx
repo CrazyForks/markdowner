@@ -105,7 +105,7 @@ export function SideBar({
   return (
     <aside
       aria-label={
-        showOutline ? 'Outline' : showSearch ? 'Search' : showAi ? 'AI Workbench' : 'Explorer'
+        showOutline ? 'Outline' : showSearch ? 'Search' : showAi ? 'AI Feature' : 'Explorer'
       }
       data-explorer-root={showExplorer ? '' : undefined}
       data-outline-root={showOutline ? '' : undefined}

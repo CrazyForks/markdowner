@@ -79,8 +79,9 @@ export function ActivityBar({
           variant="ghost"
           size="icon"
           className={cn('w-8 h-8 rounded-md', isAiOpen ? activeClass : inactiveClass)}
-          title="AI Workbench"
-          aria-label="AI Workbench"
+          title="AI Feature (Cmd+Shift+A)"
+          aria-label="AI Feature (Cmd+Shift+A)"
+          aria-keyshortcuts="Meta+Shift+A Control+Shift+A"
           aria-pressed={Boolean(isAiOpen)}
           onClick={onOpenAi}
         >

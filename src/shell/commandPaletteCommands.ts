@@ -21,6 +21,7 @@ export type CommandPaletteActions = {
   revealActiveFileInFinder: () => void;
   revealProjectInFinder: () => void;
   toggleSidebar: () => void;
+  toggleAiFeature: () => void;
   showExplorerPanel: () => void;
   focusExplorerTree: () => void;
   focusEditor: () => void;
@@ -180,6 +181,13 @@ export function buildCommandPaletteCommands(
       label: 'Toggle Sidebar',
       shortcut: '⌘⇧B',
       run: actions.toggleSidebar,
+    },
+    {
+      id: 'view.toggleAiFeature',
+      category: 'View',
+      label: 'Toggle AI Feature',
+      shortcut: '⌘⇧A',
+      run: actions.toggleAiFeature,
     },
     {
       id: 'view.showExplorer',
