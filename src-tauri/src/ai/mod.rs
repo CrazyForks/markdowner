@@ -20,7 +20,7 @@ use self::{
     activity::{
         ActiveAiRun, ActiveStatus, ActivityProgress, ActivityRegistry, AiDocumentRef, AiRunScope,
     },
-    chunking::{plan_translation_chunks, subdivide_translation_chunk},
+    chunking::{TranslationChunk, plan_translation_chunks, subdivide_translation_chunk},
     history::{
         HistoryPage, HistoryRepository, RunStatus, StoredRun, StoredRunDetail,
         StoredTranslationChunk,
@@ -1381,24 +1381,28 @@ async fn run_chunked_translation(
             &completion.content,
             completion.finish_reason.as_deref(),
         );
-        if chunk_issues
-            .iter()
-            .any(|issue| issue.code == "response_truncated")
-        {
-            let split = match subdivide_translation_chunk(&chunk) {
-                Ok(split) => split,
-                Err(error) => {
-                    finish_translation_error(app, state, &request, should_record, &error, &on_event);
-                    return Err(error);
+        match translation_retry_subdivision(&chunk, &chunk_issues) {
+            Ok(Some(split)) => {
+                total_chunks = total_chunks
+                    .saturating_sub(1)
+                    .saturating_add(u32::try_from(split.len()).unwrap_or(u32::MAX));
+                for child in split.into_iter().rev() {
+                    queue.push_front(child);
                 }
-            };
-            total_chunks = total_chunks
-                .saturating_sub(1)
-                .saturating_add(u32::try_from(split.len()).unwrap_or(u32::MAX));
-            for child in split.into_iter().rev() {
-                queue.push_front(child);
+                continue;
             }
-            continue;
+            Ok(None) => {}
+            Err(error) => {
+                finish_translation_error(
+                    app,
+                    state,
+                    &request,
+                    should_record,
+                    &error,
+                    &on_event,
+                );
+                return Err(error);
+            }
         }
         let Some(chunk_result) = chunk_result else {
             let result = finish_invalid_translation(
@@ -1861,6 +1865,19 @@ fn classify_schema_error(error: &serde_json::Error) -> SchemaFailure {
     }
 }
 
+fn translation_retry_subdivision(
+    chunk: &TranslationChunk,
+    issues: &[AiValidationIssue],
+) -> Result<Option<Vec<TranslationChunk>>, AiError> {
+    if !issues
+        .iter()
+        .any(|issue| issue.code == "response_truncated")
+    {
+        return Ok(None);
+    }
+    subdivide_translation_chunk(chunk).map(Some)
+}
+
 fn validation_issues(error: ValidationError) -> Vec<AiValidationIssue> {
     error
         .issues
@@ -1878,10 +1895,12 @@ fn validation_issues(error: ValidationError) -> Vec<AiValidationIssue> {
 
 #[cfg(test)]
 mod tests {
+    use super::chunking::TranslationChunk;
     use super::{
         AiRunRequest, AiState, CatalogCache, RequestScheduler, SchemaFailure,
-        classify_schema_error, prepare_translation_resume, record_history_start,
+        classify_schema_error,
         openrouter::{AiModel, AiModelPricing, AiTask},
+        prepare_translation_resume, record_history_start, translation_retry_subdivision,
         validate_provider_result,
     };
     use markdowner_core::ai_document::{AiDocumentEnvelope, ByteRange};
@@ -2048,7 +2067,107 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("EOF while parsing a string"));
-        assert_eq!(classify_schema_error(&error), SchemaFailure::ResponseTruncated);
+        assert_eq!(
+            classify_schema_error(&error),
+            SchemaFailure::ResponseTruncated
+        );
+    }
+
+    #[test]
+    fn translation_eof_retries_with_structure_preserving_subdivision() {
+        let source = "One sentence. Two sentence. Three sentence. Four sentence. ".repeat(20);
+        let chunk = TranslationChunk {
+            index: 0,
+            source_range: 0..source.len(),
+            source: source.clone(),
+            heading: Some("Details".to_string()),
+            estimated_input_tokens: 300,
+            subdivision_depth: 0,
+        };
+        let envelope = AiDocumentEnvelope::with_policy(
+            "doc-1#chunk-0",
+            &chunk.source,
+            None,
+            super::protection_policy_for_task(AiTask::Translation),
+        )
+        .unwrap();
+        let truncated = r#"{"schema_version":1,"detected_source_language":"en","target_language":"ko","segments":[{"id":"s1","translated_text":"unfinished"#;
+
+        let (result, issues) =
+            validate_provider_result(&envelope, AiTask::Translation, truncated, None);
+
+        assert!(result.is_none());
+        assert_eq!(issues[0].code, "response_truncated");
+        let split = translation_retry_subdivision(&chunk, &issues)
+            .unwrap()
+            .expect("EOF should request a retry");
+        assert!(split.len() >= 2);
+        assert!(split.iter().all(|child| child.subdivision_depth == 1));
+        assert_eq!(
+            split
+                .iter()
+                .map(|child| child.source.as_str())
+                .collect::<String>(),
+            source
+        );
+
+        let translated = split
+            .iter()
+            .map(|child| {
+                let child_envelope = AiDocumentEnvelope::with_policy(
+                    "doc-1#retry",
+                    &child.source,
+                    None,
+                    super::protection_policy_for_task(AiTask::Translation),
+                )
+                .unwrap();
+                let response = serde_json::json!({
+                    "schema_version": 1,
+                    "detected_source_language": "en",
+                    "target_language": "ko",
+                    "segments": child_envelope.segments.iter().map(|segment| serde_json::json!({
+                        "id": segment.id,
+                        "translated_text": segment.text,
+                    })).collect::<Vec<_>>(),
+                })
+                .to_string();
+                let (result, issues) =
+                    validate_provider_result(&child_envelope, AiTask::Translation, &response, None);
+                assert!(issues.is_empty());
+                result.unwrap().proposed_markdown
+            })
+            .collect::<String>();
+        assert_eq!(translated, source);
+    }
+
+    #[test]
+    fn translation_length_finish_reason_uses_the_same_retry_path() {
+        let source = "One sentence. Two sentence. Three sentence. Four sentence. ".repeat(8);
+        let chunk = TranslationChunk {
+            index: 0,
+            source_range: 0..source.len(),
+            source,
+            heading: None,
+            estimated_input_tokens: 120,
+            subdivision_depth: 0,
+        };
+        let envelope = AiDocumentEnvelope::with_policy(
+            "doc-1#chunk-0",
+            &chunk.source,
+            None,
+            super::protection_policy_for_task(AiTask::Translation),
+        )
+        .unwrap();
+
+        let (_, issues) =
+            validate_provider_result(&envelope, AiTask::Translation, "{}", Some("length"));
+
+        assert_eq!(issues[0].code, "response_truncated");
+        assert!(
+            translation_retry_subdivision(&chunk, &issues)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
