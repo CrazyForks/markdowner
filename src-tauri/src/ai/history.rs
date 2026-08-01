@@ -79,6 +79,11 @@ CREATE TABLE IF NOT EXISTS ai_interviews (
 );
 "#;
 
+const MIGRATION_3: &str = r#"
+ALTER TABLE ai_translation_chunks ADD COLUMN source_start INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ai_translation_chunks ADD COLUMN source_end INTEGER NOT NULL DEFAULT 0;
+"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
@@ -138,6 +143,19 @@ pub struct StoredInterview {
     pub run: StoredRun,
     pub status: String,
     pub turns: Vec<StoredInterviewTurn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredTranslationChunk {
+    pub document_id: String,
+    pub file_index: u32,
+    pub chunk_index: u32,
+    pub source_start: u32,
+    pub source_end: u32,
+    pub heading: Option<String>,
+    pub source_hash: String,
+    pub result_json: String,
+    pub usage_json: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -383,6 +401,100 @@ impl HistoryStore {
         transaction.commit().map_err(|_| history_unavailable())
     }
 
+    pub fn resume_run(&self, id: &str) -> Result<(), AiError> {
+        let connection = self.connection()?;
+        let changed = connection
+            .execute(
+                r#"UPDATE ai_runs
+                   SET status = 'running', error_json = NULL, finished_at = NULL
+                   WHERE id = ?1 AND status IN ('failed', 'cancelled', 'interrupted')"#,
+                [id],
+            )
+            .map_err(|_| history_unavailable())?;
+        if changed == 0 {
+            return Err(AiError::new(
+                "translation_resume_unavailable",
+                "This translation is not available to resume.",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn save_translation_chunk(
+        &self,
+        run_id: &str,
+        chunk: &StoredTranslationChunk,
+    ) -> Result<(), AiError> {
+        let connection = self.connection()?;
+        connection
+            .execute(
+                r#"INSERT INTO ai_translation_chunks (
+                    run_id, document_id, file_index, chunk_index, heading,
+                    status, source_hash, result_json, error_json, usage_json,
+                    created_at, updated_at, source_start, source_end
+                ) VALUES (?1, ?2, ?3, ?4, ?5, 'completed', ?6, ?7, NULL, ?8, ?9, ?9, ?10, ?11)
+                ON CONFLICT(run_id, document_id, chunk_index) DO UPDATE SET
+                    heading = excluded.heading,
+                    status = excluded.status,
+                    source_hash = excluded.source_hash,
+                    result_json = excluded.result_json,
+                    error_json = NULL,
+                    usage_json = excluded.usage_json,
+                    updated_at = excluded.updated_at,
+                    source_start = excluded.source_start,
+                    source_end = excluded.source_end"#,
+                params![
+                    run_id,
+                    chunk.document_id,
+                    chunk.file_index,
+                    chunk.chunk_index,
+                    chunk.heading,
+                    chunk.source_hash,
+                    chunk.result_json,
+                    chunk.usage_json,
+                    unix_timestamp(),
+                    chunk.source_start,
+                    chunk.source_end,
+                ],
+            )
+            .map_err(|_| history_unavailable())?;
+        Ok(())
+    }
+
+    pub fn completed_translation_chunks(
+        &self,
+        run_id: &str,
+        document_id: &str,
+    ) -> Result<Vec<StoredTranslationChunk>, AiError> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                r#"SELECT document_id, file_index, chunk_index, source_start,
+                          source_end, heading, source_hash, result_json, usage_json
+                   FROM ai_translation_chunks
+                   WHERE run_id = ?1 AND document_id = ?2 AND status = 'completed'
+                   ORDER BY source_start ASC, source_end ASC"#,
+            )
+            .map_err(|_| history_unavailable())?;
+        let rows = statement
+            .query_map(params![run_id, document_id], |row| {
+                Ok(StoredTranslationChunk {
+                    document_id: row.get(0)?,
+                    file_index: row.get(1)?,
+                    chunk_index: row.get(2)?,
+                    source_start: row.get(3)?,
+                    source_end: row.get(4)?,
+                    heading: row.get(5)?,
+                    source_hash: row.get(6)?,
+                    result_json: row.get(7)?,
+                    usage_json: row.get(8)?,
+                })
+            })
+            .map_err(|_| history_unavailable())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|_| history_unavailable())
+    }
+
     pub fn page(&self, page: u32, page_size: u32) -> Result<HistoryPage, AiError> {
         let connection = self.connection()?;
         let page_size = page_size.clamp(1, HISTORY_PAGE_SIZE);
@@ -483,6 +595,24 @@ fn migrate_and_recover(connection: &mut Connection) -> Result<(), AiError> {
             [unix_timestamp()],
         )
         .map_err(|_| history_unavailable())?;
+    let migration_3_applied = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM ai_schema_migrations WHERE version = 3)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|_| history_unavailable())?;
+    if !migration_3_applied {
+        transaction
+            .execute_batch(MIGRATION_3)
+            .map_err(|_| history_unavailable())?;
+        transaction
+            .execute(
+                "INSERT INTO ai_schema_migrations (version, applied_at) VALUES (3, ?1)",
+                [unix_timestamp()],
+            )
+            .map_err(|_| history_unavailable())?;
+    }
     transaction
         .execute(
             r#"UPDATE ai_runs
@@ -813,5 +943,42 @@ mod tests {
 
         assert_eq!(store.clear().unwrap(), 2);
         assert_eq!(store.page(0, 20).unwrap().total, 0);
+    }
+
+    #[test]
+    fn translation_chunks_survive_failure_and_resume_without_raw_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = HistoryStore::open(&path).unwrap();
+        let run = fixture_run("resume-me", 1);
+        store.insert_run(&run).unwrap();
+        let chunk = StoredTranslationChunk {
+            document_id: "doc-1".to_string(),
+            file_index: 0,
+            chunk_index: 17,
+            source_start: 17,
+            source_end: 42,
+            heading: Some("Scope".to_string()),
+            source_hash: "chunk-hash".to_string(),
+            result_json: r#"{"proposedMarkdown":"번역","targetLanguage":"ko"}"#.to_string(),
+            usage_json: Some(r#"{"totalTokens":12}"#.to_string()),
+        };
+        store.save_translation_chunk(&run.id, &chunk).unwrap();
+        store
+            .finish_run(&run.id, RunStatus::Failed, None, Some(r#"{"code":"offline"}"#))
+            .unwrap();
+        drop(store);
+
+        let reopened = HistoryStore::open(&path).unwrap();
+        let chunks = reopened
+            .completed_translation_chunks(&run.id, "doc-1")
+            .unwrap();
+        assert_eq!(chunks, vec![chunk]);
+        assert!(!chunks[0].result_json.contains("original source"));
+        reopened.resume_run(&run.id).unwrap();
+        assert_eq!(
+            reopened.detail(&run.id).unwrap().unwrap().status,
+            RunStatus::Running
+        );
     }
 }
