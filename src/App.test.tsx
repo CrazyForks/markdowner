@@ -134,6 +134,12 @@ vi.mock('./lib/desktop', () => ({
   aiHistoryDetail: aiHistoryDetailMock,
   aiHistoryDelete: aiHistoryDeleteMock,
   aiHistoryClear: aiHistoryClearMock,
+  aiInterviewStart: vi.fn(),
+  aiInterviewAnswer: vi.fn(),
+  aiInterviewUpdateAnswer: vi.fn(),
+  aiInterviewSkip: vi.fn(),
+  aiInterviewFinish: vi.fn(),
+  aiInterviewResume: vi.fn(),
   aiRenderSelectedOperations: aiRenderSelectedOperationsMock,
   aiDiscardResult: aiDiscardResultMock,
 }));
@@ -1057,6 +1063,12 @@ describe('App recent documents', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: /^ai feature/i }),
     );
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI task' }), {
+      target: { value: 'custom' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Custom prompt' }), {
+      target: { value: 'Improve this requirement.' },
+    });
     const runButton = await screen.findByRole('button', { name: /^run$/i });
     await waitFor(() => expect(runButton).toBeEnabled());
     replaceActiveDocumentSourceMock.mockClear();
@@ -1104,6 +1116,12 @@ describe('App recent documents', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: /^ai feature/i }),
     );
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI task' }), {
+      target: { value: 'custom' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Custom prompt' }), {
+      target: { value: 'Improve this requirement.' },
+    });
     const runButton = await screen.findByRole('button', { name: /^run$/i });
     await waitFor(() => expect(runButton).toBeEnabled());
     fireEvent.click(runButton);
@@ -2135,8 +2153,8 @@ describe('App recent documents', () => {
     const dialog = await screen.findByRole('dialog', { name: /document stats/i });
 
     expect(within(dialog).getByText(/^meeting-notes\.md$/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/^26$/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/^166$/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^21$/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^137$/)).toBeInTheDocument();
     expect(within(dialog).getByText(/^~1 min$/)).toBeInTheDocument();
     expect(within(dialog).getByText(/^1$/)).toBeInTheDocument();
     expect(within(dialog).getByText(/^1 table$/)).toBeInTheDocument();

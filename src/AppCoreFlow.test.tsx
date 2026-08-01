@@ -80,6 +80,12 @@ vi.mock('./lib/desktop', () => ({
   aiHistoryDetail: vi.fn().mockResolvedValue(null),
   aiHistoryDelete: vi.fn().mockResolvedValue(false),
   aiHistoryClear: vi.fn().mockResolvedValue(0),
+  aiInterviewStart: vi.fn(),
+  aiInterviewAnswer: vi.fn(),
+  aiInterviewUpdateAnswer: vi.fn(),
+  aiInterviewSkip: vi.fn(),
+  aiInterviewFinish: vi.fn(),
+  aiInterviewResume: vi.fn(),
   aiDeleteKey: vi.fn(),
   aiDiscardResult: vi.fn(),
   aiKeyStatus: vi.fn().mockResolvedValue({
@@ -92,7 +98,9 @@ vi.mock('./lib/desktop', () => ({
   aiRun: vi.fn(),
   aiSaveKey: vi.fn(),
   aiVerifyKey: vi.fn(),
+  openExternalUrl: vi.fn(),
   openExternalUrlInNewWindow: vi.fn(),
+  readTextFiles: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@/shell/TerminalPanel', () => ({
