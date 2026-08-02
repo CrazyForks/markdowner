@@ -399,8 +399,8 @@ export function AiPrdInterview({
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void requestNextQuestion(true)}>
               Skip
             </Button>
-            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setFinishOpen(true)}>
-              Enough — Generate PRD
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setFinishOpen(true)}>
+              Generate Now
             </Button>
           </div>
         </div>

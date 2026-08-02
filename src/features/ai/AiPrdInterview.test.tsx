@@ -157,7 +157,9 @@ describe('AiPrdInterview', () => {
     expect(await screen.findByText('What measurable outcome defines success?')).toBeVisible();
     expect(interviewServices.finishInterview).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Enough — Generate PRD' }));
+    const generateNowButton = screen.getByRole('button', { name: 'Generate Now' });
+    expect(generateNowButton).toHaveAttribute('data-variant', 'outline');
+    fireEvent.click(generateNowButton);
     expect(screen.getByRole('dialog', { name: 'Finish PRD interview?' })).toBeVisible();
     expect(interviewServices.finishInterview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Generate PRD' }));
