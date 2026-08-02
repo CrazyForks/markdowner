@@ -7,7 +7,7 @@ use super::{
     history::{StoredInterview, StoredInterviewTurn},
 };
 
-pub const PRD_INTERVIEW_PROMPT_VERSION: &str = "2026-08-02.prd-interview.v1";
+pub const PRD_INTERVIEW_PROMPT_VERSION: &str = "2026-08-02.prd-interview.v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,8 +62,9 @@ pub struct InterviewTurn {
 pub struct ModelTurn {
     pub question: String,
     pub rationale: String,
+    #[serde(alias = "unresolved_area")]
     pub unresolved_area: String,
-    #[serde(default)]
+    #[serde(default, alias = "remaining_areas")]
     pub remaining_areas: Vec<String>,
 }
 

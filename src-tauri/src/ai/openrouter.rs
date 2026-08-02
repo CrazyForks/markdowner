@@ -276,12 +276,12 @@ Never decide that the interview is complete; only the user can explicitly finish
                 "schema": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["question", "rationale", "unresolved_area", "remaining_areas"],
+                    "required": ["question", "rationale", "unresolvedArea", "remainingAreas"],
                     "properties": {
                         "question": {"type": "string"},
                         "rationale": {"type": "string"},
-                        "unresolved_area": {"type": "string"},
-                        "remaining_areas": {"type": "array", "items": {"type": "string"}}
+                        "unresolvedArea": {"type": "string"},
+                        "remainingAreas": {"type": "array", "items": {"type": "string"}}
                     }
                 }
             }
@@ -658,12 +658,7 @@ impl OpenRouterClient {
                 on_progress,
             )
             .await?;
-        let turn = serde_json::from_str::<ModelTurn>(&completion.content).map_err(|error| {
-            AiError::new(
-                "invalid_interview_response",
-                format!("The model returned an invalid PRD interview question: {error}"),
-            )
-        })?;
+        let turn = parse_interview_turn(&completion.content)?;
         Ok((turn, completion))
     }
 
@@ -713,6 +708,15 @@ impl OpenRouterClient {
             .join(path)
             .map_err(|_| AiError::new("client_error", "Could not construct an OpenRouter URL."))
     }
+}
+
+fn parse_interview_turn(content: &str) -> Result<ModelTurn, AiError> {
+    serde_json::from_str::<ModelTurn>(content).map_err(|error| {
+        AiError::new(
+            "invalid_interview_response",
+            format!("The model returned an invalid PRD interview question: {error}"),
+        )
+    })
 }
 
 fn authorized_headers(secret: &str) -> Result<HeaderMap, AiError> {
@@ -896,7 +900,8 @@ mod tests {
 
     use super::{
         build_chat_request, build_interview_chat_request, build_messages, redact_sensitive,
-        AiCompletionRequest, AiTask, OpenRouterClient, PrdInterviewCompletionRequest, SseDecoder,
+        parse_interview_turn, AiCompletionRequest, AiTask, OpenRouterClient,
+        PrdInterviewCompletionRequest, SseDecoder,
     };
 
     fn fixture_request(task: AiTask) -> AiCompletionRequest {
@@ -938,7 +943,7 @@ mod tests {
         assert!(body.get("tools").is_none());
         assert_eq!(
             body["metadata"]["prompt_version"],
-            "2026-08-02.prd-interview.v1"
+            "2026-08-02.prd-interview.v2"
         );
         assert!(body["messages"][1]["content"]
             .as_str()
@@ -949,6 +954,63 @@ mod tests {
             .unwrap()
             .contains("only the user can explicitly finish"));
         assert_eq!(body["response_format"]["json_schema"]["name"], "prd_interview_question");
+    }
+
+    #[test]
+    fn interview_schema_output_matches_the_model_turn_contract() {
+        let request = PrdInterviewCompletionRequest {
+            model: "z-ai/glm-5.2".into(),
+            document: fixture_request(AiTask::Prd).document,
+            interview_history: json!([]),
+            instruction: None,
+            zdr_only: true,
+            max_output_tokens: 4_096,
+        };
+        let body = build_interview_chat_request(&request);
+        let schema = &body["response_format"]["json_schema"]["schema"];
+        let properties = schema["properties"].as_object().unwrap();
+        let unresolved_area_key = properties
+            .keys()
+            .find(|key| key.replace('_', "").eq_ignore_ascii_case("unresolvedarea"))
+            .unwrap();
+        let remaining_areas_key = properties
+            .keys()
+            .find(|key| key.replace('_', "").eq_ignore_ascii_case("remainingareas"))
+            .unwrap();
+        let content = json!({
+            "question": "Who is the primary user?",
+            "rationale": "The draft does not identify a primary user.",
+            unresolved_area_key: "primary user",
+            remaining_areas_key: ["measurable success"]
+        })
+        .to_string();
+
+        let turn = parse_interview_turn(&content).unwrap();
+
+        assert_eq!(
+            schema["required"],
+            json!(["question", "rationale", "unresolvedArea", "remainingAreas"])
+        );
+        assert_eq!(unresolved_area_key, "unresolvedArea");
+        assert_eq!(remaining_areas_key, "remainingAreas");
+        assert_eq!(turn.unresolved_area, "primary user");
+        assert_eq!(turn.remaining_areas, ["measurable success"]);
+    }
+
+    #[test]
+    fn interview_parser_accepts_legacy_snake_case_field_names() {
+        let content = json!({
+            "question": "Who is the primary user?",
+            "rationale": "The draft does not identify a primary user.",
+            "unresolved_area": "primary user",
+            "remaining_areas": ["measurable success"]
+        })
+        .to_string();
+
+        let turn = parse_interview_turn(&content).unwrap();
+
+        assert_eq!(turn.unresolved_area, "primary user");
+        assert_eq!(turn.remaining_areas, ["measurable success"]);
     }
 
     #[test]
