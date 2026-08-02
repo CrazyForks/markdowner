@@ -230,17 +230,13 @@ describe('SettingsPanel update section', () => {
     );
   });
 
-  it('provides a dedicated navigation action for AI Feature settings', () => {
-    const scrollIntoView = vi.fn();
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
-      configurable: true,
-      value: scrollIntoView,
-    });
+  it('omits the AI Feature shortcut while keeping its settings available', () => {
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open AI Feature settings' }));
-
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    expect(
+      screen.queryByRole('button', { name: 'Open AI Feature settings' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('settings-openrouter')).toBeInTheDocument();
   });
 
   it('persists AI Feature default scope and history controls', () => {
