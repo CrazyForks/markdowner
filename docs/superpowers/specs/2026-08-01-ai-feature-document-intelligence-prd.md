@@ -202,6 +202,10 @@ Acceptance criteria:
 
 - 시작 시 대상 문서와 제한된 워크스페이스 참고 문맥을 분석한다.
 - 화면에는 한 번에 핵심 질문 하나만 표시한다.
+- 문서와 이전 답변에서 확인할 수 있는 사실은 사용자에게 다시 묻지 않고, 제품
+  의사결정이 필요한 지점만 질문한다.
+- 각 질문에는 사용자가 그대로 채택하거나 수정할 수 있는 구체적인 추천 답변을
+  표시한다.
 - 다음 질문은 이전 질문, 사용자 답변, 대상 문서와 아직 해결되지 않은 PRD 영역을
   반영한다.
 - 사용자는 자유 텍스트로 답하고, 답변 수정과 질문 건너뛰기를 할 수 있다.
@@ -352,8 +356,11 @@ Markdowner가 검토된 방법론을 host workflow로 구현하고 대화 상태
 
 - [obra/superpowers](https://github.com/obra/superpowers)의 brainstorming에서
   한 번에 하나의 질문, 대안 비교, 단계별 승인 방식을 채택한다.
-- [mattpocock/skills](https://github.com/mattpocock/skills)의 grilling에서
-  모호한 요구를 끝까지 질문으로 구체화하는 방식을 채택한다.
+- [mattpocock/skills의 grill-me](https://github.com/mattpocock/skills/blob/main/skills/productivity/grill-me/SKILL.md)가
+  호출하는
+  [grilling](https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md)에서
+  의사결정 트리를 한 번에 한 질문씩 내려가는 방식, 질문마다 추천 답변을 제시하는
+  방식, 문서에서 확인할 수 있는 사실 대신 사용자 의사결정을 묻는 방식을 채택한다.
 - prompt recipe는 앱 source에 versioned constant 또는 asset으로 포함한다.
 - 임의 로컬 Markdown 파일이나 내려받은 skill을 자동 system prompt로 실행하지
   않는다.
