@@ -164,6 +164,13 @@ describe('AiPrdInterview', () => {
     expect(interviewServices.finishInterview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Generate PRD' }));
     await waitFor(() => expect(interviewServices.finishInterview).toHaveBeenCalledWith('interview-1', null));
+    await waitFor(() => expect(interviewServices.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: 'prd',
+        maxOutputTokens: 16_384,
+      }),
+      expect.any(Function),
+    ));
     await waitFor(() => expect(onResult).toHaveBeenCalledTimes(1));
   });
 

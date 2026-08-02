@@ -11,6 +11,10 @@ import {
   aiInterviewUpdateAnswer,
   aiRun,
 } from '@/lib/desktop';
+import {
+  DEFAULT_AI_OUTPUT_TOKEN_LIMIT,
+  PRD_AI_OUTPUT_TOKEN_LIMIT,
+} from './model';
 import type {
   AiInterviewContinueRequest,
   AiInterviewSession,
@@ -134,7 +138,7 @@ export function AiPrdInterview({
         model,
         instruction,
         zdrOnly,
-        maxOutputTokens: 4_096,
+        maxOutputTokens: DEFAULT_AI_OUTPUT_TOKEN_LIMIT,
         scope,
       });
       localStorage.setItem(storageKey, requestId);
@@ -172,7 +176,7 @@ export function AiPrdInterview({
       answer: skip ? null : answer.trim(),
       instruction,
       zdrOnly,
-      maxOutputTokens: 4_096,
+      maxOutputTokens: DEFAULT_AI_OUTPUT_TOKEN_LIMIT,
     };
     try {
       const next = skip
@@ -206,7 +210,7 @@ export function AiPrdInterview({
       targetLanguage: null,
       instruction,
       zdrOnly,
-      maxOutputTokens: 4_096,
+      maxOutputTokens: PRD_AI_OUTPUT_TOKEN_LIMIT,
       recordHistory,
       scope: session.scope,
       interviewId: session.requestId,

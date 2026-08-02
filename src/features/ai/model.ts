@@ -16,6 +16,8 @@ export const PINNED_AI_MODELS = [
 ] as const;
 export const WHOLE_DOCUMENT_TOKEN_LIMIT = 50_000;
 export const SELECTION_TOKEN_LIMIT = 20_000;
+export const DEFAULT_AI_OUTPUT_TOKEN_LIMIT = 4_096;
+export const PRD_AI_OUTPUT_TOKEN_LIMIT = 16_384;
 
 const PINNED_NAMES: Record<(typeof PINNED_AI_MODELS)[number], string> = {
   'z-ai/glm-5.2': 'GLM 5.2',
@@ -189,6 +191,12 @@ export function estimateInputTokens(source: string): number {
     Math.ceil(utf8Length(source) / 4),
   );
   return contentEstimate + 1_200;
+}
+
+export function outputTokenLimitForTask(task: AiTask): number {
+  return task === 'prd'
+    ? PRD_AI_OUTPUT_TOKEN_LIMIT
+    : DEFAULT_AI_OUTPUT_TOKEN_LIMIT;
 }
 
 export function estimateAiRun({

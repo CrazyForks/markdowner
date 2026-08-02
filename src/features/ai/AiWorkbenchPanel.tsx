@@ -21,6 +21,7 @@ import { AiPrdInterview, type AiPrdInterviewServices } from './AiPrdInterview';
 import {
   detectDocumentLanguage,
   estimateAiRun,
+  outputTokenLimitForTask,
   orderModels,
   resolveUsageCost,
   resolveRunGate,
@@ -311,12 +312,13 @@ export function AiWorkbenchPanel({
     targetDocument.documentId === documentId
       ? source
       : documentSources[targetDocument.documentId] ?? '';
+  const maxOutputTokens = outputTokenLimitForTask(task);
   const estimate = pricedSelectedModel
     ? estimateAiRun({
         source: scopedSource,
         scope: 'document',
         model: pricedSelectedModel,
-        maxOutputTokens: 4_096,
+        maxOutputTokens,
       })
     : null;
   const gate =
@@ -410,7 +412,7 @@ export function AiWorkbenchPanel({
       targetLanguage: targetRequired ? targetLanguage : null,
       instruction: instruction.trim() || null,
       zdrOnly: settings.aiZdrOnly,
-      maxOutputTokens: 4_096,
+      maxOutputTokens,
       recordHistory: settings.aiHistoryEnabled,
       scope: runScope,
     };

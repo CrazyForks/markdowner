@@ -67,6 +67,7 @@ describe('AiWorkbenchPanel', () => {
       'z-ai/glm-5.2',
     );
     expect(screen.getByText(/Estimated input/i)).toBeInTheDocument();
+    expect(screen.getByText('Output cap · 16,384 tokens')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
@@ -74,6 +75,7 @@ describe('AiWorkbenchPanel', () => {
       expect.objectContaining({
         documentId: 'doc-1',
         task: 'prd',
+        maxOutputTokens: 16_384,
       }),
     );
     expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
