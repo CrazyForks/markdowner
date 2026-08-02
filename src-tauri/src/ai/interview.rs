@@ -61,8 +61,9 @@ pub struct InterviewTurn {
 #[serde(rename_all = "camelCase")]
 pub struct ModelTurn {
     pub question: String,
+    #[serde(default)]
     pub rationale: String,
-    #[serde(alias = "unresolved_area")]
+    #[serde(default, alias = "unresolved_area")]
     pub unresolved_area: String,
     #[serde(default, alias = "remaining_areas")]
     pub remaining_areas: Vec<String>,

@@ -1014,6 +1014,25 @@ mod tests {
     }
 
     #[test]
+    fn interview_parser_accepts_a_question_without_advisory_fields() {
+        let content = json!({
+            "question": "Who is the primary user?",
+            "rationale": "The draft does not identify a primary user."
+        })
+        .to_string();
+
+        let turn = parse_interview_turn(&content).unwrap();
+
+        assert_eq!(turn.question, "Who is the primary user?");
+        assert_eq!(
+            turn.rationale,
+            "The draft does not identify a primary user."
+        );
+        assert!(turn.unresolved_area.is_empty());
+        assert!(turn.remaining_areas.is_empty());
+    }
+
+    #[test]
     fn structured_translation_request_enforces_zdr_and_parameters() {
         let request = build_chat_request(&fixture_request(AiTask::Translation));
 
