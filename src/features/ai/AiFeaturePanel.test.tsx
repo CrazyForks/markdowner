@@ -157,6 +157,7 @@ describe('AiFeaturePanel', () => {
           position: 1,
           question: 'Which approval is still unresolved?',
           rationale: 'Launch ownership remains unclear.',
+          recommendedAnswer: 'Assign one product owner as the launch decision maker.',
           unresolvedArea: 'approval',
           answer: null,
           skipped: false,

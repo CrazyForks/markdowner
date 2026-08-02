@@ -89,6 +89,7 @@ export interface AiPrdInterviewTurn {
   position: number;
   question: string;
   rationale: string;
+  recommendedAnswer: string;
   unresolvedArea: string;
   answer: string | null;
   skipped: boolean;
@@ -230,6 +231,7 @@ export interface AiInterviewTurn {
   answer: string | null;
   skipped: boolean;
   rationale?: string;
+  recommendedAnswer?: string;
   unresolvedArea?: string;
 }
 

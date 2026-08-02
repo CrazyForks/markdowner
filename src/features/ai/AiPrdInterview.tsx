@@ -125,7 +125,7 @@ export function AiPrdInterview({
     const requestId = createRequestId();
     setBusy(true);
     setError('');
-    setStatus('Finding the highest-impact PRD gap…');
+    setStatus('Finding the highest-impact PRD decision…');
     try {
       const next = await services.startInterview({
         requestId,
@@ -165,7 +165,7 @@ export function AiPrdInterview({
     if (!session) return;
     setBusy(true);
     setError('');
-    setStatus('Preparing one next question…');
+    setStatus('Preparing the next decision…');
     const request: AiInterviewContinueRequest = {
       requestId: session.requestId,
       source,
@@ -260,7 +260,8 @@ export function AiPrdInterview({
       <div className="rounded-md border border-border p-3">
         <p className="text-sm font-medium">Guided PRD interview</p>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          AI asks one focused question at a time. It continues until you say the draft is sufficient.
+          AI resolves facts from the draft, asks one product decision at a time, and offers an
+          editable recommendation. It continues until you say the draft is sufficient.
         </p>
         <Button
           type="button"
@@ -353,6 +354,27 @@ export function AiPrdInterview({
           <p className="text-sm font-medium leading-relaxed">{current.question}</p>
           {current.rationale ? (
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{current.rationale}</p>
+          ) : null}
+          {current.recommendedAnswer ? (
+            <div
+              aria-label="Recommended answer"
+              className="mt-3 rounded-md border border-border bg-muted/30 p-2.5"
+            >
+              <p className="text-xs font-medium">Recommended answer</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {current.recommendedAnswer}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                disabled={busy}
+                onClick={() => setAnswer(current.recommendedAnswer)}
+              >
+                Use recommended answer
+              </Button>
+            </div>
           ) : null}
           <label htmlFor="ai-prd-answer" className="mt-3 block text-xs font-medium">Your answer</label>
           <textarea

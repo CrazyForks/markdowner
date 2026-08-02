@@ -7,7 +7,7 @@ use super::{
     history::{StoredInterview, StoredInterviewTurn},
 };
 
-pub const PRD_INTERVIEW_PROMPT_VERSION: &str = "2026-08-02.prd-interview.v2";
+pub const PRD_INTERVIEW_PROMPT_VERSION: &str = "2026-08-03.prd-interview.v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +52,7 @@ pub struct InterviewTurn {
     pub position: u32,
     pub question: String,
     pub rationale: String,
+    pub recommended_answer: String,
     pub unresolved_area: String,
     pub answer: Option<String>,
     pub skipped: bool,
@@ -63,6 +64,8 @@ pub struct ModelTurn {
     pub question: String,
     #[serde(default)]
     pub rationale: String,
+    #[serde(default, alias = "recommendation", alias = "recommended_answer")]
+    pub recommended_answer: String,
     #[serde(default, alias = "unresolved_area")]
     pub unresolved_area: String,
     #[serde(default, alias = "remaining_areas")]
@@ -103,6 +106,7 @@ impl InterviewSession {
             position,
             question: question.to_string(),
             rationale: model_turn.rationale.trim().to_string(),
+            recommended_answer: model_turn.recommended_answer.trim().to_string(),
             unresolved_area: model_turn.unresolved_area.trim().to_string(),
             answer: None,
             skipped: false,
@@ -158,6 +162,7 @@ impl InterviewSession {
                         "position": turn.position,
                         "question": turn.question,
                         "rationale": turn.rationale,
+                        "recommendedAnswer": turn.recommended_answer,
                         "unresolvedArea": turn.unresolved_area,
                         "answer": turn.answer,
                         "skipped": turn.skipped,
@@ -176,6 +181,7 @@ impl InterviewSession {
             position: turn.position,
             question: turn.question.clone(),
             rationale: turn.rationale.clone(),
+            recommended_answer: turn.recommended_answer.clone(),
             unresolved_area: turn.unresolved_area.clone(),
             answer: turn.answer.clone(),
             skipped: turn.skipped,
@@ -204,6 +210,7 @@ impl InterviewSession {
                     position: turn.position,
                     question: turn.question,
                     rationale: turn.rationale,
+                    recommended_answer: turn.recommended_answer,
                     unresolved_area: turn.unresolved_area,
                     answer: turn.answer,
                     skipped: turn.skipped,
@@ -260,6 +267,7 @@ mod tests {
         ModelTurn {
             question: "What is the success threshold?".into(),
             rationale: "The draft has no measurable outcome.".into(),
+            recommended_answer: "Adopt a measurable activation target.".into(),
             unresolved_area: "success metric".into(),
             remaining_areas: Vec::new(),
         }
@@ -270,9 +278,18 @@ mod tests {
         let mut session = fixture_session();
         session.apply_model_turn(fixture_model_turn()).unwrap();
         assert_eq!(session.status, InterviewStatus::AwaitingAnswer);
+        assert_eq!(
+            session.current_turn().unwrap().recommended_answer,
+            "Adopt a measurable activation target."
+        );
 
         session.answer("Enough for now", true).unwrap();
         assert_eq!(session.status, InterviewStatus::ReadyToGenerate);
+        assert_eq!(
+            session.history_data()[0]["recommendedAnswer"],
+            "Adopt a measurable activation target."
+        );
+        assert_eq!(session.history_data()[0]["answer"], "Enough for now");
     }
 
     #[test]

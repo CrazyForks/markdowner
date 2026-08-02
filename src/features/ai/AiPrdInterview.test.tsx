@@ -9,7 +9,11 @@ const scope = {
   target: { documentId: 'doc-1', path: '/PRD.md', label: 'PRD.md' },
 };
 
-function session(question: string, position = 0): AiInterviewSession {
+function session(
+  question: string,
+  position = 0,
+  recommendedAnswer = 'Choose the narrowest primary user who feels this problem weekly.',
+): AiInterviewSession {
   return {
     requestId: 'interview-1',
     documentId: 'doc-1',
@@ -23,6 +27,7 @@ function session(question: string, position = 0): AiInterviewSession {
         position,
         question,
         rationale: 'This decision is missing.',
+        recommendedAnswer,
         unresolvedArea: 'primary user',
         answer: null,
         skipped: false,
@@ -87,6 +92,56 @@ afterEach(() => {
 });
 
 describe('AiPrdInterview', () => {
+  it('offers an editable recommendation and repeats the answer-driven loop', async () => {
+    const interviewServices = services();
+    vi.mocked(interviewServices.answerInterview)
+      .mockResolvedValueOnce(session(
+        'What measurable outcome defines success?',
+        1,
+        'Use weekly successful PRD reviews as the activation metric.',
+      ))
+      .mockResolvedValueOnce(session(
+        'Which failure case must the first release handle?',
+        2,
+        'Handle a stale document before adding broader recovery paths.',
+      ));
+    renderInterview(interviewServices);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start PRD interview' }));
+    expect(await screen.findByText(
+      'Choose the narrowest primary user who feels this problem weekly.',
+    )).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Use recommended answer' }));
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue(
+      'Choose the narrowest primary user who feels this problem weekly.',
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your answer' }), {
+      target: { value: 'Product managers at five-to-fifty-person software teams.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue interview' }));
+
+    expect(await screen.findByText('What measurable outcome defines success?')).toBeVisible();
+    expect(interviewServices.answerInterview).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        answer: 'Product managers at five-to-fifty-person software teams.',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use recommended answer' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue interview' }));
+
+    expect(await screen.findByText(
+      'Which failure case must the first release handle?',
+    )).toBeVisible();
+    expect(interviewServices.answerInterview).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        answer: 'Use weekly successful PRD reviews as the activation metric.',
+      }),
+    );
+    expect(interviewServices.finishInterview).not.toHaveBeenCalled();
+  });
+
   it('asks one question at a time and stops only after user confirmation', async () => {
     const { interviewServices, onResult } = renderInterview();
 

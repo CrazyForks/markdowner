@@ -84,6 +84,10 @@ ALTER TABLE ai_translation_chunks ADD COLUMN source_start INTEGER NOT NULL DEFAU
 ALTER TABLE ai_translation_chunks ADD COLUMN source_end INTEGER NOT NULL DEFAULT 0;
 "#;
 
+const MIGRATION_4: &str = r#"
+ALTER TABLE ai_interview_turns ADD COLUMN recommended_answer TEXT NOT NULL DEFAULT '';
+"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
@@ -117,6 +121,7 @@ pub struct StoredInterviewTurn {
     pub position: u32,
     pub question: String,
     pub rationale: String,
+    pub recommended_answer: String,
     pub unresolved_area: String,
     pub answer: Option<String>,
     pub skipped: bool,
@@ -613,6 +618,24 @@ fn migrate_and_recover(connection: &mut Connection) -> Result<(), AiError> {
             )
             .map_err(|_| history_unavailable())?;
     }
+    let migration_4_applied = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM ai_schema_migrations WHERE version = 4)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|_| history_unavailable())?;
+    if !migration_4_applied {
+        transaction
+            .execute_batch(MIGRATION_4)
+            .map_err(|_| history_unavailable())?;
+        transaction
+            .execute(
+                "INSERT INTO ai_schema_migrations (version, applied_at) VALUES (4, ?1)",
+                [unix_timestamp()],
+            )
+            .map_err(|_| history_unavailable())?;
+    }
     transaction
         .execute(
             r#"UPDATE ai_runs
@@ -660,14 +683,15 @@ fn insert_interview_turn(
     transaction
         .execute(
             r#"INSERT INTO ai_interview_turns (
-                run_id, position, question, rationale, unresolved_area,
-                answer, skipped, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)"#,
+                run_id, position, question, rationale, recommended_answer,
+                unresolved_area, answer, skipped, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)"#,
             params![
                 run_id,
                 turn.position,
                 turn.question,
                 turn.rationale,
+                turn.recommended_answer,
                 turn.unresolved_area,
                 turn.answer,
                 turn.skipped,
@@ -728,7 +752,8 @@ fn interview_turns(
 ) -> Result<Vec<StoredInterviewTurn>, AiError> {
     let mut statement = connection
         .prepare(
-            r#"SELECT position, question, rationale, unresolved_area, answer, skipped
+            r#"SELECT position, question, rationale, recommended_answer,
+                      unresolved_area, answer, skipped
                FROM ai_interview_turns WHERE run_id = ?1 ORDER BY position ASC"#,
         )
         .map_err(|_| history_unavailable())?;
@@ -738,9 +763,10 @@ fn interview_turns(
                 position: row.get(0)?,
                 question: row.get(1)?,
                 rationale: row.get(2)?,
-                unresolved_area: row.get(3)?,
-                answer: row.get(4)?,
-                skipped: row.get(5)?,
+                recommended_answer: row.get(3)?,
+                unresolved_area: row.get(4)?,
+                answer: row.get(5)?,
+                skipped: row.get(6)?,
             })
         })
         .map_err(|_| history_unavailable())?;
@@ -943,6 +969,80 @@ mod tests {
 
         assert_eq!(store.clear().unwrap(), 2);
         assert_eq!(store.page(0, 20).unwrap().total, 0);
+    }
+
+    #[test]
+    fn interview_recommendations_migrate_and_persist() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch(MIGRATION_1).unwrap();
+        connection.execute_batch(MIGRATION_2).unwrap();
+        connection.execute_batch(MIGRATION_3).unwrap();
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO ai_schema_migrations (version, applied_at)
+                VALUES (1, 1), (2, 1), (3, 1);
+                INSERT INTO ai_runs (
+                    id, task, model, status, scope_json, source_hash,
+                    prompt_version, started_at
+                ) VALUES (
+                    'legacy-interview', 'prd', 'z-ai/glm-5.2', 'running',
+                    '{"kind":"document","target":{"documentId":"doc-1","label":"PRD.md"}}',
+                    'hash', '2026-08-02.prd-interview.v2', 1
+                );
+                INSERT INTO ai_interviews (run_id, status, updated_at)
+                VALUES ('legacy-interview', 'awaiting_answer', 1);
+                INSERT INTO ai_interview_turns (
+                    run_id, position, question, rationale, unresolved_area,
+                    answer, skipped, created_at, updated_at
+                ) VALUES (
+                    'legacy-interview', 0, 'Who is this for?',
+                    'The audience is unclear.', 'primary user', NULL, 0, 1, 1
+                );
+                "#,
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = HistoryStore::open(&path).unwrap();
+        let legacy = store.interview("legacy-interview").unwrap().unwrap();
+        assert!(legacy.turns[0].recommended_answer.is_empty());
+
+        store
+            .append_interview_turn(
+                "legacy-interview",
+                &StoredInterviewTurn {
+                    position: 1,
+                    question: "What outcome defines success?".into(),
+                    rationale: "The outcome is not measurable.".into(),
+                    recommended_answer: "Use weekly successful reviews.".into(),
+                    unresolved_area: "success metric".into(),
+                    answer: None,
+                    skipped: false,
+                },
+                "awaiting_answer",
+            )
+            .unwrap();
+        drop(store);
+
+        let reopened = HistoryStore::open(&path).unwrap();
+        let migrated = reopened.interview("legacy-interview").unwrap().unwrap();
+        assert_eq!(
+            migrated.turns[1].recommended_answer,
+            "Use weekly successful reviews."
+        );
+        let migration_4 = reopened
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM ai_schema_migrations WHERE version = 4",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(migration_4, 1);
     }
 
     #[test]
