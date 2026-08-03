@@ -363,6 +363,61 @@ describe('paginatePdfDocument', () => {
 
     expect(result.pageCount).toBe(1);
   });
+
+  it('clamps fractional paper width to the integer iframe viewport', () => {
+    document.body.innerHTML =
+      '<main class="markdowner-export"><p id="content"></p></main>';
+    const container = document.querySelector('.markdowner-export') as HTMLElement;
+    const content = document.querySelector('#content') as HTMLElement;
+    vi.spyOn(content, 'getBoundingClientRect').mockReturnValue(rect(54, 20));
+    const clientWidth = vi
+      .spyOn(document.documentElement, 'clientWidth', 'get')
+      .mockReturnValue(595);
+
+    const result = paginatePdfDocument(document, {
+      pageWidth: 595.2755905511812,
+      pageHeight: 841.8897637795276,
+      pageInsets: { top: 30, right: 20, bottom: 30, left: 20 },
+      pageFurniture: {
+        ...pageFurniture,
+        pageNumbersEnabled: true,
+      },
+      maxPages: 100,
+    });
+    clientWidth.mockRestore();
+
+    expect(container.style.width).toBe('595px');
+    expect(result.pageCount).toBe(1);
+  });
+
+  it('uses laid-out content geometry instead of WebKit viewport scroll chrome', () => {
+    document.body.innerHTML =
+      '<main class="markdowner-export" style="min-height:100vh"><table id="content"></table></main>';
+    const content = document.querySelector('#content') as HTMLElement;
+    vi.spyOn(content, 'getBoundingClientRect').mockReturnValue(rect(400, 100));
+    const bodyScrollHeight = vi
+      .spyOn(document.body, 'scrollHeight', 'get')
+      .mockReturnValue(858);
+    const documentScrollHeight = vi
+      .spyOn(document.documentElement, 'scrollHeight', 'get')
+      .mockReturnValue(858);
+
+    const result = paginatePdfDocument(document, {
+      pageWidth: 595.2755905511812,
+      pageHeight: 841.8897637795276,
+      pageInsets: { top: 30, right: 20, bottom: 30, left: 20 },
+      pageFurniture: {
+        ...pageFurniture,
+        pageNumbersEnabled: true,
+      },
+      maxPages: 100,
+    });
+    bodyScrollHeight.mockRestore();
+    documentScrollHeight.mockRestore();
+
+    expect(result.totalHeight).toBe(841.8897637795276);
+    expect(result.pageCount).toBe(1);
+  });
 });
 
 describe('PDF pagination runtime', () => {

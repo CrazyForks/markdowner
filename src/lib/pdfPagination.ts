@@ -193,7 +193,13 @@ export function paginatePdfDocument(
   container.style.margin = '0';
   container.style.padding = `${effectiveTop}px ${pageInsets.right}px 0 ${pageInsets.left}px`;
   container.style.position = 'relative';
-  container.style.width = `${pageWidth}px`;
+  // WebKit exposes an integer viewport width even when physical paper resolves
+  // to fractional CSS pixels (A4 is 595.275…pt). Letting the container exceed
+  // that viewport by a fraction creates a horizontal scrollbar whose height is
+  // then mistaken for document overflow and produces a blank trailing page.
+  const viewportWidth = doc.documentElement?.clientWidth ?? 0;
+  const layoutWidth = viewportWidth > 0 ? Math.min(pageWidth, viewportWidth) : pageWidth;
+  container.style.width = `${layoutWidth}px`;
 
   const children = Array.from(container.children) as HTMLElement[];
 
@@ -425,18 +431,11 @@ export function paginatePdfDocument(
   }
 
   const measuredHeight = Math.max(pageHeight, measuredBottom);
-  const scrollHeight = Math.max(
-    doc.body?.scrollHeight ?? 0,
-    doc.documentElement?.scrollHeight ?? 0,
-  );
-  // DOM scrollHeight is integer-valued even when the paper height is a
-  // fractional CSS pixel value (A4 is 841.889…pt). Treat that sub-pixel
-  // rounding as the measured page height; otherwise ceil(842 / 841.889…)
-  // produces a second, completely blank page.
-  const totalHeight =
-    scrollHeight > measuredHeight + 1
-      ? Math.max(measuredHeight, scrollHeight)
-      : measuredHeight;
+  // Page count follows rendered content geometry. WebKit's root scrollHeight
+  // also includes viewport rounding and trailing-margin scroll chrome (for a
+  // one-page A4 document it can report 858px for an 841.889…px page), which is
+  // not printable content and would create a completely blank trailing page.
+  const totalHeight = measuredHeight;
   const pageCount = Math.max(1, Math.ceil(totalHeight / pageHeight));
   if (pageCount > maxPages) {
     throw new Error(`PDF export exceeds the ${maxPages} pages limit.`);

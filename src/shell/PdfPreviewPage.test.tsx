@@ -5,6 +5,26 @@ import { PDF_PREVIEW_READY_MESSAGE } from '@/lib/pdfPagination';
 
 import { PdfPreviewPage } from './PdfPreviewPage';
 
+function rect(top: number, height: number): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    top,
+    right: 500,
+    bottom: top + height,
+    left: 0,
+    width: 500,
+    height,
+    toJSON: () => ({}),
+  };
+}
+
+function mockThreePageContent(frameDocument: Document) {
+  const paragraphs = frameDocument.querySelectorAll('p');
+  vi.spyOn(paragraphs[0], 'getBoundingClientRect').mockReturnValue(rect(40, 100));
+  vi.spyOn(paragraphs[1], 'getBoundingClientRect').mockReturnValue(rect(1_700, 100));
+}
+
 function renderPage() {
   const onReady = vi.fn();
   const onError = vi.fn();
@@ -56,14 +76,7 @@ describe('PdfPreviewPage', () => {
     const frameDocument = frame.contentDocument!;
     frameDocument.body.innerHTML =
       '<main class="markdowner-export"><p>First page</p><p>More content</p></main>';
-    Object.defineProperty(frameDocument.body, 'scrollHeight', {
-      configurable: true,
-      value: 1_700,
-    });
-    Object.defineProperty(frameDocument.documentElement, 'scrollHeight', {
-      configurable: true,
-      value: 1_700,
-    });
+    mockThreePageContent(frameDocument);
 
     fireEvent.load(frame);
 
@@ -102,6 +115,7 @@ describe('PdfPreviewPage', () => {
     const frameDocument = frame.contentDocument!;
     frameDocument.body.innerHTML =
       '<main class="markdowner-export"><p>First page</p><p>More content</p></main>';
+    mockThreePageContent(frameDocument);
     let layoutReady = false;
     Object.defineProperty(frame, 'clientWidth', {
       configurable: true,
@@ -114,14 +128,6 @@ describe('PdfPreviewPage', () => {
     Object.defineProperty(frameDocument.documentElement, 'clientWidth', {
       configurable: true,
       get: () => (layoutReady ? 595 : 0),
-    });
-    Object.defineProperty(frameDocument.body, 'scrollHeight', {
-      configurable: true,
-      get: () => (layoutReady ? 1_700 : 400_000),
-    });
-    Object.defineProperty(frameDocument.documentElement, 'scrollHeight', {
-      configurable: true,
-      get: () => (layoutReady ? 1_700 : 400_000),
     });
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
       layoutReady = true;
@@ -137,6 +143,9 @@ describe('PdfPreviewPage', () => {
         pageCount: 3,
       }),
     );
+    expect(frameDocument.querySelector('.markdowner-export')).toHaveStyle({
+      width: '595px',
+    });
     expect(onError).not.toHaveBeenCalled();
   });
 
