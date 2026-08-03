@@ -30,7 +30,7 @@
 - Modify `src/components/wysiwyg/SlashCommandMenu.tsx` and its test to generate exactly H1-H4 menu actions from the shared authoring levels.
 - Modify `src/lib/wysiwygBehavior.integration.test.ts` and `src/lib/wysiwygRoundtrip.integration.test.ts` so production-shaped integration harnesses use the same heading extension and lock H4/H5/H6 behavior.
 - Modify `src/lib/outline.test.ts` to prove preserved H5/H6 headings remain navigable at their original depths.
-- Modify `src/styles.css` and `src/styles.test.ts` to define and verify the hierarchy in base preview, split preview, and ProseMirror.
+- Modify `src/styles.css` and verify its built output through browser-computed styles in base preview, split preview, and ProseMirror.
 - Modify `src/shell/MarkdownPreviewPane.test.tsx` to prove semantic H1-H4 preview output and source-line metadata.
 - Modify `src/lib/exportDocument.ts` and `src/lib/exportDocument.test.ts` to define and verify the self-contained HTML/PDF heading scale and rhythm.
 - Modify `package.json` and `pnpm-lock.yaml` to make `@tiptap/extension-heading` a direct dependency rather than importing an undeclared StarterKit transitive dependency.
@@ -309,7 +309,6 @@ Expected: all five files pass; H4 is creatable, Heading 5 is absent from menus, 
 
 **Files:**
 - Modify: `src/styles.css`
-- Modify: `src/styles.test.ts`
 - Modify: `src/shell/MarkdownPreviewPane.test.tsx`
 - Modify: `src/lib/exportDocument.ts`
 - Modify: `src/lib/exportDocument.test.ts`
@@ -319,43 +318,11 @@ Expected: all five files pass; H4 is creatable, Heading 5 is absent from menus, 
 - Produces: base, split-preview, ProseMirror, and `.markdowner-export` H1-H4 rules using the approved scale
 - Produces: quiet body-sized H5/H6 compatibility rules
 
-- [ ] **Step 1: Write failing stylesheet contract tests**
+- [ ] **Step 1: Establish a failing rendered-style baseline**
 
-Extend `src/styles.test.ts` with exact selector assertions using the existing `ruleBody()` helper:
+Start `pnpm dev --host 127.0.0.1`, open `/playground.html` with the `agent-browser` skill, and author H1-H4 followed by body text. Evaluate `getComputedStyle()` for each heading and its following paragraph. Record the current H4 result under `/tmp/markdowner-heading-qa/red-computed-styles.json`.
 
-```ts
-describe('heading hierarchy stylesheet', () => {
-  it('uses the approved H1-H4 scale in the shared markdown surface', () => {
-    for (const [level, size] of [
-      [1, '1.875em'],
-      [2, '1.5em'],
-      [3, '1.25em'],
-      [4, '1.125em'],
-    ] as const) {
-      expect(ruleBody(`.markdown-surface h${level}`)).toContain(`font-size: ${size};`);
-    }
-    expect(ruleBody('.markdown-surface h4')).toContain('font-semibold');
-  });
-
-  it('mirrors H4 in split preview and WYSIWYG', () => {
-    for (const selector of [
-      '.editor-pane-preview .markdown-surface h4',
-      '.notion-editor-content .ProseMirror h4',
-    ]) {
-      const rule = ruleBody(selector);
-      expect(rule).toContain('font-size: 1.125em;');
-    }
-  });
-
-  it('keeps H5 and H6 readable at body scale', () => {
-    for (const selector of ['.markdown-surface h5', '.markdown-surface h6']) {
-      expect(ruleBody(selector)).toContain('font-size: 1em;');
-    }
-  });
-});
-```
-
-Assert the literal `font-semibold` utility used by the implementation. Do not weaken the test to a broad substring search across the entire stylesheet.
+Expected before implementation: H4 has the browser/body-sized fallback instead of the approved `1.125` ratio and compact subsection rhythm. This is the failing behavior; do not accept a source-text search as a substitute.
 
 - [ ] **Step 2: Write failing preview and export tests**
 
@@ -385,13 +352,13 @@ expect(html).toContain('.markdowner-export h3 { font-size: 1.25em;');
 expect(html).toContain('.markdowner-export h4 { font-size: 1.125em;');
 ```
 
-Run:
+Run the DOM/export tests:
 
 ```bash
-pnpm exec vitest run src/styles.test.ts src/shell/MarkdownPreviewPane.test.tsx src/lib/exportDocument.test.ts --maxWorkers=1
+pnpm exec vitest run src/shell/MarkdownPreviewPane.test.tsx src/lib/exportDocument.test.ts --maxWorkers=1
 ```
 
-Expected: FAIL because H4 is missing from the shared, split-preview, and WYSIWYG style contracts and export H1 still uses `2em`.
+Expected: the new semantic preview assertion passes because React-Markdown already emits H4, while the export assertion fails because export H1 still uses `2em`. The browser baseline from Step 1 independently proves the missing WYSIWYG/preview H4 presentation.
 
 - [ ] **Step 3: Add the base and compatibility heading rules**
 
@@ -471,14 +438,13 @@ pnpm exec vitest run \
   src/lib/wysiwygBehavior.integration.test.ts \
   src/lib/wysiwygRoundtrip.integration.test.ts \
   src/lib/outline.test.ts \
-  src/styles.test.ts \
   src/shell/MarkdownPreviewPane.test.tsx \
   src/lib/exportDocument.test.ts \
   src/lib/pdfPagination.production.test.ts \
   --maxWorkers=1
 ```
 
-Expected: all tests pass, including the production/minified pagination harness.
+Expected: all tests pass, including the production/minified pagination harness. Repeat the Step 1 browser `getComputedStyle()` evaluation and store `/tmp/markdowner-heading-qa/green-computed-styles.json`; H1-H4 ratios must be `1.875`, `1.5`, `1.25`, and `1.125` relative to body text, H4 must have `font-weight: 600`, and H5/H6 compatibility headings must remain at the body-size ratio `1`.
 
 ### Task 3: Verify, review, commit, and push the feature checkpoint
 
@@ -551,7 +517,7 @@ git diff -- package.json pnpm-lock.yaml src/App.tsx src/editorPlayground.tsx \
   src/lib/wysiwygBehavior.integration.test.ts \
   src/lib/wysiwygRoundtrip.integration.test.ts \
   src/lib/outline.test.ts \
-  src/styles.css src/styles.test.ts \
+  src/styles.css \
   src/shell/MarkdownPreviewPane.test.tsx \
   src/lib/exportDocument.ts src/lib/exportDocument.test.ts
 ```
@@ -571,7 +537,7 @@ git add package.json pnpm-lock.yaml src/App.tsx src/editorPlayground.tsx \
   src/lib/wysiwygBehavior.integration.test.ts \
   src/lib/wysiwygRoundtrip.integration.test.ts \
   src/lib/outline.test.ts \
-  src/styles.css src/styles.test.ts \
+  src/styles.css \
   src/shell/MarkdownPreviewPane.test.tsx \
   src/lib/exportDocument.ts src/lib/exportDocument.test.ts
 git diff --cached --check
