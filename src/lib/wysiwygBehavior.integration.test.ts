@@ -23,6 +23,7 @@ import { Editor } from '@tiptap/core';
 import { common, createLowlight } from 'lowlight';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { MarkdownerHeading } from '@/components/wysiwyg/headingExtension';
 import { WYSIWYG_LINK_OPTIONS } from '@/lib/wysiwygLinkOptions';
 
 const lowlight = createLowlight(common);
@@ -31,9 +32,11 @@ function buildEditor(initial = ''): Editor {
   return new Editor({
     extensions: [
       StarterKit.configure({
+        heading: false,
         link: WYSIWYG_LINK_OPTIONS,
         codeBlock: false,
       }),
+      MarkdownerHeading,
       CodeBlockLowlight.configure({ lowlight, defaultLanguage: null }),
       Image,
       Table.configure({ resizable: true }),
@@ -106,6 +109,20 @@ describe('WYSIWYG behaviour — markdown input rules', () => {
     expect(firstBlock(editor).attrs?.level).toBe(3);
   });
 
+  it('#### + space converts to H4', () => {
+    typeText(editor, '#### ');
+    expect(firstBlock(editor).attrs?.level).toBe(4);
+  });
+
+  it.each(['##### ', '###### '] as const)(
+    '%s remains paragraph text instead of creating an unsupported heading',
+    (prefix) => {
+      typeText(editor, prefix);
+      expect(firstBlock(editor).type).toBe('paragraph');
+      expect(editor.getText()).toBe(prefix);
+    },
+  );
+
   it('- + space starts a bullet list', () => {
     typeText(editor, '- item');
     expect(firstBlock(editor).type).toBe('bulletList');
@@ -159,7 +176,8 @@ describe('WYSIWYG behaviour — markdown link input rule', () => {
     );
     const editor = new Editor({
       extensions: [
-        StarterKit.configure({ codeBlock: false }),
+        StarterKit.configure({ codeBlock: false, heading: false }),
+        MarkdownerHeading,
         MarkdownLinkInputRule,
         Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
       ],

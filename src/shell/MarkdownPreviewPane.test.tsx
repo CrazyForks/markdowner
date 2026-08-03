@@ -34,6 +34,28 @@ describe('MarkdownPreviewPane', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument();
   });
 
+  it('renders the complete authoring heading hierarchy as semantic h1 through h4', () => {
+    const { container } = render(
+      <MarkdownPreviewPane
+        source={[
+          '# Heading one',
+          '',
+          '## Heading two',
+          '',
+          '### Heading three',
+          '',
+          '#### Heading four',
+        ].join('\n')}
+      />,
+    );
+
+    expect(container.querySelector('h1')).toHaveTextContent('Heading one');
+    expect(container.querySelector('h2')).toHaveTextContent('Heading two');
+    expect(container.querySelector('h3')).toHaveTextContent('Heading three');
+    expect(container.querySelector('h4')).toHaveTextContent('Heading four');
+    expect(container.querySelector('h4')).toHaveAttribute('data-source-line', '7');
+  });
+
   it('renders gfm task lists with checkboxes the task-list styles can match', () => {
     const { container } = render(
       <MarkdownPreviewPane source={['- [ ] open item', '- [x] done item'].join('\n')} />,

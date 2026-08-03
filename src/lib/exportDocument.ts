@@ -754,11 +754,13 @@ img, svg, video { max-width: 100%; height: auto; }`
   font-size: ${style.fontSize}px;
   line-height: ${style.lineHeight};
 }
-.markdowner-export h1 { font-size: 2em; }
-.markdowner-export h2 { font-size: 1.5em; }
-.markdowner-export h3 { font-size: 1.25em; }
-.markdowner-export h4 { font-size: 1.125em; }
-.markdowner-export h5, .markdowner-export h6 { font-size: 1em; }
+.markdowner-export h1 { font-size: 1.875em; font-weight: 700; }
+.markdowner-export h2 { font-size: 1.5em; font-weight: 600; }
+.markdowner-export h3 { font-size: 1.25em; font-weight: 600; }
+.markdowner-export h4 { font-size: 1.125em; font-weight: 600; }
+.markdowner-export h5, .markdowner-export h6 { font-size: 1em; font-weight: 600; }
+.markdowner-export h1, .markdowner-export h2, .markdowner-export h3 { margin-block: 1.5em 0.5em; }
+.markdowner-export h4, .markdowner-export h5, .markdowner-export h6 { margin-block: 1em 0.5em; }
 .markdowner-export p { margin-block: 0 ${style.paragraphSpacing}px; }
 .markdowner-export th,
 .markdowner-export td {

@@ -416,6 +416,40 @@ describe('buildExportHtml', () => {
     expect(html).not.toContain('__markdownerPaginatePdf');
   });
 
+  it('preserves h1 through h4 semantics and the shared heading scale', async () => {
+    const html = await buildExportHtml({
+      title: 'Heading hierarchy',
+      source: [
+        '# Heading one',
+        '',
+        '## Heading two',
+        '',
+        '### Heading three',
+        '',
+        '#### Heading four',
+      ].join('\n'),
+      activeDocumentPath: null,
+    });
+    const exportedDocument = new DOMParser().parseFromString(html, 'text/html');
+
+    expect(exportedDocument.querySelector('h1')?.textContent).toBe('Heading one');
+    expect(exportedDocument.querySelector('h2')?.textContent).toBe('Heading two');
+    expect(exportedDocument.querySelector('h3')?.textContent).toBe('Heading three');
+    expect(exportedDocument.querySelector('h4')?.textContent).toBe('Heading four');
+    expect(html).toContain(
+      '.markdowner-export h1 { font-size: 1.875em; font-weight: 700; }',
+    );
+    expect(html).toContain(
+      '.markdowner-export h2 { font-size: 1.5em; font-weight: 600; }',
+    );
+    expect(html).toContain(
+      '.markdowner-export h3 { font-size: 1.25em; font-weight: 600; }',
+    );
+    expect(html).toContain(
+      '.markdowner-export h4 { font-size: 1.125em; font-weight: 600; }',
+    );
+  });
+
   it('adds explicit Custom page dimensions and the shared paginator when printing', async () => {
     const html = await buildExportHtml({
       title: 'P',

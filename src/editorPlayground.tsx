@@ -22,6 +22,7 @@ import { useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 
 import { createCodeBlockExtension } from '@/components/wysiwyg/codeBlockExtension';
+import { MarkdownerHeading } from '@/components/wysiwyg/headingExtension';
 import { ImeDebugOverlay } from '@/components/wysiwyg/ImeDebugOverlay';
 import { MarkdownLinkInputRule } from '@/components/wysiwyg/markdownLinkInputRule';
 import { PreventTableHoverSelection } from '@/components/wysiwyg/preventTableHoverSelection';
@@ -44,7 +45,12 @@ function Playground() {
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ link: WYSIWYG_LINK_OPTIONS, codeBlock: false }),
+      StarterKit.configure({
+        heading: false,
+        link: WYSIWYG_LINK_OPTIONS,
+        codeBlock: false,
+      }),
+      MarkdownerHeading,
       createCodeBlockExtension(),
       Image,
       Table.configure({ resizable: true }),

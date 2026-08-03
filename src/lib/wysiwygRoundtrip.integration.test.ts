@@ -26,6 +26,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { resolvePersistedWysiwygMarkdown } from './wysiwygEditorSync';
 import { FrontMatterExtension } from '@/components/wysiwyg/frontMatterExtension';
+import { MarkdownerHeading } from '@/components/wysiwyg/headingExtension';
 import obsidianFixture from '../../tests/fixtures/obsidian-frontmatter.md?raw';
 
 const lowlight = createLowlight(common);
@@ -34,7 +35,8 @@ function buildEditor() {
   return new Editor({
     extensions: [
       FrontMatterExtension,
-      StarterKit.configure({ codeBlock: false }),
+      StarterKit.configure({ codeBlock: false, heading: false }),
+      MarkdownerHeading,
       CodeBlockLowlight.configure({ lowlight, defaultLanguage: null }),
       Image,
       Table.configure({ resizable: true }),
@@ -134,6 +136,21 @@ describe('WYSIWYG load → no-edit → save preserves original bytes', () => {
     const { loaded, canonical } = loadAndSnapshot(editor, source);
     const persisted = resolvePersistedWysiwygMarkdown(editor.getMarkdown(), loaded, canonical);
     expect(persisted).toBe(loaded);
+  });
+
+  it('round-trips compatibility H1-H6 headings at their original depths', () => {
+    editor = buildEditor();
+    const source = [
+      '# One',
+      '## Two',
+      '### Three',
+      '#### Four',
+      '##### Five',
+      '###### Six',
+    ].join('\n\n');
+    loadAndSnapshot(editor, source);
+
+    expect(editor.getMarkdown().trim()).toBe(source);
   });
 
   it('hands back the live serialised markdown the moment the user authors a change', () => {

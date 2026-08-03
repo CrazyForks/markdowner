@@ -10,7 +10,6 @@ import {
   Heading2,
   Heading3,
   Heading4,
-  Heading5,
   Image as ImageIcon,
   Link as LinkIcon,
   List,
@@ -30,6 +29,10 @@ import { importImageAsset } from '@/lib/desktop';
 import { publishEditorEvent, subscribeEditorEvent } from '@/lib/editorEvents';
 import { IMAGE_FILE_EXTENSIONS } from '@/lib/fileDialogOptions';
 import { buildSkillSuggestions } from '@/lib/skillSuggestions';
+import {
+  AUTHORING_HEADING_LEVELS,
+  type AuthoringHeadingLevel,
+} from './headingExtension';
 
 import { filterSlashItems } from './slashItemFilter';
 
@@ -52,6 +55,37 @@ type SlashItem = {
   run?: (editor: Editor) => void;
 };
 
+const HEADING_ICONS: Record<AuthoringHeadingLevel, typeof Type> = {
+  1: Heading1,
+  2: Heading2,
+  3: Heading3,
+  4: Heading4,
+};
+
+const HEADING_DESCRIPTIONS: Record<AuthoringHeadingLevel, string> = {
+  1: 'Large section heading.',
+  2: 'Medium section heading.',
+  3: 'Small section heading.',
+  4: 'Sub-section heading.',
+};
+
+const HEADING_ITEMS: SlashItem[] = AUTHORING_HEADING_LEVELS.map((level) => ({
+  id: `h${level}`,
+  title: `Heading ${level}`,
+  description: HEADING_DESCRIPTIONS[level],
+  keywords: [
+    `h${level}`,
+    'heading',
+    ...(level === 1 ? ['title', '큰제목'] : []),
+    `제목${level}`,
+    '제목',
+    '헤딩',
+  ],
+  icon: HEADING_ICONS[level],
+  convertible: true,
+  run: (editor) => editor.chain().focus().setNode('heading', { level }).run(),
+}));
+
 const SLASH_ITEMS: SlashItem[] = [
   {
     id: 'paragraph',
@@ -62,51 +96,7 @@ const SLASH_ITEMS: SlashItem[] = [
     convertible: true,
     run: (editor) => editor.chain().focus().setParagraph().run(),
   },
-  {
-    id: 'h1',
-    title: 'Heading 1',
-    description: 'Large section heading.',
-    keywords: ['h1', 'heading', 'title', '제목1', '제목', '큰제목', '헤딩'],
-    icon: Heading1,
-    convertible: true,
-    run: (editor) => editor.chain().focus().setNode('heading', { level: 1 }).run(),
-  },
-  {
-    id: 'h2',
-    title: 'Heading 2',
-    description: 'Medium section heading.',
-    keywords: ['h2', 'heading', '제목2', '제목', '헤딩'],
-    icon: Heading2,
-    convertible: true,
-    run: (editor) => editor.chain().focus().setNode('heading', { level: 2 }).run(),
-  },
-  {
-    id: 'h3',
-    title: 'Heading 3',
-    description: 'Small section heading.',
-    keywords: ['h3', 'heading', '제목3', '제목', '헤딩'],
-    icon: Heading3,
-    convertible: true,
-    run: (editor) => editor.chain().focus().setNode('heading', { level: 3 }).run(),
-  },
-  {
-    id: 'h4',
-    title: 'Heading 4',
-    description: 'Sub-section heading.',
-    keywords: ['h4', 'heading', '제목4', '제목', '헤딩'],
-    icon: Heading4,
-    convertible: true,
-    run: (editor) => editor.chain().focus().setNode('heading', { level: 4 }).run(),
-  },
-  {
-    id: 'h5',
-    title: 'Heading 5',
-    description: 'Smallest section heading.',
-    keywords: ['h5', 'heading', '제목5', '제목', '헤딩'],
-    icon: Heading5,
-    convertible: true,
-    run: (editor) => editor.chain().focus().setNode('heading', { level: 5 }).run(),
-  },
+  ...HEADING_ITEMS,
   {
     id: 'bulleted',
     title: 'Bulleted list',

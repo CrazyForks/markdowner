@@ -62,6 +62,18 @@ describe('parseMarkdownOutline', () => {
     ]);
   });
 
+  it('keeps compatibility H5/H6 headings navigable at their source depth', () => {
+    expect(
+      parseMarkdownOutline('##### Five\n###### Six').map(({ depth, title }) => ({
+        depth,
+        title,
+      })),
+    ).toEqual([
+      { depth: 5, title: 'Five' },
+      { depth: 6, title: 'Six' },
+    ]);
+  });
+
   it('ignores headings inside fenced code blocks', () => {
     const source = [
       '# Visible',

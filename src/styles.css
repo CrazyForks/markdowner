@@ -247,13 +247,25 @@ img.ProseMirror-separator {
     @apply min-h-full outline-none;
   }
   .markdown-surface h1 {
-    @apply text-3xl font-bold mt-6 mb-4 leading-tight;
+    font-size: 1.875em;
+    @apply mt-6 mb-4 font-bold leading-tight;
   }
   .markdown-surface h2 {
-    @apply text-2xl font-semibold mt-6 mb-3 leading-snug;
+    font-size: 1.5em;
+    @apply mt-6 mb-3 font-semibold leading-snug;
   }
   .markdown-surface h3 {
-    @apply text-xl font-semibold mt-5 mb-2;
+    font-size: 1.25em;
+    @apply mt-5 mb-2 font-semibold;
+  }
+  .markdown-surface h4 {
+    font-size: 1.125em;
+    @apply mt-4 mb-2 font-semibold leading-snug;
+  }
+  .markdown-surface h5,
+  .markdown-surface h6 {
+    font-size: 1em;
+    @apply mt-4 mb-2 font-semibold;
   }
   .markdown-surface p {
     @apply my-3;
@@ -413,6 +425,15 @@ img.ProseMirror-separator {
     font-size: 1.25em;
     @apply mt-6 mb-2 font-semibold;
   }
+  .editor-pane-preview .markdown-surface h4 {
+    font-size: 1.125em;
+    @apply mt-4 mb-2 font-semibold leading-snug;
+  }
+  .editor-pane-preview .markdown-surface h5,
+  .editor-pane-preview .markdown-surface h6 {
+    font-size: 1em;
+    @apply mt-4 mb-2 font-semibold;
+  }
   .editor-pane-preview .markdown-surface > *:first-child {
     @apply mt-0;
   }
@@ -504,6 +525,15 @@ img.ProseMirror-separator {
   }
   .notion-editor-content .ProseMirror h3 {
     font-size: 1.25em;
+  }
+  .notion-editor-content .ProseMirror h4 {
+    font-size: 1.125em;
+    @apply mt-4 mb-2 px-1 font-semibold tracking-normal;
+  }
+  .notion-editor-content .ProseMirror h5,
+  .notion-editor-content .ProseMirror h6 {
+    font-size: 1em;
+    @apply mt-4 mb-2 px-1 font-semibold tracking-normal;
   }
   /* First block hugs the top — no extra margin above the document's leading
      heading or paragraph since the static page header was removed. */

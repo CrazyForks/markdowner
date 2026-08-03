@@ -111,7 +111,12 @@ describe('SlashCommandMenu', () => {
 
     expect(await screen.findByRole('menu', { name: /insert block/i })).toBeInTheDocument();
 
-    for (let index = 0; index < 12; index += 1) {
+    const tableIndex = screen
+      .getAllByRole('menuitem')
+      .findIndex((item) => /^table/i.test(item.textContent ?? ''));
+    expect(tableIndex).toBeGreaterThan(0);
+
+    for (let index = 0; index < tableIndex; index += 1) {
       fireEvent.keyDown(editor.view.dom, { key: 'ArrowDown' });
     }
 
@@ -327,9 +332,14 @@ describe('SlashCommandMenu', () => {
     });
 
     expect(await screen.findByRole('menu', { name: /turn into/i })).toBeInTheDocument();
-    // h1–h5 are offered as conversion targets.
-    expect(screen.getByRole('menuitem', { name: /heading 4/i })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /heading 5/i })).toBeInTheDocument();
+    // H1-H4 are the complete authoring surface; H5/H6 remain load-only
+    // compatibility levels and must not appear as conversion targets.
+    for (const level of [1, 2, 3, 4]) {
+      expect(
+        screen.getByRole('menuitem', { name: new RegExp(`heading ${level}`, 'i') }),
+      ).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('menuitem', { name: /heading 5/i })).toBeNull();
     // Insert-only blocks are not conversion targets.
     expect(screen.queryByRole('menuitem', { name: /^table$/i })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /divider/i })).toBeNull();

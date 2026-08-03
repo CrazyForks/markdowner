@@ -19,6 +19,7 @@ import { Markdown } from '@tiptap/markdown';
 import { useEditor, type Editor as TiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { createCodeBlockExtension } from '@/components/wysiwyg/codeBlockExtension';
+import { MarkdownerHeading } from '@/components/wysiwyg/headingExtension';
 import { ImeDebugOverlay } from '@/components/wysiwyg/ImeDebugOverlay';
 import { MarkdownLinkInputRule } from '@/components/wysiwyg/markdownLinkInputRule';
 import { PreventTableHoverSelection } from '@/components/wysiwyg/preventTableHoverSelection';
@@ -1881,6 +1882,7 @@ export default function App() {
     () => [
       FrontMatterExtension,
       StarterKit.configure({
+        heading: false,
         // Links only from explicit markdown / commands — never autolinked
         // from bare dotted words. See wysiwygLinkOptions.ts for the why.
         link: WYSIWYG_LINK_OPTIONS,
@@ -1897,6 +1899,7 @@ export default function App() {
         // editor gains syntax highlighting + a per-block language picker.
         codeBlock: false,
       }),
+      MarkdownerHeading,
       createCodeBlockExtension(),
       createMarkdownImageExtension(() => activeDocumentPathRef.current),
       // MarkdownTable = stock Table + non-corrupting markdown round-trip
