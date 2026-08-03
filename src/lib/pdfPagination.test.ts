@@ -335,6 +335,34 @@ describe('paginatePdfDocument', () => {
       '<b>Plain text</b>',
     );
   });
+
+  it('does not add a blank page for integer scroll-height rounding on fractional paper sizes', () => {
+    document.body.innerHTML =
+      '<main class="markdowner-export"><p id="content"></p></main>';
+    const content = document.querySelector('#content') as HTMLElement;
+    vi.spyOn(content, 'getBoundingClientRect').mockReturnValue(rect(54, 20));
+    const bodyScrollHeight = vi
+      .spyOn(document.body, 'scrollHeight', 'get')
+      .mockReturnValue(842);
+    const documentScrollHeight = vi
+      .spyOn(document.documentElement, 'scrollHeight', 'get')
+      .mockReturnValue(842);
+
+    const result = paginatePdfDocument(document, {
+      pageWidth: 595.2755905511812,
+      pageHeight: 841.8897637795276,
+      pageInsets: { top: 32, right: 32, bottom: 32, left: 32 },
+      pageFurniture: {
+        ...pageFurniture,
+        pageNumbersEnabled: true,
+      },
+      maxPages: 100,
+    });
+    bodyScrollHeight.mockRestore();
+    documentScrollHeight.mockRestore();
+
+    expect(result.pageCount).toBe(1);
+  });
 });
 
 describe('PDF pagination runtime', () => {
