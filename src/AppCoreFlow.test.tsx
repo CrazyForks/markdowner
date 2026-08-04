@@ -9,6 +9,7 @@ import {
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import gfmContractFixture from '../tests/fixtures/gfm-contract.md?raw';
 import type { AppSnapshot, EditorMode } from './lib/desktop';
 
 const bootstrapMock = vi.fn();
@@ -365,10 +366,10 @@ describe('App core Markdown editing flow', () => {
   it(
     'opens a Markdown file and switches WYSIWYG, source, and split modes without runtime errors',
     async () => {
-      const openedPath = '/tmp/project/core-flow.md';
-      const openedSource = ['# Core flow', '', 'A **bold** paragraph.'].join('\n');
+      const openedPath = '/tmp/project/gfm-contract.md';
+      const openedSource = gfmContractFixture;
       const openedSnapshot = baseSnapshot({
-        activeDocumentName: 'core-flow.md',
+        activeDocumentName: 'gfm-contract.md',
         activeDocumentPath: openedPath,
         activeDocumentSource: openedSource,
         mode: 'Wysiwyg',
@@ -393,11 +394,14 @@ describe('App core Markdown editing flow', () => {
         const openFileButton = await screen.findByRole('button', { name: /^open file…$/i });
         fireEvent.click(openFileButton);
 
-        expect(await screen.findByRole('tab', { name: /core-flow\.md/i })).toBeInTheDocument();
+        expect(await screen.findByRole('tab', { name: /gfm-contract\.md/i })).toBeInTheDocument();
         await waitFor(() => {
           expect(openDocumentMock).toHaveBeenCalledWith(openedPath);
         });
-        expect(screen.getByTestId('editor-surface-wysiwyg')).toHaveTextContent('Core flow');
+        const wysiwygSurface = screen.getByTestId('editor-surface-wysiwyg');
+        expect(wysiwygSurface).toHaveTextContent('GFM Contract');
+        expect(wysiwygSurface.querySelector('table')).toBeInTheDocument();
+        expect(wysiwygSurface.querySelector('s')).toHaveTextContent('Retired text');
 
         fireEvent.keyDown(window, { key: 'k', metaKey: true });
         fireEvent.keyDown(window, { key: 'e', metaKey: true });
@@ -408,7 +412,9 @@ describe('App core Markdown editing flow', () => {
         await waitFor(() => {
           expect(setModeMock).toHaveBeenCalledWith('Wysiwyg');
         });
-        expect(screen.getByTestId('editor-surface-wysiwyg')).toHaveTextContent('Core flow');
+        expect(
+          screen.getByTestId('editor-surface-wysiwyg').querySelector('table'),
+        ).toBeInTheDocument();
 
         fireEvent.keyDown(window, { key: 'k', metaKey: true });
         fireEvent.keyDown(window, { key: 's', metaKey: true });
@@ -416,7 +422,10 @@ describe('App core Markdown editing flow', () => {
           expect(setModeMock).toHaveBeenCalledWith('SplitView');
         });
         await waitFor(() => {
-          expect(screen.getByTestId('editor-surface-preview')).toHaveTextContent('Core flow');
+          const preview = screen.getByTestId('editor-surface-preview');
+          expect(preview.querySelector('table')).toBeInTheDocument();
+          expect(preview.querySelector('del')).toHaveTextContent('Retired text');
+          expect(preview.querySelector('script')).toBeNull();
         });
 
         await runtimeErrors.expectClean();

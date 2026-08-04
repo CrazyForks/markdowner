@@ -25,6 +25,13 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }));
 
+describe('always-on GFM', () => {
+  it('does not expose a persisted dialect preference', () => {
+    expect(DEFAULT_SETTINGS).not.toHaveProperty('gfmEnabled');
+    expect(DEFAULT_SETTINGS).not.toHaveProperty('markdownDialect');
+  });
+});
+
 describe('code block syntax highlighting settings', () => {
   it('defaults to One Dark with theme sync enabled', () => {
     expect(DEFAULT_SETTINGS.codeBlockTheme).toBe('one-dark');

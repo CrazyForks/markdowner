@@ -77,6 +77,15 @@ describe('SettingsPanel update section', () => {
 
   afterEach(() => cleanup());
 
+  it('does not expose a GFM setting or explanation', () => {
+    renderPanel();
+
+    expect(
+      screen.queryByRole('switch', { name: /gfm|github flavored markdown/i }),
+    ).toBeNull();
+    expect(screen.queryByText(/gfm|github flavored markdown/i)).toBeNull();
+  });
+
   it('shows the update action and fires onUpdateAction when available', () => {
     const onUpdateAction = vi.fn();
     renderPanel({ updateInfo: availableUpdate, onUpdateAction });
