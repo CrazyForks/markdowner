@@ -506,6 +506,23 @@ it('previews and confirms independent body and fenced-code typography', async ()
 });
 ```
 
+Extend the existing Reset test by changing both fenced-code controls before
+clicking Reset, then assert all three typography values return to their
+defaults:
+
+```ts
+fireEvent.change(screen.getByLabelText('Code block size'), {
+  target: { value: '4' },
+});
+fireEvent.change(screen.getByLabelText('Code block line height'), {
+  target: { value: '0.9' },
+});
+fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+expect(screen.getByLabelText('Body size')).toHaveValue('14');
+expect(screen.getByLabelText('Code block size')).toHaveValue('12');
+expect(screen.getByLabelText('Code block line height')).toHaveValue('1.6');
+```
+
 - [ ] **Step 6: Run the integration tests and confirm RED**
 
 Run:
@@ -536,9 +553,28 @@ In `src/shell/ExportPreviewTab.tsx`, change only the `Body size` control bound:
 />
 ```
 
-Leave `NumericStyleKey`, draft normalization, request-reset behavior, and
-confirmation flow unchanged. `ExportCodeStyleControls` already emits partial
-patches through the existing normalized parent callback.
+Keep `NumericStyleKey`, draft normalization, and confirmation flow unchanged.
+`ExportCodeStyleControls` already emits partial patches through the existing
+normalized parent callback. Update the explicit Reset action so theme changes
+still preserve typography while Reset supplies the three defaults before
+applying the app preset:
+
+```ts
+setDraftStyle((current) =>
+  applyDraftStylePreset(
+    {
+      ...current,
+      fontSize: DEFAULT_EXPORT_STYLE.fontSize,
+      codeBlockFontSize: DEFAULT_EXPORT_STYLE.codeBlockFontSize,
+      codeBlockLineHeight: DEFAULT_EXPORT_STYLE.codeBlockLineHeight,
+      codeBlockTheme: 'app',
+      inlineCodePreset: 'amber',
+    },
+    'app',
+    appTheme,
+  ),
+);
+```
 
 - [ ] **Step 8: Run Task 2 checks and review the complete diff**
 
