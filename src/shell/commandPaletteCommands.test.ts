@@ -16,6 +16,7 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     saveAs: vi.fn(),
     exportHtml: vi.fn(),
     exportPdf: vi.fn(),
+    exportImage: vi.fn(),
     exportWorkspaceHtml: vi.fn(),
     exportWorkspacePdfs: vi.fn(),
     revealActiveFileInFinder: vi.fn(),
@@ -119,6 +120,9 @@ describe('buildCommandPaletteCommands', () => {
     expect(commands.find((command) => command.id === 'file.exportPdf')?.label).toBe(
       'Export as PDF…',
     );
+    expect(commands.find((command) => command.id === 'file.exportImage')?.label).toBe(
+      'Export as Image…',
+    );
     expect(commands.find((command) => command.id === 'file.exportWorkspaceHtml')?.label).toBe(
       'Export All Markdown as HTML…',
     );
@@ -136,6 +140,7 @@ describe('buildCommandPaletteCommands', () => {
       'file.saveAs',
       'file.exportHtml',
       'file.exportPdf',
+      'file.exportImage',
       'file.exportWorkspaceHtml',
       'file.exportWorkspacePdfs',
       'file.revealInFinder',
@@ -193,6 +198,7 @@ describe('buildCommandPaletteCommands', () => {
     expect(commands.find((command) => command.id === 'file.saveAs')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'file.exportHtml')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'file.exportPdf')?.disabled).toBe(true);
+    expect(commands.find((command) => command.id === 'file.exportImage')?.disabled).toBe(true);
     expect(commands.find((command) => command.id === 'file.exportWorkspaceHtml')?.disabled).toBe(
       true,
     );
@@ -244,6 +250,7 @@ describe('buildCommandPaletteCommands', () => {
   it('wires the export commands to their actions', () => {
     const exportHtml = vi.fn();
     const exportPdf = vi.fn();
+    const exportImage = vi.fn();
     const exportWorkspaceHtml = vi.fn();
     const exportWorkspacePdfs = vi.fn();
     const commands = buildCommandPaletteCommands({
@@ -252,15 +259,23 @@ describe('buildCommandPaletteCommands', () => {
       canGoBack: true,
       canGoForward: true,
       settings: settings(),
-      actions: actions({ exportHtml, exportPdf, exportWorkspaceHtml, exportWorkspacePdfs }),
+      actions: actions({
+        exportHtml,
+        exportPdf,
+        exportImage,
+        exportWorkspaceHtml,
+        exportWorkspacePdfs,
+      }),
     });
 
     commands.find((command) => command.id === 'file.exportHtml')?.run?.();
     commands.find((command) => command.id === 'file.exportPdf')?.run?.();
+    commands.find((command) => command.id === 'file.exportImage')?.run?.();
     commands.find((command) => command.id === 'file.exportWorkspaceHtml')?.run?.();
     commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.run?.();
     expect(exportHtml).toHaveBeenCalledTimes(1);
     expect(exportPdf).toHaveBeenCalledTimes(1);
+    expect(exportImage).toHaveBeenCalledTimes(1);
     expect(exportWorkspaceHtml).toHaveBeenCalledTimes(1);
     expect(exportWorkspacePdfs).toHaveBeenCalledTimes(1);
   });

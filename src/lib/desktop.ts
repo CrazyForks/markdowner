@@ -19,6 +19,11 @@ import {
   normalizeDraftBackupEntries,
   type DraftBackupEntry,
 } from './draftBackups';
+import type {
+  ImageExportFormat,
+  ImageExportLayout,
+  ImageExportScale,
+} from './imageExport';
 
 export type EditorMode = 'Wysiwyg' | 'Editor' | 'SplitView';
 export type ThemeKind = 'BuiltInLight' | 'BuiltInDark' | 'CustomCss';
@@ -238,6 +243,31 @@ export async function exportPdfFile(
 
 export async function exportPdfFiles(files: readonly PdfExportFile[]): Promise<void> {
   await invoke<void>('write_pdf_files', { files });
+}
+
+export interface ImageExportRequest {
+  path: string;
+  html: string;
+  format: ImageExportFormat;
+  layout: ImageExportLayout;
+  scale: ImageExportScale;
+  quality: number;
+  paperWidthMm: number;
+  paperHeightMm: number;
+  backgroundColor: string;
+}
+
+export interface ImageExportResult {
+  paths: string[];
+  width: number;
+  height: number;
+  pageCount: number;
+}
+
+export async function exportImageFile(
+  request: ImageExportRequest,
+): Promise<ImageExportResult> {
+  return invoke<ImageExportResult>('write_image_file', { request });
 }
 
 /**

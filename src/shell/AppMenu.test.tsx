@@ -42,6 +42,7 @@ function renderAppMenu(overrides: Partial<React.ComponentProps<typeof AppMenu>> 
       onImportTheme={() => {}}
       onExportHtml={() => {}}
       onExportPdf={() => {}}
+      onExportImage={() => {}}
       onExportWorkspaceHtml={() => {}}
       onExportWorkspacePdfs={() => {}}
       onSetMode={() => {}}
@@ -98,11 +99,13 @@ describe('AppMenu mode shortcuts', () => {
   it('invokes the export handlers from the Export menu items', () => {
     const onExportHtml = vi.fn();
     const onExportPdf = vi.fn();
+    const onExportImage = vi.fn();
     const onExportWorkspaceHtml = vi.fn();
     const onExportWorkspacePdfs = vi.fn();
     renderAppMenu({
       onExportHtml,
       onExportPdf,
+      onExportImage,
       onExportWorkspaceHtml,
       onExportWorkspacePdfs,
     });
@@ -114,6 +117,10 @@ describe('AppMenu mode shortcuts', () => {
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
     fireEvent.click(screen.getByRole('menuitem', { name: /Export as PDF/ }));
     expect(onExportPdf).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export as Image/ }));
+    expect(onExportImage).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
     fireEvent.click(screen.getByRole('menuitem', { name: /Export All Markdown as HTML/ }));
@@ -129,6 +136,7 @@ describe('AppMenu mode shortcuts', () => {
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
     expect(screen.getByRole('menuitem', { name: /Export as HTML/ })).toBeDisabled();
     expect(screen.getByRole('menuitem', { name: /Export as PDF/ })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /Export as Image/ })).toBeDisabled();
     expect(
       screen.getByRole('menuitem', { name: /Export All Markdown as HTML/ }),
     ).not.toBeDisabled();

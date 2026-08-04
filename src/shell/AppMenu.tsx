@@ -7,6 +7,7 @@ import {
   FileCode,
   Files,
   FileUp,
+  Image as ImageIcon,
   Keyboard,
   Menu,
   Monitor,
@@ -43,6 +44,7 @@ interface AppMenuProps {
   onImportTheme: () => void;
   onExportHtml: () => void;
   onExportPdf: () => void;
+  onExportImage: () => void;
   onExportWorkspaceHtml: () => void;
   onExportWorkspacePdfs: () => void;
   onSetMode: (mode: EditorMode) => void;
@@ -178,6 +180,7 @@ export function AppMenu({
   onImportTheme,
   onExportHtml,
   onExportPdf,
+  onExportImage,
   onExportWorkspaceHtml,
   onExportWorkspacePdfs,
   onSetMode,
@@ -284,6 +287,14 @@ export function AppMenu({
             onSelect={() => run(onExportPdf)}
           >
             Export as PDF…
+          </MenuAction>
+          <MenuAction
+            disabled={!activeDocumentOpen || busy}
+            icon={<ImageIcon className="size-4" />}
+            title="Export the document as PNG, JPEG, or WebP"
+            onSelect={() => run(onExportImage)}
+          >
+            Export as Image…
           </MenuAction>
           <MenuAction
             disabled={!hasWorkspaceRoot || busy}

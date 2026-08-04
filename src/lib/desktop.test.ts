@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import {
+  exportImageFile,
   exportPdfFile,
   exportPdfFiles,
   exportTextFiles,
@@ -82,5 +83,29 @@ describe('desktop export bridge', () => {
     ];
     await exportPdfFiles(files);
     expect(invokeMock).toHaveBeenLastCalledWith('write_pdf_files', { files });
+  });
+
+  it('passes the complete image request through one typed command argument', async () => {
+    const request = {
+      path: '/tmp/Guide.webp',
+      html: '<html />',
+      format: 'webp' as const,
+      layout: 'pages' as const,
+      scale: 2 as const,
+      quality: 90,
+      paperWidthMm: 210,
+      paperHeightMm: 297,
+      backgroundColor: '#ffffff',
+    };
+    const result = {
+      paths: ['/tmp/Guide-001.webp'],
+      width: 1587,
+      height: 2245,
+      pageCount: 1,
+    };
+    invokeMock.mockResolvedValueOnce(result);
+
+    await expect(exportImageFile(request)).resolves.toEqual(result);
+    expect(invokeMock).toHaveBeenLastCalledWith('write_image_file', { request });
   });
 });

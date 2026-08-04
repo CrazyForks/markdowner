@@ -16,6 +16,7 @@ export type CommandPaletteActions = {
   saveAs: () => void;
   exportHtml: () => void;
   exportPdf: () => void;
+  exportImage: () => void;
   exportWorkspaceHtml: () => void;
   exportWorkspacePdfs: () => void;
   revealActiveFileInFinder: () => void;
@@ -146,6 +147,13 @@ export function buildCommandPaletteCommands(
       label: 'Export as PDF…',
       disabled: !activeDocumentOpen,
       run: actions.exportPdf,
+    },
+    {
+      id: 'file.exportImage',
+      category: 'File',
+      label: 'Export as Image…',
+      disabled: !activeDocumentOpen,
+      run: actions.exportImage,
     },
     {
       id: 'file.exportWorkspaceHtml',

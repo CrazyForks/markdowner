@@ -124,6 +124,7 @@ import {
   saveActiveDocumentAs,
   exportPdfFile,
   exportPdfFiles,
+  exportImageFile,
   exportTextFile,
   exportTextFiles,
   readTextFiles,
@@ -154,6 +155,14 @@ import {
   type ExportTheme,
   type WorkspaceExportFormat,
 } from '@/lib/exportDocument';
+import {
+  imageExtension,
+  imageFormatLabel,
+  loadImageExportOptions,
+  normalizeImageExportOptions,
+  saveImageExportPreferences,
+  type ImageExportOptions,
+} from '@/lib/imageExport';
 import { resolvePdfPaper } from '@/lib/pdfPaper';
 import {
   applyDraftBackupsToRestoredTabs,
@@ -582,6 +591,9 @@ export default function App() {
   const [exportRequest, setExportRequest] = useState<ExportPreviewRequest | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportStyle, setExportStyle] = useState<ExportStyle>(() => loadExportStyle());
+  const [imageExportOptions, setImageExportOptions] = useState<ImageExportOptions>(() =>
+    loadImageExportOptions(),
+  );
   const exportAppTheme: ExportTheme =
     snapshot.theme.kind === 'BuiltInDark' ? 'dark' : 'light';
   const exportPreviewInitialStyle = useMemo(
@@ -4908,15 +4920,22 @@ export default function App() {
     }, `Could not prepare workspace ${format.toUpperCase()} export`);
   };
 
-  const handleConfirmExport = async (nextStyle: ExportStyle) => {
+  const handleConfirmExport = async (
+    nextStyle: ExportStyle,
+    nextImageOptions?: ImageExportOptions,
+  ) => {
     const request = exportRequest;
     if (!request) return;
     const style = normalizeExportStyle(nextStyle);
     const paper = resolvePdfPaper(style);
+    const selectedImageOptions =
+      request.format === 'image'
+        ? normalizeImageExportOptions(nextImageOptions ?? imageExportOptions)
+        : null;
     setExportStyle(style);
     saveExportStyle(style);
     if (
-      request.format === 'pdf' &&
+      (request.format === 'pdf' || request.format === 'image') &&
       (settings.pdfPaperSize !== style.paperSize ||
         settings.pdfPaperOrientation !== style.paperOrientation ||
         settings.pdfPaperWidthMm !== style.paperWidthMm ||
@@ -4931,29 +4950,52 @@ export default function App() {
       });
     }
 
-    const formatLabel = request.format.toUpperCase();
+    const formatLabel = selectedImageOptions
+      ? imageFormatLabel(selectedImageOptions.format)
+      : request.format.toUpperCase();
     const fallback =
       request.scope === 'workspace'
         ? `Could not export workspace to ${formatLabel}`
-        : `Could not export to ${formatLabel}`;
+        : `Could not export as ${formatLabel}`;
 
     setExportError(null);
     setSnapshot((current) => setSnapshotLastError(current, null));
     await withBusy(async () => {
       if (request.scope === 'document') {
+        const imageFileExtension = selectedImageOptions
+          ? imageExtension(selectedImageOptions.format)
+          : null;
+        const imageFilterName = selectedImageOptions
+          ? selectedImageOptions.format === 'webp'
+            ? 'WebP Image'
+            : `${imageFormatLabel(selectedImageOptions.format)} Image`
+          : null;
         const selected = await saveDialog(
           request.format === 'html'
             ? {
                 defaultPath: `${request.title}.html`,
                 filters: [{ name: 'HTML', extensions: ['html'] }],
               }
-            : {
-                defaultPath: defaultPdfExportPath(
-                  request.activeDocumentPath,
-                  snapshot.activeDocumentName,
-                ),
-                filters: [{ name: 'PDF', extensions: ['pdf'] }],
-              },
+            : request.format === 'pdf'
+              ? {
+                  defaultPath: defaultPdfExportPath(
+                    request.activeDocumentPath,
+                    snapshot.activeDocumentName,
+                  ),
+                  filters: [{ name: 'PDF', extensions: ['pdf'] }],
+                }
+              : {
+                  defaultPath: defaultPdfExportPath(
+                    request.activeDocumentPath,
+                    snapshot.activeDocumentName,
+                  ).replace(/\.pdf$/i, `.${imageFileExtension}`),
+                  filters: [
+                    {
+                      name: imageFilterName ?? 'Image',
+                      extensions: [imageFileExtension ?? 'png'],
+                    },
+                  ],
+                },
         );
         if (typeof selected !== 'string') return;
 
@@ -4961,18 +5003,54 @@ export default function App() {
           title: request.title,
           source: request.source,
           activeDocumentPath: request.activeDocumentPath,
-          renderMode: request.format === 'pdf' ? 'paged' : 'html',
+          renderMode:
+            request.format === 'pdf'
+              ? 'paged'
+              : request.format === 'image'
+                ? selectedImageOptions?.layout === 'long'
+                  ? 'continuous'
+                  : 'paged'
+                : 'html',
           style,
         });
         if (request.format === 'html') {
           await exportTextFile(selected, html);
-        } else {
+        } else if (request.format === 'pdf') {
           await exportPdfFile(
             selected,
             html,
             paper.widthMm,
             paper.heightMm,
           );
+        } else {
+          if (!selectedImageOptions) {
+            throw new Error('Image export options are unavailable');
+          }
+          const result = await exportImageFile({
+            path: selected,
+            html,
+            format: selectedImageOptions.format,
+            layout: selectedImageOptions.layout,
+            scale: selectedImageOptions.scale,
+            quality: selectedImageOptions.quality,
+            paperWidthMm: paper.widthMm,
+            paperHeightMm: paper.heightMm,
+            backgroundColor: style.backgroundColor,
+          });
+          if (result.paths.length === 0) {
+            throw new Error('The image renderer did not return an output path');
+          }
+          setImageExportOptions(selectedImageOptions);
+          saveImageExportPreferences(selectedImageOptions);
+          await handleCloseTab(EXPORT_PREVIEW_TAB_ID, {
+            suppressActiveTabAnnouncement: true,
+          });
+          announceShell(
+            result.paths.length === 1
+              ? `Exported ${formatLabel} to ${result.paths[0]}`
+              : `Exported ${result.paths.length} ${formatLabel} images to ${result.paths.join(', ')}`,
+          );
+          return;
         }
         announceShell(`Exported ${formatLabel} to ${selected}`);
         await handleCloseTab(EXPORT_PREVIEW_TAB_ID);
@@ -5617,7 +5695,10 @@ export default function App() {
     );
   });
 
-  const handleCloseTab = useEffectEvent(async (targetId: string) => {
+  const handleCloseTab = useEffectEvent(async (
+    targetId: string,
+    options: { suppressActiveTabAnnouncement?: boolean } = {},
+  ) => {
     if (targetId === EXPORT_PREVIEW_TAB_ID) {
       const currentTabs = tabsRef.current;
       if (!currentTabs.some((tab) => tab.id === EXPORT_PREVIEW_TAB_ID)) {
@@ -5638,6 +5719,9 @@ export default function App() {
 
       tabsRef.current = remainingTabs;
       activeTabIdRef.current = nextActiveTabId;
+      if (options.suppressActiveTabAnnouncement) {
+        lastAnnouncedTabIdRef.current = nextActiveTabId;
+      }
       preExportTabIdRef.current = null;
       setExportError(null);
       setExportRequest(null);
@@ -6519,6 +6603,7 @@ export default function App() {
       saveAs: () => void handleSaveAs(),
       exportHtml: () => openDocumentExport('html'),
       exportPdf: () => openDocumentExport('pdf'),
+      exportImage: () => openDocumentExport('image'),
       exportWorkspaceHtml: () => void openWorkspaceExport('html'),
       exportWorkspacePdfs: () => void openWorkspaceExport('pdf'),
       revealActiveFileInFinder: () => {
@@ -6628,6 +6713,7 @@ export default function App() {
             onImportTheme={() => void handleImportTheme()}
             onExportHtml={() => openDocumentExport('html')}
             onExportPdf={() => openDocumentExport('pdf')}
+            onExportImage={() => openDocumentExport('image')}
             onExportWorkspaceHtml={() => void openWorkspaceExport('html')}
             onExportWorkspacePdfs={() => void openWorkspaceExport('pdf')}
             onSetMode={(mode) => void handleSetMode(mode)}
@@ -6790,8 +6876,9 @@ export default function App() {
             appCodeBlockTheme={effectiveCodeBlockTheme}
             busy={busy}
             errorMessage={exportError}
+            initialImageOptions={imageExportOptions}
             onCancel={() => void handleCloseTab(EXPORT_PREVIEW_TAB_ID)}
-            onConfirm={(style) => void handleConfirmExport(style)}
+            onConfirm={(style, options) => void handleConfirmExport(style, options)}
           />
         </div>
       ) : null}

@@ -44,6 +44,7 @@ const readTextFilesMock = vi.fn();
 const readImagesBase64Mock = vi.fn();
 const exportPdfFileMock = vi.fn();
 const exportPdfFilesMock = vi.fn();
+const exportImageFileMock = vi.fn();
 const exportTextFileMock = vi.fn();
 const exportTextFilesMock = vi.fn();
 const aiKeyStatusMock = vi.fn();
@@ -119,6 +120,7 @@ vi.mock('./lib/desktop', () => ({
   readImagesBase64: readImagesBase64Mock,
   exportPdfFile: exportPdfFileMock,
   exportPdfFiles: exportPdfFilesMock,
+  exportImageFile: exportImageFileMock,
   exportTextFile: exportTextFileMock,
   exportTextFiles: exportTextFilesMock,
   aiKeyStatus: aiKeyStatusMock,
@@ -238,6 +240,26 @@ vi.mock('./shell/PagedExportPreviewPage', async () => {
         });
       }, [height, onReady, pageCount, pageIndex, token, width]);
       return <span>Page {pageIndex + 1} / {pageCount}</span>;
+    },
+  };
+});
+
+vi.mock('./shell/ContinuousExportPreview', async () => {
+  const React = await import('react');
+  return {
+    ContinuousExportPreview: ({
+      width,
+      onReady,
+    }: {
+      width: number;
+      onReady: (size: { width: number; height: number }) => void;
+    }) => {
+      const onReadyRef = React.useRef(onReady);
+      onReadyRef.current = onReady;
+      React.useEffect(() => {
+        onReadyRef.current({ width, height: width * 2 });
+      }, [width]);
+      return <span>Continuous image preview</span>;
     },
   };
 });
@@ -694,6 +716,13 @@ describe('App recent documents', () => {
     exportPdfFileMock.mockResolvedValue(undefined);
     exportPdfFilesMock.mockReset();
     exportPdfFilesMock.mockResolvedValue(undefined);
+    exportImageFileMock.mockReset();
+    exportImageFileMock.mockResolvedValue({
+      paths: ['/tmp/export-001.png'],
+      width: 1587,
+      height: 2245,
+      pageCount: 1,
+    });
     exportTextFileMock.mockReset();
     exportTextFileMock.mockResolvedValue(undefined);
     exportTextFilesMock.mockReset();
@@ -791,6 +820,7 @@ describe('App recent documents', () => {
     window.localStorage.removeItem('markdowner.sidebarOpen');
     window.localStorage.removeItem('markdowner.sidebarWidth');
     window.localStorage.removeItem('markdowner.exportStyle.v1');
+    window.localStorage.removeItem('markdowner.imageExportOptions.v1');
     window.history.replaceState(null, '', '/');
     onCloseRequestedMock.mockImplementation(async (handler) => {
       closeRequestedHandler = handler;
@@ -3132,6 +3162,112 @@ describe('App recent documents', () => {
     );
     expect(screen.getByLabelText('Page number format')).toHaveValue(
       'page-label-of-total',
+    );
+  });
+
+  it('exports the current document as one continuous WebP image using returned paths', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        recentDocuments: ['/tmp/project/meeting-notes.md'],
+      }),
+    );
+    saveDialogMock.mockResolvedValue('/tmp/project/exports/meeting-notes.webp');
+    exportImageFileMock.mockResolvedValue({
+      paths: ['/tmp/project/exports/meeting-notes.webp'],
+      width: 1587,
+      height: 3174,
+      pageCount: 1,
+    });
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export as image…$/i }));
+
+    expect(await screen.findByRole('combobox', { name: 'Image format' })).toHaveValue('png');
+    expect(screen.getByRole('button', { name: 'Pages' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '2×' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Image format' }), {
+      target: { value: 'webp' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Long image' }));
+    fireEvent.change(screen.getByRole('slider', { name: 'Image quality' }), {
+      target: { value: '84' },
+    });
+
+    const exportButton = await screen.findByRole('button', { name: 'Export Image' });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(saveDialogMock).toHaveBeenCalledWith({
+        defaultPath: '/tmp/project/meeting-notes.webp',
+        filters: [{ name: 'WebP Image', extensions: ['webp'] }],
+      });
+      expect(exportImageFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: '/tmp/project/exports/meeting-notes.webp',
+          format: 'webp',
+          layout: 'long',
+          scale: 2,
+          quality: 84,
+          paperWidthMm: 210,
+          paperHeightMm: 297,
+          backgroundColor: '#18181b',
+        }),
+      );
+    });
+    const request = exportImageFileMock.mock.calls[0]?.[0];
+    expect(request.html).toContain('data-export-layout="continuous"');
+    expect(request.html).not.toContain('__markdownerPdfPaginationStatus');
+    await waitFor(() => {
+      expect(screen.getByTestId('shell-live-region')).toHaveTextContent(
+        'Exported WEBP to /tmp/project/exports/meeting-notes.webp',
+      );
+    });
+    expect(JSON.parse(window.localStorage.getItem('markdowner.imageExportOptions.v1') ?? '{}'))
+      .toEqual({ format: 'webp', scale: 2, quality: 84 });
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: /Export Preview/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it('keeps Image Export Preview open and shows the native renderer error', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'meeting-notes.md',
+        activeDocumentPath: '/tmp/project/meeting-notes.md',
+        activeDocumentSource: '# Meeting notes',
+        recentDocuments: ['/tmp/project/meeting-notes.md'],
+      }),
+    );
+    saveDialogMock.mockResolvedValue('/tmp/project/exports/meeting-notes.png');
+    exportImageFileMock.mockRejectedValue(
+      new Error("Image output '/tmp/project/exports/meeting-notes-001.png' already exists"),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export as image…$/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Long image' }));
+    const exportButton = await screen.findByRole('button', { name: 'Export Image' });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
+    expect(await screen.findByText('Export failed')).toBeInTheDocument();
+    expect(screen.getByText(/meeting-notes-001\.png.*already exists/i)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Export Preview/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
     );
   });
 
