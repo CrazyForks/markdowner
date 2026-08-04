@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import gfmContractFixture from '../../tests/fixtures/gfm-contract.md?raw';
 import { MarkdownPreviewPane } from './MarkdownPreviewPane';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -67,6 +68,22 @@ describe('MarkdownPreviewPane', () => {
       'li.task-list-item > input[type="checkbox"]',
     );
     expect(checkboxes).toHaveLength(2);
+  });
+
+  it('renders the complete always-on GFM contract safely', () => {
+    const { container } = render(<MarkdownPreviewPane source={gfmContractFixture} />);
+
+    expect(container.querySelector('table')).toBeInTheDocument();
+    expect(
+      container.querySelectorAll('li.task-list-item > input[type="checkbox"]'),
+    ).toHaveLength(2);
+    expect(container.querySelector('del')).toHaveTextContent('Retired text');
+    expect(container.querySelector('a[href="https://example.com/gfm"]')).toBeInTheDocument();
+    expect(container.querySelector('a[href="http://www.example.org"]')).toBeInTheDocument();
+    expect(container.querySelector('script')).toBeNull();
+    expect(
+      (window as Window & { __markdownerGfmProbe?: boolean }).__markdownerGfmProbe,
+    ).toBeUndefined();
   });
 
   it('highlights fenced code through the shared lowlight registry', () => {

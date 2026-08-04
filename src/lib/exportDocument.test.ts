@@ -16,6 +16,7 @@ import {
   saveExportStyle,
 } from './exportDocument';
 import { DEFAULT_PDF_PAPER } from './pdfPaper';
+import gfmContractFixture from '../../tests/fixtures/gfm-contract.md?raw';
 
 vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (filePath: string) => `asset://${filePath}`,
@@ -36,11 +37,18 @@ describe('exportBaseName', () => {
 });
 
 describe('renderMarkdownToHtml', () => {
-  it('renders GFM markdown to static HTML', () => {
-    const html = renderMarkdownToHtml('# Title\n\n- one\n- two', null);
-    expect(html).toContain('<h1');
-    expect(html).toContain('Title');
-    expect(html).toContain('<li');
+  it('renders the complete always-on GFM contract to safe static HTML', () => {
+    const html = renderMarkdownToHtml(gfmContractFixture, null);
+
+    expect(html).toContain('<table');
+    expect(html).toContain('class="contains-task-list"');
+    expect(html).toContain('<del>Retired text</del>');
+    expect(html).toContain('href="https://example.com/gfm"');
+    expect(html).toContain('href="http://www.example.org"');
+    expect(html).not.toContain('<script');
+    expect(html).toContain(
+      '&lt;script&gt;window.__markdownerGfmProbe = true&lt;/script&gt;',
+    );
   });
 });
 

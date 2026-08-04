@@ -24,7 +24,9 @@ import { common, createLowlight } from 'lowlight';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MarkdownerHeading } from '@/components/wysiwyg/headingExtension';
+import { GFM_MARKED_OPTIONS } from '@/lib/gfm';
 import { WYSIWYG_LINK_OPTIONS } from '@/lib/wysiwygLinkOptions';
+import gfmContractFixture from '../../tests/fixtures/gfm-contract.md?raw';
 
 const lowlight = createLowlight(common);
 
@@ -45,7 +47,7 @@ function buildEditor(initial = ''): Editor {
       TableCell,
       TaskList,
       TaskItem.configure({ nested: true }),
-      Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
+      Markdown.configure({ markedOptions: GFM_MARKED_OPTIONS }),
     ],
     content: initial,
     contentType: initial ? 'markdown' : undefined,
@@ -79,6 +81,24 @@ function firstBlock(editor: Editor): { type: string; attrs?: Record<string, unkn
   const json = editor.getJSON();
   const first = (json.content as Array<{ type: string; attrs?: Record<string, unknown> }>)[0];
   return first;
+}
+
+function collectDocumentFeatures(editor: Editor) {
+  const nodeTypes: string[] = [];
+  const markTypes: string[] = [];
+  const linkHrefs: string[] = [];
+
+  editor.state.doc.descendants((node) => {
+    nodeTypes.push(node.type.name);
+    for (const mark of node.marks) {
+      markTypes.push(mark.type.name);
+      if (mark.type.name === 'link' && typeof mark.attrs.href === 'string') {
+        linkHrefs.push(mark.attrs.href);
+      }
+    }
+  });
+
+  return { nodeTypes, markTypes, linkHrefs };
 }
 
 describe('WYSIWYG behaviour — markdown input rules', () => {
@@ -402,6 +422,26 @@ describe('WYSIWYG behaviour — round-trip fidelity for common content', () => {
 
   it('preserves a GFM strikethrough mark', () => {
     expect(roundTrip('~~gone~~\n').trim()).toBe('~~gone~~');
+  });
+
+  it('parses the always-on GFM contract without executable raw HTML', () => {
+    const editor = buildEditor(gfmContractFixture);
+    try {
+      const features = collectDocumentFeatures(editor);
+
+      expect(features.nodeTypes).toEqual(
+        expect.arrayContaining(['table', 'taskList', 'taskItem']),
+      );
+      expect(features.markTypes).toContain('strike');
+      expect(features.linkHrefs).toEqual(
+        expect.arrayContaining(['https://example.com/gfm', 'http://www.example.org']),
+      );
+      expect(editor.getHTML()).not.toContain('<script');
+      expect(editor.getMarkdown()).toContain('| Feature |');
+      expect(editor.getMarkdown()).toContain('- [x] Done task');
+    } finally {
+      editor.destroy();
+    }
   });
 
   it('preserves a hard break (two trailing spaces)', () => {
