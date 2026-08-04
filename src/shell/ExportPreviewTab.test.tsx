@@ -464,10 +464,49 @@ describe('ExportPreviewTab', () => {
     );
   });
 
+  it('previews and confirms independent body and fenced-code typography', async () => {
+    const buildPreview = previewBuilder();
+    const onConfirm = vi.fn();
+    renderPreview({ buildPreview, onConfirm });
+
+    fireEvent.change(screen.getByLabelText('Body size'), {
+      target: { value: '6' },
+    });
+    fireEvent.change(screen.getByLabelText('Code block size'), {
+      target: { value: '4' },
+    });
+    fireEvent.change(screen.getByLabelText('Code block line height'), {
+      target: { value: '0.9' },
+    });
+
+    await waitFor(() => {
+      expect(buildPreview).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          style: expect.objectContaining({
+            fontSize: 6,
+            codeBlockFontSize: 4,
+            codeBlockLineHeight: 0.9,
+          }),
+        }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export HTML' }));
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fontSize: 6,
+        codeBlockFontSize: 4,
+        codeBlockLineHeight: 0.9,
+      }),
+    );
+  });
+
   it('exposes typography, spacing, code styles, and keyboard-key controls', () => {
     renderPreview();
 
     expect(screen.getByLabelText('Body size')).toHaveValue('14');
+    expect(screen.getByLabelText('Body size')).toHaveAttribute('min', '6');
+    expect(screen.getByLabelText('Body size')).toHaveAttribute('max', '24');
     expect(screen.getByLabelText('Font family')).toHaveValue('sans');
     expect(screen.getByLabelText('Text color')).toHaveValue('#202124');
     expect(screen.getByLabelText('Background color')).toHaveValue('#ffffff');
@@ -476,6 +515,8 @@ describe('ExportPreviewTab', () => {
     expect(screen.getByLabelText('Line height')).toHaveAttribute('max', '2.2');
     expect(screen.getByLabelText('Paragraph spacing')).toHaveValue('8');
     expect(screen.getByLabelText('All sides padding')).toHaveValue('32');
+    expect(screen.getByLabelText('Code block size')).toHaveValue('12');
+    expect(screen.getByLabelText('Code block line height')).toHaveValue('1.6');
     expect(screen.getByLabelText('Code block theme')).toHaveValue('app');
     expect(screen.getByLabelText('Inline code preset')).toHaveValue('amber');
     expect(screen.queryByLabelText('Inline code text color')).toBeNull();
@@ -935,6 +976,12 @@ describe('ExportPreviewTab', () => {
     fireEvent.change(screen.getByLabelText('Body size'), {
       target: { value: '20' },
     });
+    fireEvent.change(screen.getByLabelText('Code block size'), {
+      target: { value: '4' },
+    });
+    fireEvent.change(screen.getByLabelText('Code block line height'), {
+      target: { value: '0.9' },
+    });
     const size = screen.getByLabelText('Size');
     expect(size).toHaveValue('A4');
     expect(Array.from((size as HTMLSelectElement).options).map((option) => option.value)).toEqual([
@@ -952,6 +999,8 @@ describe('ExportPreviewTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
     expect(screen.getByLabelText('Theme')).toHaveValue('app');
     expect(screen.getByLabelText('Body size')).toHaveValue('14');
+    expect(screen.getByLabelText('Code block size')).toHaveValue('12');
+    expect(screen.getByLabelText('Code block line height')).toHaveValue('1.6');
     expect(screen.getByLabelText('Size')).toHaveValue('A4');
   });
 

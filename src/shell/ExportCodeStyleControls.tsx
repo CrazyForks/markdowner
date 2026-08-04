@@ -14,7 +14,7 @@ import {
   type CodeBlockTheme,
 } from '@/lib/settings';
 
-import { ExportColorControl } from './ExportControlPrimitives';
+import { ExportColorControl, ExportRangeControl } from './ExportControlPrimitives';
 
 export interface ExportCodeStyleControlsProps {
   value: ExportStyle;
@@ -65,6 +65,30 @@ export function ExportCodeStyleControls({
       <legend className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
         Code
       </legend>
+
+      <ExportRangeControl
+        id={`${id}-block-size`}
+        label="Code block size"
+        value={value.codeBlockFontSize}
+        min={4}
+        max={24}
+        step={1}
+        suffix=" px"
+        disabled={disabled}
+        onChange={(codeBlockFontSize) => onChange({ codeBlockFontSize })}
+      />
+
+      <ExportRangeControl
+        id={`${id}-block-line-height`}
+        label="Code block line height"
+        value={value.codeBlockLineHeight}
+        min={0.8}
+        max={2.2}
+        step={0.1}
+        suffix="×"
+        disabled={disabled}
+        onChange={(codeBlockLineHeight) => onChange({ codeBlockLineHeight })}
+      />
 
       <div className="grid gap-2">
         <Label

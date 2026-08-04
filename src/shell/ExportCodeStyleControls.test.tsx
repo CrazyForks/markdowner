@@ -30,6 +30,61 @@ describe('ExportCodeStyleControls', () => {
     expect(select.options[0]?.textContent).toContain('One Dark');
   });
 
+  it('exposes independent fenced-code typography ranges', () => {
+    render(
+      <ExportCodeStyleControls
+        value={DEFAULT_EXPORT_STYLE}
+        appCodeBlockTheme="one-dark"
+        appTheme="light"
+        disabled={false}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText('Code block size')).toHaveValue('12');
+    expect(screen.getByLabelText('Code block size')).toHaveAttribute('min', '4');
+    expect(screen.getByLabelText('Code block size')).toHaveAttribute('max', '24');
+    expect(screen.getByLabelText('Code block size')).toHaveAttribute('step', '1');
+    expect(screen.getByLabelText('Code block line height')).toHaveValue('1.6');
+    expect(screen.getByLabelText('Code block line height')).toHaveAttribute('min', '0.8');
+    expect(screen.getByLabelText('Code block line height')).toHaveAttribute('max', '2.2');
+    expect(screen.getByLabelText('Code block line height')).toHaveAttribute('step', '0.1');
+  });
+
+  it('emits fenced-code typography patches and respects disabled state', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <ExportCodeStyleControls
+        value={DEFAULT_EXPORT_STYLE}
+        appCodeBlockTheme="one-dark"
+        appTheme="light"
+        disabled={false}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Code block size'), {
+      target: { value: '4' },
+    });
+    fireEvent.change(screen.getByLabelText('Code block line height'), {
+      target: { value: '0.9' },
+    });
+    expect(onChange).toHaveBeenNthCalledWith(1, { codeBlockFontSize: 4 });
+    expect(onChange).toHaveBeenNthCalledWith(2, { codeBlockLineHeight: 0.9 });
+
+    rerender(
+      <ExportCodeStyleControls
+        value={DEFAULT_EXPORT_STYLE}
+        appCodeBlockTheme="one-dark"
+        appTheme="light"
+        disabled
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByLabelText('Code block size')).toBeDisabled();
+    expect(screen.getByLabelText('Code block line height')).toBeDisabled();
+  });
+
   it('offers every approved inline preset and applies Blue', () => {
     const onChange = vi.fn();
     render(

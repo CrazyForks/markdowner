@@ -5,6 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
+  DEFAULT_EXPORT_STYLE,
   applyExportStylePreset,
   buildExportHtml,
   normalizeExportStyle,
@@ -431,6 +432,9 @@ export function ExportPreviewTab({
                 applyDraftStylePreset(
                   {
                     ...current,
+                    fontSize: DEFAULT_EXPORT_STYLE.fontSize,
+                    codeBlockFontSize: DEFAULT_EXPORT_STYLE.codeBlockFontSize,
+                    codeBlockLineHeight: DEFAULT_EXPORT_STYLE.codeBlockLineHeight,
                     codeBlockTheme: 'app',
                     inlineCodePreset: 'amber',
                   },
@@ -529,7 +533,7 @@ export function ExportPreviewTab({
               id={controlId('font-size')}
               label="Body size"
               value={draftStyle.fontSize}
-              min={10}
+              min={6}
               max={24}
               step={1}
               suffix=" px"
