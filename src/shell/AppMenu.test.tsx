@@ -108,40 +108,40 @@ describe('AppMenu mode shortcuts', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
 
-    fireEvent.click(screen.getByRole('menuitem', { name: /Export to HTML/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export as HTML/ }));
     expect(onExportHtml).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Export to PDF/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export as PDF/ }));
     expect(onExportPdf).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Export All Markdown to HTML/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export All Markdown as HTML/ }));
     expect(onExportWorkspaceHtml).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Export All Markdown to PDFs/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Export All Markdown as PDFs/ }));
     expect(onExportWorkspacePdfs).toHaveBeenCalledTimes(1);
   });
 
   it('disables the export items when no document is open', () => {
     renderAppMenu({ activeDocumentOpen: false });
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
-    expect(screen.getByRole('menuitem', { name: /Export to HTML/ })).toBeDisabled();
-    expect(screen.getByRole('menuitem', { name: /Export to PDF/ })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /Export as HTML/ })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /Export as PDF/ })).toBeDisabled();
     expect(
-      screen.getByRole('menuitem', { name: /Export All Markdown to HTML/ }),
+      screen.getByRole('menuitem', { name: /Export All Markdown as HTML/ }),
     ).not.toBeDisabled();
     expect(
-      screen.getByRole('menuitem', { name: /Export All Markdown to PDFs/ }),
+      screen.getByRole('menuitem', { name: /Export All Markdown as PDFs/ }),
     ).not.toBeDisabled();
   });
 
   it('disables all-markdown HTML and PDF export without a workspace root', () => {
     renderAppMenu({ hasWorkspaceRoot: false });
     fireEvent.click(screen.getByRole('button', { name: /app menu/i }));
-    expect(screen.getByRole('menuitem', { name: /Export All Markdown to HTML/ })).toBeDisabled();
-    expect(screen.getByRole('menuitem', { name: /Export All Markdown to PDFs/ })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /Export All Markdown as HTML/ })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /Export All Markdown as PDFs/ })).toBeDisabled();
   });
 
   it('shows Keyboard Shortcuts immediately above Settings and invokes its handler', () => {

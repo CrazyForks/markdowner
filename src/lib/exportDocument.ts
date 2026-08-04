@@ -684,7 +684,7 @@ export interface ExportHtmlOptions {
 
 /**
  * Build a self-contained, styled HTML document for the current markdown. Used
- * for both "Export to HTML" (written to disk) and "Export to PDF". Local images
+ * for both "Export as HTML" (written to disk) and "Export as PDF". Local images
  * are inlined as base64 `data:` URIs (and remote images fetched the same way) so
  * the document renders identically outside the app — a plain browser for HTML,
  * and the standalone WebKit instance that paginates the PDF.

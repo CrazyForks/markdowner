@@ -275,7 +275,7 @@ export function AppMenu({
             title="Export the document as a styled HTML file"
             onSelect={() => run(onExportHtml)}
           >
-            Export to HTML…
+            Export as HTML…
           </MenuAction>
           <MenuAction
             disabled={!activeDocumentOpen || busy}
@@ -283,7 +283,7 @@ export function AppMenu({
             title="Export the document as a PDF file"
             onSelect={() => run(onExportPdf)}
           >
-            Export to PDF…
+            Export as PDF…
           </MenuAction>
           <MenuAction
             disabled={!hasWorkspaceRoot || busy}
@@ -291,7 +291,7 @@ export function AppMenu({
             title="Export all Markdown files in the workspace as HTML"
             onSelect={() => run(onExportWorkspaceHtml)}
           >
-            Export All Markdown to HTML…
+            Export All Markdown as HTML…
           </MenuAction>
           <MenuAction
             disabled={!hasWorkspaceRoot || busy}
@@ -299,7 +299,7 @@ export function AppMenu({
             title="Export all Markdown files in the workspace as PDFs"
             onSelect={() => run(onExportWorkspacePdfs)}
           >
-            Export All Markdown to PDFs…
+            Export All Markdown as PDFs…
           </MenuAction>
 
           <MenuSeparator />

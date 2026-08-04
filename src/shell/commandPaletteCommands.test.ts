@@ -104,6 +104,29 @@ describe('buildCommandPaletteCommands', () => {
     );
   });
 
+  it('uses consistent Export as labels', () => {
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: actions(),
+    });
+
+    expect(commands.find((command) => command.id === 'file.exportHtml')?.label).toBe(
+      'Export as HTML…',
+    );
+    expect(commands.find((command) => command.id === 'file.exportPdf')?.label).toBe(
+      'Export as PDF…',
+    );
+    expect(commands.find((command) => command.id === 'file.exportWorkspaceHtml')?.label).toBe(
+      'Export All Markdown as HTML…',
+    );
+    expect(commands.find((command) => command.id === 'file.exportWorkspacePdfs')?.label).toBe(
+      'Export All Markdown as PDFs…',
+    );
+  });
+
   it('keeps commands grouped in File, View, Preferences, and Theme order', () => {
     expect(commandIds()).toEqual([
       'file.new',
