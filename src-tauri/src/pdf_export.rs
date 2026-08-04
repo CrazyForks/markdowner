@@ -66,138 +66,27 @@ fn ensure_parent_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum NavigationLoadState {
-    Pending,
-    Finished,
-    Failed(String),
-}
-
-fn navigation_load_result(state: &NavigationLoadState) -> Option<Result<(), String>> {
-    match state {
-        NavigationLoadState::Pending => None,
-        NavigationLoadState::Finished => Some(Ok(())),
-        NavigationLoadState::Failed(message) => Some(Err(message.clone())),
-    }
-}
-
 pub fn format_pdf_export_error(path: &str, error: &str) -> String {
     format!("Could not export '{path}' to PDF: {error}")
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use std::{
-        cell::RefCell,
-        path::Path,
-        rc::Rc,
-        time::{Duration, Instant},
-    };
+    use std::path::Path;
 
-    use block2::RcBlock;
-    use objc2::rc::Retained;
-    use objc2::runtime::AnyObject;
-    use objc2::runtime::{NSObject, ProtocolObject};
-    use objc2::{AnyThread, DefinedClass, MainThreadOnly, define_class, msg_send};
-    use objc2_core_foundation::{CFRunLoop, CGPoint, CGRect, CGSize, kCFRunLoopDefaultMode};
-    use objc2_foundation::{
-        MainThreadMarker, NSData, NSError, NSNumber, NSObjectProtocol, NSString,
-    };
+    use objc2::AnyThread;
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_foundation::NSString;
     use objc2_pdf_kit::{PDFDisplayBox, PDFDocument};
-    use objc2_web_kit::{
-        WKNavigation, WKNavigationDelegate, WKPDFConfiguration, WKWebView, WKWebViewConfiguration,
-    };
 
-    use super::{
-        MAX_PAGES, NavigationLoadState, ensure_parent_dir, navigation_load_result,
-        pagination_probe_result, paper_points,
-    };
+    use super::{MAX_PAGES, ensure_parent_dir, pagination_probe_result, paper_points};
+    use crate::web_export::macos::WebExportSession;
 
-    const LOAD_TIMEOUT: Duration = Duration::from_secs(10);
-    const JS_TIMEOUT: Duration = Duration::from_secs(10);
-    const PDF_TIMEOUT: Duration = Duration::from_secs(20);
-    type PdfDataSlot = Rc<RefCell<Option<Result<Retained<NSData>, String>>>>;
     const PAGINATION_PROBE_JS: &str = r#"(function () {
   if (window.__markdownerPdfPaginationStatus === "error") return -1;
   var result = window.__markdownerPdfPaginationResult;
   return result && Number.isFinite(result.totalHeight) ? result.totalHeight : 0;
 })()"#;
-
-    struct ExportNavigationDelegateIvars {
-        state: Rc<RefCell<NavigationLoadState>>,
-    }
-
-    define_class!(
-        #[unsafe(super = NSObject)]
-        #[thread_kind = MainThreadOnly]
-        #[ivars = ExportNavigationDelegateIvars]
-        struct ExportNavigationDelegate;
-
-        unsafe impl NSObjectProtocol for ExportNavigationDelegate {}
-
-        unsafe impl WKNavigationDelegate for ExportNavigationDelegate {
-            #[unsafe(method(webView:didFinishNavigation:))]
-            fn did_finish_navigation(
-                &self,
-                _webview: &WKWebView,
-                _navigation: Option<&WKNavigation>,
-            ) {
-                self.finish(NavigationLoadState::Finished);
-            }
-
-            #[unsafe(method(webView:didFailProvisionalNavigation:withError:))]
-            fn did_fail_provisional_navigation(
-                &self,
-                _webview: &WKWebView,
-                _navigation: Option<&WKNavigation>,
-                error: &NSError,
-            ) {
-                self.finish_with_error(error);
-            }
-
-            #[unsafe(method(webView:didFailNavigation:withError:))]
-            fn did_fail_navigation(
-                &self,
-                _webview: &WKWebView,
-                _navigation: Option<&WKNavigation>,
-                error: &NSError,
-            ) {
-                self.finish_with_error(error);
-            }
-
-            #[unsafe(method(webViewWebContentProcessDidTerminate:))]
-            fn web_content_process_did_terminate(&self, _webview: &WKWebView) {
-                self.finish(NavigationLoadState::Failed(
-                    "WebKit content process terminated while loading export HTML".to_string(),
-                ));
-            }
-        }
-    );
-
-    impl ExportNavigationDelegate {
-        fn new(state: Rc<RefCell<NavigationLoadState>>, mtm: MainThreadMarker) -> Retained<Self> {
-            let delegate = Self::alloc(mtm).set_ivars(ExportNavigationDelegateIvars { state });
-            unsafe { msg_send![super(delegate), init] }
-        }
-
-        fn finish(&self, result: NavigationLoadState) {
-            let mut state = self.ivars().state.borrow_mut();
-            if matches!(*state, NavigationLoadState::Pending) {
-                *state = result;
-            }
-        }
-
-        fn finish_with_error(&self, error: &NSError) {
-            let message = error.localizedDescription().to_string();
-            self.finish(NavigationLoadState::Failed(format!(
-                "WebKit could not load export HTML: {message}"
-            )));
-        }
-    }
-
-    fn tick_run_loop() {
-        CFRunLoop::run_in_mode(unsafe { kCFRunLoopDefaultMode }, 0.05, true);
-    }
 
     pub(super) fn pdf_page_media_box(paper_width: f64, paper_height: f64) -> CGRect {
         CGRect {
@@ -209,109 +98,6 @@ mod macos {
         }
     }
 
-    fn wait_for_load(state: &Rc<RefCell<NavigationLoadState>>) -> Result<(), String> {
-        let deadline = Instant::now() + LOAD_TIMEOUT;
-        loop {
-            let result = navigation_load_result(&state.borrow());
-            if let Some(result) = result {
-                result?;
-                // Extra passes so layout settles and embedded image data URIs decode.
-                tick_run_loop();
-                tick_run_loop();
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err("Timed out loading export HTML for PDF generation".to_string());
-            }
-            tick_run_loop();
-        }
-    }
-
-    /// Evaluate JS that returns a number, pumping the run loop until it resolves.
-    fn eval_js_number(webview: &WKWebView, script: &str) -> Result<f64, String> {
-        let slot: Rc<RefCell<Option<Result<f64, String>>>> = Rc::new(RefCell::new(None));
-        let sink = slot.clone();
-        let completion = RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
-            let result = if !error.is_null() {
-                let message = unsafe { (*error).localizedDescription() }.to_string();
-                Err(format!("JavaScript evaluation failed: {message}"))
-            } else if value.is_null() {
-                Err("JavaScript evaluation returned no value".to_string())
-            } else {
-                let number = unsafe { &*(value.cast::<NSNumber>()) };
-                Ok(number.doubleValue())
-            };
-            *sink.borrow_mut() = Some(result);
-        });
-        let script = NSString::from_str(script);
-        unsafe {
-            webview.evaluateJavaScript_completionHandler(&script, Some(&completion));
-        }
-        let deadline = Instant::now() + JS_TIMEOUT;
-        loop {
-            if slot.borrow().is_some() {
-                return slot.borrow_mut().take().unwrap();
-            }
-            if Instant::now() >= deadline {
-                return Err("Timed out running the pagination script".to_string());
-            }
-            tick_run_loop();
-        }
-    }
-
-    fn wait_for_pagination(webview: &WKWebView) -> Result<f64, String> {
-        let deadline = Instant::now() + JS_TIMEOUT;
-        loop {
-            let value = eval_js_number(webview, PAGINATION_PROBE_JS)?;
-            if let Some(result) = pagination_probe_result(value) {
-                return result;
-            }
-            if Instant::now() >= deadline {
-                return Err("Timed out waiting for embedded PDF pagination".to_string());
-            }
-            tick_run_loop();
-        }
-    }
-
-    /// Render one page-sized region of the web view to standalone PDF data.
-    fn create_pdf_page(
-        mtm: MainThreadMarker,
-        webview: &WKWebView,
-        rect: CGRect,
-    ) -> Result<Retained<NSData>, String> {
-        let slot: PdfDataSlot = Rc::new(RefCell::new(None));
-        let sink = slot.clone();
-        let completion = RcBlock::new(move |data: *mut NSData, error: *mut NSError| {
-            let result = if !error.is_null() {
-                let message = unsafe { (*error).localizedDescription() }.to_string();
-                Err(format!("WebKit could not create the PDF: {message}"))
-            } else {
-                match unsafe { Retained::retain(data) } {
-                    Some(data) => Ok(data),
-                    None => Err("WebKit did not return PDF data".to_string()),
-                }
-            };
-            *sink.borrow_mut() = Some(result);
-        });
-
-        let config = unsafe { WKPDFConfiguration::new(mtm) };
-        unsafe {
-            config.setRect(rect);
-            webview.createPDFWithConfiguration_completionHandler(Some(&config), &completion);
-        }
-
-        let deadline = Instant::now() + PDF_TIMEOUT;
-        loop {
-            if slot.borrow().is_some() {
-                return slot.borrow_mut().take().unwrap();
-            }
-            if Instant::now() >= deadline {
-                return Err("Timed out waiting for WebKit to create the PDF".to_string());
-            }
-            tick_run_loop();
-        }
-    }
-
     pub fn write_pdf_file(
         path: &str,
         html: &str,
@@ -320,41 +106,19 @@ mod macos {
     ) -> Result<(), String> {
         let output_path = Path::new(path);
         ensure_parent_dir(output_path)?;
-
-        let mtm = MainThreadMarker::new()
-            .ok_or_else(|| "PDF export must run on the macOS main thread".to_string())?;
-
         let (paper_width, paper_height) = paper_points(paper_width_mm, paper_height_mm)?;
-
-        let configuration = unsafe { WKWebViewConfiguration::new(mtm) };
-        let frame = CGRect {
-            origin: CGPoint { x: 0.0, y: 0.0 },
-            size: CGSize {
-                width: paper_width,
-                height: paper_height,
-            },
-        };
-        let webview = unsafe {
-            WKWebView::initWithFrame_configuration(mtm.alloc::<WKWebView>(), frame, &configuration)
-        };
-        let navigation_state = Rc::new(RefCell::new(NavigationLoadState::Pending));
-        let navigation_delegate = ExportNavigationDelegate::new(navigation_state.clone(), mtm);
-        unsafe {
-            webview.setNavigationDelegate(Some(ProtocolObject::from_ref(&*navigation_delegate)));
-        }
-        let html_string = NSString::from_str(html);
-        let navigation = unsafe { webview.loadHTMLString_baseURL(&html_string, None) };
-        if navigation.is_none() {
-            return Err("WebKit refused to start loading export HTML".to_string());
-        }
-        wait_for_load(&navigation_state)?;
-
-        let total_height = wait_for_pagination(&webview)?.max(paper_height);
+        let session = WebExportSession::load(html, paper_width, paper_height)?;
+        let total_height = session
+            .wait_for_number(
+                PAGINATION_PROBE_JS,
+                "Timed out waiting for embedded PDF pagination",
+                pagination_probe_result,
+            )?
+            .max(paper_height);
         let page_count = ((total_height / paper_height).ceil() as usize).max(1);
         if page_count > MAX_PAGES {
             return Err(format!("PDF export exceeds the {MAX_PAGES} pages limit"));
         }
-        tick_run_loop();
 
         // Each page is a fixed physical-paper slice; merge them into one document.
         let combined = unsafe { PDFDocument::new() };
@@ -369,7 +133,7 @@ mod macos {
                     height: paper_height,
                 },
             };
-            let data = create_pdf_page(mtm, &webview, rect)?;
+            let data = session.create_pdf(rect)?;
             let page_doc = unsafe { PDFDocument::initWithData(PDFDocument::alloc(), &data) }
                 .ok_or_else(|| "Could not read a generated PDF page".to_string())?;
             if let Some(page) = unsafe { page_doc.pageAtIndex(0) } {
@@ -386,8 +150,7 @@ mod macos {
             }
         }
 
-        let written = unsafe { combined.writeToFile(&NSString::from_str(path)) };
-        if written {
+        if unsafe { combined.writeToFile(&NSString::from_str(path)) } {
             Ok(())
         } else {
             Err("WebKit could not write the PDF file".to_string())
@@ -399,23 +162,7 @@ mod macos {
 mod tests {
     #[cfg(target_os = "macos")]
     use super::macos::pdf_page_media_box;
-    use super::{
-        NavigationLoadState, format_pdf_export_error, navigation_load_result,
-        pagination_probe_result, paper_points,
-    };
-
-    #[test]
-    fn navigation_load_only_finishes_from_delegate_completion() {
-        assert_eq!(navigation_load_result(&NavigationLoadState::Pending), None);
-        assert_eq!(
-            navigation_load_result(&NavigationLoadState::Finished),
-            Some(Ok(()))
-        );
-        assert_eq!(
-            navigation_load_result(&NavigationLoadState::Failed("WebKit failed".to_string())),
-            Some(Err("WebKit failed".to_string()))
-        );
-    }
+    use super::{format_pdf_export_error, pagination_probe_result, paper_points};
 
     #[test]
     fn export_errors_identify_the_failed_output_path() {

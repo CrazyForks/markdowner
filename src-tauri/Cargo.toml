@@ -29,6 +29,9 @@ portable-pty = "0.9.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7.18"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+tempfile = "3"
+webpx = { version = "0.4.0", default-features = false, features = ["encode", "std"] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
 # Default-app (.md) registration through NSWorkspace / UTType.
@@ -36,11 +39,8 @@ security-framework = "3.7.0"
 objc2 = "0.6"
 objc2-core-foundation = { version = "0.3", features = ["CFRunLoop", "CFDate"] }
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSURL", "NSString", "NSError", "NSData", "NSValue"] }
-objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "block2", "objc2-uniform-type-identifiers"] }
-objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfiguration", "WKPDFConfiguration", "WKNavigation", "WKNavigationDelegate", "block2", "objc2-app-kit", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSImage", "NSBitmapImageRep", "block2", "objc2-uniform-type-identifiers"] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfiguration", "WKPDFConfiguration", "WKSnapshotConfiguration", "WKNavigation", "WKNavigationDelegate", "block2", "objc2-app-kit", "objc2-core-foundation"] }
 objc2-pdf-kit = { version = "0.3", features = ["PDFDocument", "PDFPage"] }
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType"] }
 block2 = "0.6"
-
-[dev-dependencies]
-tempfile = "3"

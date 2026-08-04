@@ -28,12 +28,14 @@ mod ai;
 mod default_handler;
 mod diagnostics;
 mod export_file;
+mod image_export;
 mod link_actions;
 mod pdf_export;
 mod shell_managed_block;
 mod skill_registry;
 mod terminal;
 mod updater;
+mod web_export;
 mod workspace_search;
 
 const MENU_COMMAND_EVENT: &str = "markdowner://menu-command";
@@ -1639,6 +1641,15 @@ fn write_pdf_files(files: Vec<PdfExportFile>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn write_image_file(
+    request: image_export::ImageExportRequest,
+) -> Result<image_export::ImageExportResult, String> {
+    let path = request.path.clone();
+    image_export::write_image_file(&request)
+        .map_err(|error| image_export::format_image_export_error(&path, &error))
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EmbeddedImage {
@@ -2158,6 +2169,7 @@ pub fn run() {
             read_images_base64,
             write_pdf_file,
             write_pdf_files,
+            write_image_file,
             has_active_document_external_changes,
             reload_active_document_from_disk,
             active_document_disk_source,
