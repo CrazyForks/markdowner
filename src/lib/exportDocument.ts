@@ -54,6 +54,8 @@ export type ExportTheme = 'light' | 'dark';
 export interface ExportStyle extends PdfPaper, ExportPageLayout {
   preset: ExportStylePreset;
   codeBlockTheme: ExportCodeBlockTheme;
+  codeBlockFontSize: number;
+  codeBlockLineHeight: number;
   inlineCodePreset: InlineCodePreset;
   fontSize: number;
   fontFamily: ExportFontFamily;
@@ -73,6 +75,8 @@ export interface ExportStyle extends PdfPaper, ExportPageLayout {
 export const DEFAULT_EXPORT_STYLE: ExportStyle = {
   preset: 'app',
   codeBlockTheme: 'app',
+  codeBlockFontSize: 12,
+  codeBlockLineHeight: 1.6,
   inlineCodePreset: 'amber',
   fontSize: 14,
   fontFamily: 'sans',
@@ -107,6 +111,8 @@ export const DARK_EXPORT_STYLE: ExportStyle = {
 
 const LEGACY_APPEARANCE_KEYS = [
   'fontSize',
+  'codeBlockFontSize',
+  'codeBlockLineHeight',
   'fontFamily',
   'textColor',
   'backgroundColor',
@@ -186,7 +192,19 @@ export function normalizeExportStyle(value: unknown): ExportStyle {
       candidate.inlineCodePreset,
       inferredInlineCodePreset,
     ),
-    fontSize: clampNumber(candidate.fontSize, DEFAULT_EXPORT_STYLE.fontSize, 10, 24),
+    fontSize: clampNumber(candidate.fontSize, DEFAULT_EXPORT_STYLE.fontSize, 6, 24),
+    codeBlockFontSize: clampNumber(
+      candidate.codeBlockFontSize,
+      DEFAULT_EXPORT_STYLE.codeBlockFontSize,
+      4,
+      24,
+    ),
+    codeBlockLineHeight: clampNumber(
+      candidate.codeBlockLineHeight,
+      DEFAULT_EXPORT_STYLE.codeBlockLineHeight,
+      0.8,
+      2.2,
+    ),
     fontFamily:
       fontFamily === 'sans' || fontFamily === 'serif' || fontFamily === 'mono'
         ? fontFamily
@@ -282,7 +300,10 @@ export function applyExportStylePreset(
     ...pageLayout,
     ...paper,
     preset,
+    fontSize: current.fontSize,
     codeBlockTheme: current.codeBlockTheme,
+    codeBlockFontSize: current.codeBlockFontSize,
+    codeBlockLineHeight: current.codeBlockLineHeight,
     inlineCodePreset: current.inlineCodePreset,
     inlineCodeTextColor: inlinePalette.textColor,
     inlineCodeBackgroundColor: inlinePalette.backgroundColor,
@@ -778,8 +799,16 @@ img, svg, video { max-width: 100%; height: auto; }`
   color: ${style.tableHeaderTextColor};
   background: ${style.tableHeaderBackgroundColor};
 }
-.markdowner-export code { font-size: 0.875em; }
-.markdowner-export code:not(pre code) {
+.markdowner-export pre {
+  font-size: ${style.codeBlockFontSize}px;
+  line-height: ${style.codeBlockLineHeight};
+}
+.markdowner-export pre code {
+  font-size: inherit;
+  line-height: inherit;
+}
+.markdowner-export :not(pre) > code {
+  font-size: 0.875em;
   color: ${style.inlineCodeTextColor};
   background: ${style.inlineCodeBackgroundColor};
 }

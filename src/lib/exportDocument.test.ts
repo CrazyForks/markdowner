@@ -207,6 +207,86 @@ describe('export styles', () => {
     });
   });
 
+  it('accepts the minimum export typography values and clamps unsafe values', () => {
+    expect(
+      normalizeExportStyle({
+        ...DEFAULT_EXPORT_STYLE,
+        fontSize: 6,
+        codeBlockFontSize: 4,
+        codeBlockLineHeight: 0.8,
+      }),
+    ).toMatchObject({
+      fontSize: 6,
+      codeBlockFontSize: 4,
+      codeBlockLineHeight: 0.8,
+    });
+
+    expect(
+      normalizeExportStyle({
+        ...DEFAULT_EXPORT_STYLE,
+        fontSize: 1,
+        codeBlockFontSize: 1,
+        codeBlockLineHeight: 0.2,
+      }),
+    ).toMatchObject({
+      fontSize: 6,
+      codeBlockFontSize: 4,
+      codeBlockLineHeight: 0.8,
+    });
+
+    expect(
+      normalizeExportStyle({
+        ...DEFAULT_EXPORT_STYLE,
+        fontSize: 99,
+        codeBlockFontSize: 99,
+        codeBlockLineHeight: 9,
+      }),
+    ).toMatchObject({
+      fontSize: 24,
+      codeBlockFontSize: 24,
+      codeBlockLineHeight: 2.2,
+    });
+  });
+
+  it('fills missing fenced-code fields without changing a legacy style', () => {
+    const legacy = {
+      ...DEFAULT_EXPORT_STYLE,
+      fontSize: 13,
+      fontFamily: 'serif' as const,
+      textColor: '#123456',
+    } as Record<string, unknown>;
+    delete legacy.codeBlockFontSize;
+    delete legacy.codeBlockLineHeight;
+
+    expect(normalizeExportStyle(legacy)).toMatchObject({
+      fontSize: 13,
+      fontFamily: 'serif',
+      textColor: '#123456',
+      codeBlockFontSize: 12,
+      codeBlockLineHeight: 1.6,
+    });
+  });
+
+  it('preserves typography while changing the export theme', () => {
+    expect(
+      applyExportStylePreset(
+        {
+          ...DEFAULT_EXPORT_STYLE,
+          fontSize: 6,
+          codeBlockFontSize: 4,
+          codeBlockLineHeight: 0.9,
+        },
+        'dark',
+        'light',
+      ),
+    ).toMatchObject({
+      preset: 'dark',
+      fontSize: 6,
+      codeBlockFontSize: 4,
+      codeBlockLineHeight: 0.9,
+    });
+  });
+
   it('accepts compact line heights down to 0.8 and normalizes export element colors', () => {
     expect(
       normalizeExportStyle({
@@ -284,6 +364,8 @@ describe('export styles', () => {
       ...DEFAULT_EXPORT_STYLE,
       fontSize: 13,
       fontFamily: 'serif' as const,
+      codeBlockFontSize: 9,
+      codeBlockLineHeight: 1.2,
     };
 
     saveExportStyle(style, storage);
@@ -537,12 +619,14 @@ describe('buildExportHtml', () => {
   it('injects the selected typography, colors, and spacing into the standalone document', async () => {
     const html = await buildExportHtml({
       title: 'Styled',
-      source: '# Heading\n\nBody',
+      source: 'Inline `value`\n\n```ts\nconst value = 1\n```',
       activeDocumentPath: null,
       style: {
         ...DEFAULT_EXPORT_STYLE,
         preset: 'custom',
-        fontSize: 13,
+        fontSize: 6,
+        codeBlockFontSize: 4,
+        codeBlockLineHeight: 0.9,
         fontFamily: 'serif',
         textColor: '#223344',
         backgroundColor: '#fffaf0',
@@ -561,19 +645,48 @@ describe('buildExportHtml', () => {
       },
     });
 
-    expect(html).toContain('font-size: 13px');
+    expect(html).toContain('font-size: 6px');
+    expect(html).toContain(
+      '.markdowner-export pre {\n  font-size: 4px;\n  line-height: 0.9;',
+    );
+    expect(html).toContain(
+      '.markdowner-export pre code {\n  font-size: inherit;\n  line-height: inherit;',
+    );
+    expect(html).toContain(
+      '.markdowner-export :not(pre) > code {\n  font-size: 0.875em;',
+    );
     expect(html).toContain('font-family: ui-serif');
     expect(html).toContain('color: #223344');
     expect(html).toContain('background: #fffaf0');
     expect(html).toContain('line-height: 1.7');
     expect(html).toContain('margin-block: 0 10px');
     expect(html).toContain('padding: 36px');
-    expect(html).toContain('.markdowner-export code:not(pre code)');
     expect(html).toContain('color: #314158');
     expect(html).toContain('background: #e8eef5');
     expect(html).toContain('.markdowner-export kbd');
     expect(html).toContain('color: #4a3520');
     expect(html).toContain('background: #f1e6d2');
+  });
+
+  it.each([
+    ['html', undefined],
+    ['paged', 'paged' as const],
+    ['continuous', 'continuous' as const],
+  ])('applies fenced-code typography in %s mode', async (_name, renderMode) => {
+    const html = await buildExportHtml({
+      title: 'Code',
+      source: '```ts\nconst value = 1\n```',
+      activeDocumentPath: null,
+      renderMode,
+      style: {
+        ...DEFAULT_EXPORT_STYLE,
+        codeBlockFontSize: 4,
+        codeBlockLineHeight: 0.9,
+      },
+    });
+
+    expect(html).toContain('font-size: 4px');
+    expect(html).toContain('line-height: 0.9');
   });
 
   it('injects independent HTML padding values', async () => {
