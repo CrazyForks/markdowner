@@ -20,6 +20,12 @@ describe('tauri security config', () => {
     });
   });
 
+  it('allows local media beside Markdown files in macOS temporary paths', () => {
+    expect(tauriConfig.app?.security?.assetProtocol?.scope).toEqual(
+      expect.arrayContaining(['/tmp/**', '/private/tmp/**']),
+    );
+  });
+
   it('keeps bundled app artifacts enabled for desktop builds', () => {
     expect(tauriConfig.bundle?.active).toBe(true);
   });

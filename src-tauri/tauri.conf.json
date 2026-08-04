@@ -47,7 +47,9 @@
         "scope": [
           "$HOME/**",
           "/Volumes/**",
-          "$TEMP/**"
+          "$TEMP/**",
+          "/tmp/**",
+          "/private/tmp/**"
         ]
       },
       "devCsp": null
