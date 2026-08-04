@@ -33,6 +33,11 @@ export function fitPreviewZoomPercent(viewport: PreviewSize, page: PreviewSize):
   );
 }
 
+export function fitPreviewWidthZoomPercent(viewportWidth: number, contentWidth: number): number {
+  if (viewportWidth <= 0 || contentWidth <= 0) return 100;
+  return Math.max(1, Math.floor(Math.min(viewportWidth / contentWidth, 1) * 100));
+}
+
 export function clampPreviewZoomPercent(percent: number): number {
   return Math.min(PREVIEW_ZOOM_MAX_PERCENT, Math.max(PREVIEW_ZOOM_MIN_PERCENT, percent));
 }

@@ -43,7 +43,9 @@ const PATH_SEPARATOR_RE = /[\\/]/;
 const EXPORT_STYLE_STORAGE_KEY = 'markdowner.exportStyle.v1';
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
-export type ExportFormat = 'html' | 'pdf';
+export type ExportFormat = 'html' | 'pdf' | 'image';
+export type WorkspaceExportFormat = Exclude<ExportFormat, 'image'>;
+export type ExportRenderMode = 'html' | 'paged' | 'continuous';
 export type ExportScope = 'document' | 'workspace';
 export type ExportFontFamily = 'sans' | 'serif' | 'mono';
 export type ExportStylePreset = 'app' | 'light' | 'dark' | 'custom';
@@ -376,7 +378,7 @@ export interface WorkspaceExportTarget {
 export function buildWorkspaceExportTargets(input: {
   rootDir: string;
   workspaceDocuments: readonly string[];
-  format: ExportFormat;
+  format: WorkspaceExportFormat;
 }): WorkspaceExportTarget[] {
   const rootDir = trimTrailingSeparators(input.rootDir);
   if (!rootDir) return [];
@@ -672,8 +674,8 @@ export interface ExportHtmlOptions {
   title: string;
   source: string;
   activeDocumentPath: string | null;
-  /** Add print page rules + pagination-friendly layout (used by PDF export). */
-  forPrint?: boolean;
+  /** Select responsive HTML, paginated paper, or fixed-width continuous layout. */
+  renderMode?: ExportRenderMode;
   paginationToken?: string;
   style?: ExportStyle;
   /** Injectable for tests; defaults to the live document. */
@@ -694,7 +696,7 @@ export async function buildExportHtml(options: ExportHtmlOptions): Promise<strin
     title,
     source,
     activeDocumentPath,
-    forPrint = false,
+    renderMode = 'html',
     paginationToken = '',
     style: rawStyle = DEFAULT_EXPORT_STYLE,
     doc = document,
@@ -710,7 +712,8 @@ export async function buildExportHtml(options: ExportHtmlOptions): Promise<strin
     style.textColor,
     resolveExportFontStack(style.fontFamily),
   );
-  const paginationScript = forPrint
+  const isPaged = renderMode === 'paged';
+  const paginationScript = isPaged
     ? buildPdfPaginationScript({
         token: paginationToken,
         pageWidth: paper.widthPt,
@@ -731,13 +734,18 @@ export async function buildExportHtml(options: ExportHtmlOptions): Promise<strin
   const css = collectDocumentCss(doc);
   // For PDF the renderer paginates into paper-sized slices and applies the page
   // margins itself, so the body just fills the page width and keeps media in bounds.
-  const printCss = forPrint
+  const renderCss = isPaged
     ? `@page { size: ${paper.widthMm}mm ${paper.heightMm}mm; }
 .markdowner-export { box-sizing: border-box; width: 100%; max-width: none; }
 .markdowner-export pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .markdowner-export pre code { white-space: inherit; }
 img, svg, video { max-width: 100%; height: auto; }`
-    : `.markdowner-export { box-sizing: border-box; max-width: 820px; margin: 0 auto; }`;
+    : renderMode === 'continuous'
+      ? `.markdowner-export { box-sizing: border-box; width: 100%; max-width: none; }
+.markdowner-export pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.markdowner-export pre code { white-space: inherit; }
+img, svg, video { max-width: 100%; height: auto; }`
+      : `.markdowner-export { box-sizing: border-box; max-width: 820px; margin: 0 auto; }`;
   const styleCss = `.markdowner-export {
   --foreground: ${style.textColor};
   --background: ${style.backgroundColor};
@@ -746,7 +754,7 @@ img, svg, video { max-width: 100%; height: auto; }`
   --border: ${style.tableBorderColor};
   --muted: ${style.tableHeaderBackgroundColor};
   box-sizing: border-box;
-  min-height: 100vh;
+  min-height: ${renderMode === 'continuous' ? '0' : '100vh'};
   padding: ${style.contentPaddingTop}px ${style.contentPaddingRight}px ${style.contentPaddingBottom}px ${style.contentPaddingLeft}px;
   color: ${style.textColor};
   background: ${style.backgroundColor};
@@ -782,7 +790,7 @@ img, svg, video { max-width: 100%; height: auto; }`
 }`;
   const exportCss = `${css}
 html, body { margin: 0; color: ${style.textColor}; background: ${style.backgroundColor}; }
-${printCss}
+${renderCss}
 ${styleCss}`;
 
   return `<!doctype html>
@@ -794,10 +802,10 @@ ${styleCss}`;
 <style>${exportCss}</style>
 </head>
 <body>
-<div class="markdowner-export ${MARKDOWN_CONTENT_SCOPE_CLASS} markdown-surface">
+<div class="markdowner-export ${MARKDOWN_CONTENT_SCOPE_CLASS} markdown-surface"${renderMode === 'continuous' ? ' data-export-layout="continuous"' : ''}>
 ${body}
 </div>
-${forPrint ? `<script>${paginationScript}</script>` : ''}
+${isPaged ? `<script>${paginationScript}</script>` : ''}
 </body>
 </html>`;
 }

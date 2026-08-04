@@ -202,10 +202,10 @@ vi.mock('@/shell/TerminalPanel', async () => {
   };
 });
 
-vi.mock('./shell/PdfPreviewPage', async () => {
+vi.mock('./shell/PagedExportPreviewPage', async () => {
   const React = await import('react');
   return {
-    PdfPreviewPage: ({
+    PagedExportPreviewPage: ({
       token,
       pageIndex,
       pageCount,
@@ -2994,7 +2994,7 @@ describe('App recent documents', () => {
     render(<App />);
 
     const menu = await openAppMenu();
-    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to pdf…$/i }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export as pdf…$/i }));
 
     expect(saveDialogMock).not.toHaveBeenCalled();
     expect(exportPdfFileMock).not.toHaveBeenCalled();
@@ -3116,7 +3116,7 @@ describe('App recent documents', () => {
     });
 
     const reopenedMenu = await openAppMenu();
-    fireEvent.click(within(reopenedMenu).getByRole('menuitem', { name: /^export to pdf…$/i }));
+    fireEvent.click(within(reopenedMenu).getByRole('menuitem', { name: /^export as pdf…$/i }));
     expect(await screen.findByLabelText('Theme')).toHaveValue('custom');
     expect(await screen.findByLabelText('Body size')).toHaveValue('13');
     expect(screen.getByLabelText('Background color')).toHaveValue('#18181b');
@@ -3151,7 +3151,7 @@ describe('App recent documents', () => {
     render(<App />);
 
     const menu = await openAppMenu();
-    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to html…$/i }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export as html…$/i }));
     const exportTab = await screen.findByRole('tab', { name: /Export Preview/i });
     fireEvent.click(await screen.findByRole('button', { name: 'Export HTML' }));
 
@@ -3176,7 +3176,7 @@ describe('App recent documents', () => {
     render(<App />);
 
     const menu = await openAppMenu();
-    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to pdf…$/i }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export as pdf…$/i }));
     expect(await screen.findByRole('tab', { name: /Export Preview/i })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -3237,7 +3237,7 @@ describe('App recent documents', () => {
     editor.markdown = '# Meeting notes\n\n![shot](./assets/shot.png)';
 
     const menu = await openAppMenu();
-    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to html…$/i }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export as html…$/i }));
 
     expect(saveDialogMock).not.toHaveBeenCalled();
     expect(exportTextFileMock).not.toHaveBeenCalled();
@@ -3279,7 +3279,7 @@ describe('App recent documents', () => {
     editor.markdown = '# Meeting notes\n\n![shot](./assets/shot.png)';
 
     const menu = await openAppMenu();
-    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export to pdf…$/i }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^export as pdf…$/i }));
 
     expect(saveDialogMock).not.toHaveBeenCalled();
     expect(exportPdfFileMock).not.toHaveBeenCalled();
@@ -3323,7 +3323,7 @@ describe('App recent documents', () => {
 
     const menu = await openAppMenu();
     fireEvent.click(
-      within(menu).getByRole('menuitem', { name: /^export all markdown to pdfs…$/i }),
+      within(menu).getByRole('menuitem', { name: /^export all markdown as pdfs…$/i }),
     );
 
     expect(exportPdfFilesMock).not.toHaveBeenCalled();
@@ -3414,7 +3414,7 @@ describe('App recent documents', () => {
 
     const menu = await openAppMenu();
     fireEvent.click(
-      within(menu).getByRole('menuitem', { name: /^export all markdown to pdfs…$/i }),
+      within(menu).getByRole('menuitem', { name: /^export all markdown as pdfs…$/i }),
     );
     const exportButton = await screen.findByRole('button', { name: 'Export 1 PDF files' });
     await waitFor(() => expect(exportButton).toBeEnabled());
@@ -3452,7 +3452,7 @@ describe('App recent documents', () => {
 
     const menu = await openAppMenu();
     fireEvent.click(
-      within(menu).getByRole('menuitem', { name: /^export all markdown to html…$/i }),
+      within(menu).getByRole('menuitem', { name: /^export all markdown as html…$/i }),
     );
 
     expect(exportTextFilesMock).not.toHaveBeenCalled();

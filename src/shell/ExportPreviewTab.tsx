@@ -12,6 +12,7 @@ import {
   resolveExportStyleForTheme,
   type ExportFormat,
   type ExportHtmlOptions,
+  type ExportRenderMode,
   type ExportScope,
   type ExportStyle,
   type ExportStylePreset,
@@ -27,6 +28,15 @@ import {
   type PreviewZoomDirection,
 } from '@/lib/exportPreviewZoom';
 import {
+  DEFAULT_IMAGE_EXPORT_OPTIONS,
+  imageContinuousPixelSize,
+  imageFormatLabel,
+  imagePagePixelSize,
+  normalizeImageExportOptions,
+  validateImageOutputSize,
+  type ImageExportOptions,
+} from '@/lib/imageExport';
+import {
   pageNumberTemplateForFormat,
   resolvePdfPageFurniture,
   resolvePdfPageInsets,
@@ -38,14 +48,16 @@ import type { PdfPreviewReadyMessage } from '@/lib/pdfPagination';
 import { cn } from '@/lib/utils';
 import type { CodeBlockTheme } from '@/lib/settings';
 import { ContentPaddingControls } from './ContentPaddingControls';
-import { ExportCodeStyleControls } from './ExportCodeStyleControls';
 import {
-  ExportColorControl,
-  ExportRangeControl,
-} from './ExportControlPrimitives';
+  ContinuousExportPreview,
+  type ContinuousExportPreviewSize,
+} from './ContinuousExportPreview';
+import { ExportCodeStyleControls } from './ExportCodeStyleControls';
+import { ExportColorControl, ExportRangeControl } from './ExportControlPrimitives';
+import { ImageExportControls } from './ImageExportControls';
+import { PagedExportPreviewPage } from './PagedExportPreviewPage';
 import { PdfPaperControls } from './PdfPaperControls';
 import { PdfPageFurnitureControls } from './PdfPageFurnitureControls';
-import { PdfPreviewPage } from './PdfPreviewPage';
 
 export interface ExportPreviewRequest {
   format: ExportFormat;
@@ -63,8 +75,9 @@ export interface ExportPreviewTabProps {
   appCodeBlockTheme: CodeBlockTheme;
   busy: boolean;
   errorMessage?: string | null;
+  initialImageOptions?: ImageExportOptions;
   onCancel: () => void;
-  onConfirm: (style: ExportStyle) => void;
+  onConfirm: (style: ExportStyle, imageOptions?: ImageExportOptions) => void;
   buildPreview?: (options: ExportHtmlOptions) => Promise<string>;
 }
 
@@ -80,6 +93,7 @@ type ColorStyleKey =
 
 function exportActionLabel(request: ExportPreviewRequest, busy: boolean): string {
   if (busy) return 'Exporting…';
+  if (request.format === 'image') return 'Export Image';
   const format = request.format.toUpperCase();
   return request.scope === 'workspace'
     ? `Export ${request.targetCount} ${format} files`
@@ -89,13 +103,10 @@ function exportActionLabel(request: ExportPreviewRequest, busy: boolean): string
 function requestDescription(request: ExportPreviewRequest): string {
   return request.scope === 'workspace'
     ? `${request.targetCount} Markdown files`
-    : request.activeDocumentPath ?? 'Unsaved document';
+    : (request.activeDocumentPath ?? 'Unsaved document');
 }
 
-function preserveInvalidPageNumberDraft(
-  source: ExportStyle,
-  normalized: ExportStyle,
-): ExportStyle {
+function preserveInvalidPageNumberDraft(source: ExportStyle, normalized: ExportStyle): ExportStyle {
   if (
     source.pageNumberFormat === 'custom' &&
     !validatePageNumberTemplate(source.pageNumberTemplate).valid
@@ -114,10 +125,7 @@ function applyDraftStylePreset(
   preset: ExportStylePreset,
   appTheme: ExportTheme,
 ): ExportStyle {
-  return preserveInvalidPageNumberDraft(
-    style,
-    applyExportStylePreset(style, preset, appTheme),
-  );
+  return preserveInvalidPageNumberDraft(style, applyExportStylePreset(style, preset, appTheme));
 }
 
 export function ExportPreviewTab({
@@ -127,12 +135,14 @@ export function ExportPreviewTab({
   appCodeBlockTheme,
   busy,
   errorMessage = null,
+  initialImageOptions = DEFAULT_IMAGE_EXPORT_OPTIONS,
   onCancel,
   onConfirm,
   buildPreview = buildExportHtml,
 }: ExportPreviewTabProps) {
   const idPrefix = useId();
   const isPdf = request.format === 'pdf';
+  const isImage = request.format === 'image';
   const requestIdentity = useMemo(
     () =>
       JSON.stringify([
@@ -155,18 +165,27 @@ export function ExportPreviewTab({
   const [draftStyle, setDraftStyle] = useState<ExportStyle>(() =>
     resolveExportStyleForTheme(initialStyle, appTheme),
   );
+  const [imageOptions, setImageOptions] = useState<ImageExportOptions>(() => ({
+    ...normalizeImageExportOptions(initialImageOptions),
+    layout: 'pages',
+  }));
   const [previewHtml, setPreviewHtml] = useState('');
   const [previewStatus, setPreviewStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [paperValid, setPaperValid] = useState(true);
   const [pageCount, setPageCount] = useState(1);
+  const [continuousSize, setContinuousSize] = useState<ContinuousExportPreviewSize | null>(null);
   const [paginationToken, setPaginationToken] = useState('');
   const [zoomMode, setZoomMode] = useState<'fit' | 'manual'>('fit');
   const [manualZoomPercent, setManualZoomPercent] = useState(100);
-  const [previewViewport, setPreviewViewport] = useState<PreviewSize>({ width: 0, height: 0 });
+  const [previewViewport, setPreviewViewport] = useState<PreviewSize>({
+    width: 0,
+    height: 0,
+  });
   const previewRequestRef = useRef(0);
   const paginationTokenRef = useRef('');
   const previewViewportRef = useRef<HTMLDivElement>(null);
   const previousRequestIdentityRef = useRef(requestIdentity);
+  const isPaged = isPdf || (isImage && imageOptions.layout === 'pages');
   const resolvedPaper = resolvePdfPaper(draftStyle);
   const pageSize = previewPageSize(resolvedPaper);
   const activePageNumberTemplate = pageNumberTemplateForFormat(
@@ -176,13 +195,8 @@ export function ExportPreviewTab({
   const templateValidation = draftStyle.pageNumbersEnabled
     ? validatePageNumberTemplate(activePageNumberTemplate)
     : ({ valid: true } as const);
-  const geometryValidation = validatePdfPageGeometry(
-    pageSize.width,
-    pageSize.height,
-    draftStyle,
-  );
-  const pageLayoutValid =
-    !isPdf || (templateValidation.valid && geometryValidation.valid);
+  const geometryValidation = validatePdfPageGeometry(pageSize.width, pageSize.height, draftStyle);
+  const pageLayoutValid = !isPaged || (templateValidation.valid && geometryValidation.valid);
   const pageLayoutError = !templateValidation.valid
     ? templateValidation.message
     : !geometryValidation.valid
@@ -196,19 +210,22 @@ export function ExportPreviewTab({
       setDraftStyle(resolveExportStyleForTheme(initialStyle, appTheme));
       setPaperValid(true);
       setPageCount(1);
+      setContinuousSize(null);
+      setImageOptions({
+        ...normalizeImageExportOptions(initialImageOptions),
+        layout: 'pages',
+      });
       setZoomMode('fit');
       setManualZoomPercent(100);
       return;
     }
     setDraftStyle((current) =>
-      current.preset === 'app'
-        ? applyDraftStylePreset(current, 'app', appTheme)
-        : current,
+      current.preset === 'app' ? applyDraftStylePreset(current, 'app', appTheme) : current,
     );
-  }, [appTheme, initialStyle, requestIdentity]);
+  }, [appTheme, initialImageOptions, initialStyle, requestIdentity]);
 
   useEffect(() => {
-    if (isPdf && (!paperValid || !pageLayoutValid)) {
+    if ((isPdf || isImage) && (!paperValid || !pageLayoutValid)) {
       previewRequestRef.current += 1;
       paginationTokenRef.current = '';
       setPreviewHtml('');
@@ -216,10 +233,11 @@ export function ExportPreviewTab({
       return;
     }
     const previewRequest = ++previewRequestRef.current;
-    const token = isPdf ? `pdf-preview-${previewRequest}` : '';
+    const token = isPaged ? `paged-preview-${previewRequest}` : '';
     paginationTokenRef.current = token;
     setPaginationToken(token);
     setPageCount(1);
+    setContinuousSize(null);
     setPreviewHtml('');
     setPreviewStatus('loading');
 
@@ -227,14 +245,14 @@ export function ExportPreviewTab({
       title: request.title,
       source: request.source,
       activeDocumentPath: request.activeDocumentPath,
-      forPrint: request.format === 'pdf',
+      renderMode: (isPaged ? 'paged' : isImage ? 'continuous' : 'html') satisfies ExportRenderMode,
       paginationToken: token,
       style: draftStyle,
     })
       .then((html) => {
         if (previewRequest !== previewRequestRef.current) return;
         setPreviewHtml(html);
-        if (!isPdf) setPreviewStatus('ready');
+        if (!isPaged && !isImage) setPreviewStatus('ready');
       })
       .catch(() => {
         if (previewRequest !== previewRequestRef.current) return;
@@ -245,6 +263,9 @@ export function ExportPreviewTab({
     buildPreview,
     appCodeBlockTheme,
     draftStyle,
+    imageOptions,
+    isImage,
+    isPaged,
     isPdf,
     pageLayoutValid,
     paperValid,
@@ -255,7 +276,7 @@ export function ExportPreviewTab({
   ]);
 
   useEffect(() => {
-    if (!isPdf || typeof ResizeObserver === 'undefined') return;
+    if (!isPaged || typeof ResizeObserver === 'undefined') return;
 
     const viewport = previewViewportRef.current;
     if (!viewport) return;
@@ -276,20 +297,18 @@ export function ExportPreviewTab({
     measure();
     observer.observe(viewport);
     return () => observer.disconnect();
-  }, [isPdf]);
+  }, [isPaged]);
 
   const updateNumber = (key: NumericStyleKey, value: number) => {
-    setDraftStyle((current) =>
-      normalizeDraftStyle({ ...current, [key]: value, preset: 'custom' }),
-    );
+    setDraftStyle((current) => normalizeDraftStyle({ ...current, [key]: value, preset: 'custom' }));
   };
   const updateColor = (key: ColorStyleKey, value: string) => {
-    setDraftStyle((current) =>
-      normalizeDraftStyle({ ...current, [key]: value, preset: 'custom' }),
-    );
+    setDraftStyle((current) => normalizeDraftStyle({ ...current, [key]: value, preset: 'custom' }));
   };
   const controlId = (name: string) => `${idPrefix}-${name}`;
-  const formatLabel = request.format.toUpperCase();
+  const formatLabel = isImage
+    ? imageFormatLabel(imageOptions.format)
+    : request.format.toUpperCase();
   const pageInsets = resolvePdfPageInsets(draftStyle);
   const pageFurniture = resolvePdfPageFurniture(
     draftStyle,
@@ -323,6 +342,28 @@ export function ExportPreviewTab({
     if (token !== paginationTokenRef.current) return;
     setPreviewStatus('error');
   };
+  const handleContinuousReady = (size: ContinuousExportPreviewSize) => {
+    setContinuousSize(size);
+    setPreviewStatus('ready');
+  };
+  const imagePixelSize = isImage
+    ? imageOptions.layout === 'pages'
+      ? imagePagePixelSize(resolvedPaper, imageOptions.scale)
+      : continuousSize
+        ? imageContinuousPixelSize(resolvedPaper, imageOptions.scale, continuousSize)
+        : null
+    : null;
+  const imageSizeValidation =
+    isImage && imagePixelSize
+      ? validateImageOutputSize({
+          format: imageOptions.format,
+          layout: imageOptions.layout,
+          width: imagePixelSize.width,
+          height: imagePixelSize.height,
+          pages: imageOptions.layout === 'pages' ? pageCount : 1,
+        })
+      : null;
+  const imageOutputValid = !isImage || imageSizeValidation?.valid === true;
 
   const previewStatusContents = (
     <>
@@ -384,6 +425,8 @@ export function ExportPreviewTab({
             disabled={busy}
             onClick={() => {
               setPaperValid(true);
+              setContinuousSize(null);
+              if (isImage) setImageOptions({ ...DEFAULT_IMAGE_EXPORT_OPTIONS });
               setDraftStyle((current) =>
                 applyDraftStylePreset(
                   {
@@ -411,9 +454,14 @@ export function ExportPreviewTab({
               busy ||
               !paperValid ||
               !pageLayoutValid ||
+              !imageOutputValid ||
               previewStatus !== 'ready'
             }
-            onClick={() => onConfirm(normalizeExportStyle(draftStyle))}
+            onClick={() => {
+              const style = normalizeExportStyle(draftStyle);
+              if (isImage) onConfirm(style, normalizeImageExportOptions(imageOptions));
+              else onConfirm(style);
+            }}
           >
             <FileDown />
             {exportActionLabel(request, busy)}
@@ -439,8 +487,19 @@ export function ExportPreviewTab({
           className="min-h-0 overflow-y-auto border-b border-border bg-background px-4 py-4 lg:border-r lg:border-b-0"
         >
           <div className="grid gap-5">
+            {isImage ? (
+              <ImageExportControls
+                idPrefix={controlId('image')}
+                value={imageOptions}
+                disabled={busy}
+                onChange={setImageOptions}
+              />
+            ) : null}
             <div className="grid gap-2">
-              <Label htmlFor={controlId('theme')} className="text-xs font-medium text-foreground/85">
+              <Label
+                htmlFor={controlId('theme')}
+                className="text-xs font-medium text-foreground/85"
+              >
                 Theme
               </Label>
               <select
@@ -479,7 +538,10 @@ export function ExportPreviewTab({
             />
 
             <div className="grid gap-2">
-              <Label htmlFor={controlId('font-family')} className="text-xs font-medium text-foreground/85">
+              <Label
+                htmlFor={controlId('font-family')}
+                className="text-xs font-medium text-foreground/85"
+              >
                 Font family
               </Label>
               <select
@@ -576,9 +638,7 @@ export function ExportPreviewTab({
               value={draftStyle}
               disabled={busy}
               onChange={(layout) =>
-                setDraftStyle((current) =>
-                  normalizeDraftStyle({ ...current, ...layout }),
-                )
+                setDraftStyle((current) => normalizeDraftStyle({ ...current, ...layout }))
               }
             />
 
@@ -588,9 +648,7 @@ export function ExportPreviewTab({
               appTheme={appTheme}
               disabled={busy}
               onChange={(patch) =>
-                setDraftStyle((current) =>
-                  normalizeDraftStyle({ ...current, ...patch }),
-                )
+                setDraftStyle((current) => normalizeDraftStyle({ ...current, ...patch }))
               }
             />
 
@@ -616,25 +674,31 @@ export function ExportPreviewTab({
               </div>
             </fieldset>
 
-            {isPdf ? (
+            {isPdf || isImage ? (
               <>
                 <div className="border-t border-border pt-4">
                   <PdfPaperControls
                     idPrefix={controlId('paper')}
+                    mode={isImage && imageOptions.layout === 'long' ? 'canvas-width' : 'page'}
                     value={draftStyle}
                     disabled={busy}
                     onChange={updatePaper}
                     onValidityChange={setPaperValid}
                   />
                 </div>
-                <PdfPageFurnitureControls
-                  value={draftStyle}
-                  disabled={busy}
-                  errorMessage={pageLayoutError}
-                  onChange={(layout) =>
-                    setDraftStyle((current) => ({ ...current, ...layout }))
-                  }
-                />
+                {isPaged ? (
+                  <PdfPageFurnitureControls
+                    value={draftStyle}
+                    disabled={busy}
+                    errorMessage={pageLayoutError}
+                    onChange={(layout) => setDraftStyle((current) => ({ ...current, ...layout }))}
+                  />
+                ) : null}
+                {imageSizeValidation && !imageSizeValidation.valid ? (
+                  <p role="alert" className="text-xs text-destructive">
+                    {imageSizeValidation.message}
+                  </p>
+                ) : null}
               </>
             ) : null}
           </div>
@@ -644,7 +708,7 @@ export function ExportPreviewTab({
           data-testid="export-preview-panel"
           className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_1px_1px,color-mix(in_srgb,var(--border)_72%,transparent)_1px,transparent_0)] bg-[length:18px_18px]"
         >
-          {isPdf ? (
+          {isPaged ? (
             <div className="flex shrink-0 justify-end border-b border-border/70 bg-background/90 px-3 py-2 backdrop-blur-sm">
               <div
                 role="group"
@@ -696,11 +760,11 @@ export function ExportPreviewTab({
           ) : null}
 
           <div
-            ref={isPdf ? previewViewportRef : undefined}
-            data-testid={isPdf ? 'pdf-preview-viewport' : undefined}
+            ref={isPaged ? previewViewportRef : undefined}
+            data-testid={isPaged ? 'pdf-preview-viewport' : undefined}
             className="min-h-0 flex-1 overflow-auto p-4 sm:p-6"
           >
-            {isPdf ? (
+            {isPaged ? (
               <div className="flex min-h-full min-w-full flex-col items-center gap-4">
                 {previewHtml
                   ? Array.from({ length: pageCount }, (_, pageIndex) => (
@@ -728,7 +792,8 @@ export function ExportPreviewTab({
                               transformOrigin: 'top left',
                             }}
                           >
-                            <PdfPreviewPage
+                            <PagedExportPreviewPage
+                              formatLabel={isImage ? 'Image' : 'PDF'}
                               html={previewHtml}
                               token={paginationToken}
                               pageIndex={pageIndex}
@@ -748,6 +813,18 @@ export function ExportPreviewTab({
                       </figure>
                     ))
                   : null}
+              </div>
+            ) : isImage ? (
+              <div className="flex min-h-full min-w-full justify-center">
+                {previewHtml ? (
+                  <ContinuousExportPreview
+                    html={previewHtml}
+                    width={pageSize.width}
+                    backgroundColor={draftStyle.backgroundColor}
+                    onReady={handleContinuousReady}
+                    onError={() => setPreviewStatus('error')}
+                  />
+                ) : null}
               </div>
             ) : (
               <div

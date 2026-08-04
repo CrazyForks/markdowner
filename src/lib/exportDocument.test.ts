@@ -455,7 +455,7 @@ describe('buildExportHtml', () => {
       title: 'P',
       source: 'x',
       activeDocumentPath: null,
-      forPrint: true,
+      renderMode: 'paged',
       paginationToken: 'export-preview-token',
       style: {
         ...DEFAULT_EXPORT_STYLE,
@@ -621,13 +621,31 @@ describe('buildExportHtml', () => {
       title: 'P',
       source: '```text\n' + 'a'.repeat(240) + '\n```',
       activeDocumentPath: null,
-      forPrint: true,
+      renderMode: 'paged',
     });
 
     expect(html).toContain(
       '.markdowner-export pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }',
     );
     expect(html).toContain('.markdowner-export pre code { white-space: inherit; }');
+  });
+
+  it('marks continuous image layout without adding pagination runtime', async () => {
+    const html = await buildExportHtml({
+      title: 'Long image',
+      source: '# One continuous document',
+      activeDocumentPath: null,
+      renderMode: 'continuous',
+      style: DEFAULT_EXPORT_STYLE,
+    });
+
+    expect(html).toContain('data-export-layout="continuous"');
+    expect(html).toContain(
+      '.markdowner-export { box-sizing: border-box; width: 100%; max-width: none; }',
+    );
+    expect(html).not.toContain('__markdownerPdfPaginationStatus');
+    expect(html).not.toContain('__markdownerPaginatePdf');
+    expect(html).not.toContain('@page');
   });
 
   it('escapes the title to avoid breaking the document', async () => {

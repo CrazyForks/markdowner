@@ -152,6 +152,7 @@ import {
   type ExportFormat,
   type ExportStyle,
   type ExportTheme,
+  type WorkspaceExportFormat,
 } from '@/lib/exportDocument';
 import { resolvePdfPaper } from '@/lib/pdfPaper';
 import {
@@ -4858,7 +4859,7 @@ export default function App() {
     });
   };
 
-  const openWorkspaceExport = async (format: ExportFormat) => {
+  const openWorkspaceExport = async (format: WorkspaceExportFormat) => {
     const rootDir = snapshot.rootDir;
     if (!rootDir) {
       announceShell('Open a workspace to export all Markdown files');
@@ -4960,7 +4961,7 @@ export default function App() {
           title: request.title,
           source: request.source,
           activeDocumentPath: request.activeDocumentPath,
-          forPrint: request.format === 'pdf',
+          renderMode: request.format === 'pdf' ? 'paged' : 'html',
           style,
         });
         if (request.format === 'html') {
@@ -4981,6 +4982,9 @@ export default function App() {
       const rootDir = snapshot.rootDir;
       if (!rootDir) {
         throw new Error('The workspace is no longer open');
+      }
+      if (request.format === 'image') {
+        throw new Error('Workspace image export is not supported');
       }
       const targets = buildWorkspaceExportTargets({
         rootDir,
@@ -5005,7 +5009,7 @@ export default function App() {
             title: target.title,
             source,
             activeDocumentPath: target.sourcePath,
-            forPrint: request.format === 'pdf',
+            renderMode: request.format === 'pdf' ? 'paged' : 'html',
             style,
           });
           return { target, html };

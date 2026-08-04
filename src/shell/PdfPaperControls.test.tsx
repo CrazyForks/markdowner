@@ -19,10 +19,10 @@ describe('PdfPaperControls', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Size'), { target: { value: 'A3' } });
-    expect(onChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ paperSize: 'A3' }),
-    );
+    fireEvent.change(screen.getByLabelText('Size'), {
+      target: { value: 'A3' },
+    });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ paperSize: 'A3' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Landscape' }));
     expect(onChange).toHaveBeenLastCalledWith(
@@ -99,6 +99,36 @@ describe('PdfPaperControls', () => {
     expect(screen.getByRole('button', { name: 'Landscape' })).toHaveAttribute(
       'aria-pressed',
       'true',
+    );
+  });
+
+  it('edits and reports only Canvas width for a continuous image', () => {
+    const onChange = vi.fn();
+    render(
+      <PdfPaperControls
+        mode="canvas-width"
+        value={{
+          ...DEFAULT_PDF_PAPER,
+          paperSize: 'Custom',
+          paperWidthMm: 180.5,
+          paperHeightMm: 240.2,
+        }}
+        disabled={false}
+        onChange={onChange}
+        onValidityChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText('Canvas width')).toHaveTextContent('180.5 mm');
+    expect(screen.getByLabelText('Width')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Height')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Swap width and height' })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Width'), {
+      target: { value: '200' },
+    });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ paperWidthMm: 200, paperHeightMm: 240.2 }),
     );
   });
 });

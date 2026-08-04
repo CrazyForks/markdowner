@@ -21,6 +21,7 @@ export interface PdfPaperControlsProps {
   onChange: (value: PdfPaper) => void;
   onValidityChange: (valid: boolean) => void;
   idPrefix?: string;
+  mode?: 'page' | 'canvas-width';
 }
 
 const selectClassName =
@@ -36,6 +37,7 @@ export function PdfPaperControls({
   onChange,
   onValidityChange,
   idPrefix = 'pdf-paper',
+  mode = 'page',
 }: PdfPaperControlsProps) {
   const [widthInput, setWidthInput] = useState(String(value.paperWidthMm));
   const [heightInput, setHeightInput] = useState(String(value.paperHeightMm));
@@ -50,7 +52,7 @@ export function PdfPaperControls({
 
   const widthValidation = validateCustomPaperInput(widthInput);
   const heightValidation = validateCustomPaperInput(heightInput);
-  const customValid = widthValidation.valid && heightValidation.valid;
+  const customValid = widthValidation.valid && (mode === 'canvas-width' || heightValidation.valid);
 
   useEffect(() => {
     onValidityChange(value.paperSize !== 'Custom' || customValid);
@@ -63,7 +65,7 @@ export function PdfPaperControls({
   const resolved = resolvePdfPaper(value);
   const validationMessage = !widthValidation.valid
     ? widthValidation.message
-    : !heightValidation.valid
+    : mode === 'page' && !heightValidation.valid
       ? heightValidation.message
       : '';
 
@@ -75,13 +77,13 @@ export function PdfPaperControls({
 
     const nextWidth = validateCustomPaperInput(nextWidthInput);
     const nextHeight = validateCustomPaperInput(nextHeightInput);
-    const valid = nextWidth.valid && nextHeight.valid;
+    const valid = nextWidth.valid && (mode === 'canvas-width' || nextHeight.valid);
     onValidityChange(valid);
-    if (!valid) return;
+    if (!valid || !nextWidth.valid) return;
     onChange({
       ...normalizePdfPaper(value),
       paperWidthMm: nextWidth.value,
-      paperHeightMm: nextHeight.value,
+      paperHeightMm: nextHeight.valid ? nextHeight.value : value.paperHeightMm,
     });
   };
 
@@ -113,7 +115,7 @@ export function PdfPaperControls({
 
   return (
     <fieldset className="grid min-w-0 gap-3">
-      <legend className="sr-only">PDF paper</legend>
+      <legend className="sr-only">{mode === 'page' ? 'PDF paper' : 'Image canvas'}</legend>
       <div className="grid gap-2">
         <Label htmlFor={sizeId} className="text-xs font-medium text-foreground/85">
           Size
@@ -136,7 +138,13 @@ export function PdfPaperControls({
 
       {value.paperSize === 'Custom' ? (
         <div className="grid gap-2">
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
+          <div
+            className={
+              mode === 'page'
+                ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2'
+                : 'grid grid-cols-1 gap-2'
+            }
+          >
             <div className="grid min-w-0 gap-1.5">
               <Label htmlFor={widthId} className="text-xs text-foreground/85">
                 Width
@@ -162,42 +170,46 @@ export function PdfPaperControls({
                 </span>
               </div>
             </div>
-            <div className="grid min-w-0 gap-1.5">
-              <Label htmlFor={heightId} className="text-xs text-foreground/85">
-                Height
-              </Label>
-              <div className="relative">
-                <Input
-                  id={heightId}
-                  aria-label="Height"
-                  aria-describedby={!heightValidation.valid ? errorId : undefined}
-                  aria-invalid={!heightValidation.valid}
-                  type="number"
-                  min={MIN_CUSTOM_PAPER_MM}
-                  max={MAX_CUSTOM_PAPER_MM}
-                  step="0.1"
-                  inputMode="decimal"
-                  value={heightInput}
+            {mode === 'page' ? (
+              <>
+                <div className="grid min-w-0 gap-1.5">
+                  <Label htmlFor={heightId} className="text-xs text-foreground/85">
+                    Height
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id={heightId}
+                      aria-label="Height"
+                      aria-describedby={!heightValidation.valid ? errorId : undefined}
+                      aria-invalid={!heightValidation.valid}
+                      type="number"
+                      min={MIN_CUSTOM_PAPER_MM}
+                      max={MAX_CUSTOM_PAPER_MM}
+                      step="0.1"
+                      inputMode="decimal"
+                      value={heightInput}
+                      disabled={disabled}
+                      onChange={(event) => updateCustomDimension('height', event.target.value)}
+                      className="pr-9"
+                    />
+                    <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-muted-foreground">
+                      mm
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="Swap width and height"
+                  title="Swap width and height"
                   disabled={disabled}
-                  onChange={(event) => updateCustomDimension('height', event.target.value)}
-                  className="pr-9"
-                />
-                <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-muted-foreground">
-                  mm
-                </span>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="Swap width and height"
-              title="Swap width and height"
-              disabled={disabled}
-              onClick={swapDimensions}
-            >
-              <ArrowLeftRight />
-            </Button>
+                  onClick={swapDimensions}
+                >
+                  <ArrowLeftRight />
+                </Button>
+              </>
+            ) : null}
           </div>
           {validationMessage ? (
             <p id={errorId} role="alert" className="text-xs text-destructive">
@@ -232,10 +244,12 @@ export function PdfPaperControls({
       )}
 
       <output
-        aria-label="Resolved paper size"
+        aria-label={mode === 'page' ? 'Resolved paper size' : 'Canvas width'}
         className="text-xs tabular-nums text-muted-foreground"
       >
-        {formatMillimeters(resolved.widthMm)} × {formatMillimeters(resolved.heightMm)} mm
+        {mode === 'page'
+          ? `${formatMillimeters(resolved.widthMm)} × ${formatMillimeters(resolved.heightMm)} mm`
+          : `${formatMillimeters(resolved.widthMm)} mm`}
       </output>
     </fieldset>
   );

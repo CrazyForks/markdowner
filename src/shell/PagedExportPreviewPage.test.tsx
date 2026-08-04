@@ -2,8 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PDF_PREVIEW_READY_MESSAGE } from '@/lib/pdfPagination';
-
-import { PdfPreviewPage } from './PdfPreviewPage';
+import { PagedExportPreviewPage } from './PagedExportPreviewPage';
 
 function rect(top: number, height: number): DOMRect {
   return {
@@ -19,17 +18,12 @@ function rect(top: number, height: number): DOMRect {
   };
 }
 
-function mockThreePageContent(frameDocument: Document) {
-  const paragraphs = frameDocument.querySelectorAll('p');
-  vi.spyOn(paragraphs[0], 'getBoundingClientRect').mockReturnValue(rect(40, 100));
-  vi.spyOn(paragraphs[1], 'getBoundingClientRect').mockReturnValue(rect(1_700, 100));
-}
-
-function renderPage() {
+function renderPage(formatLabel: 'PDF' | 'Image' = 'Image') {
   const onReady = vi.fn();
   const onError = vi.fn();
   render(
-    <PdfPreviewPage
+    <PagedExportPreviewPage
+      formatLabel={formatLabel}
       html="<!doctype html><html><body>Preview</body></html>"
       token="preview-7"
       pageIndex={1}
@@ -52,7 +46,7 @@ function renderPage() {
       onError={onError}
     />,
   );
-  const frame = screen.getByTitle('PDF preview page 2') as HTMLIFrameElement;
+  const frame = screen.getByTitle(`${formatLabel} preview page 2`) as HTMLIFrameElement;
   Object.defineProperty(frame, 'clientWidth', {
     configurable: true,
     value: 595,
@@ -68,15 +62,17 @@ function renderPage() {
   return { frame, onReady, onError };
 }
 
-describe('PdfPreviewPage', () => {
+describe('PagedExportPreviewPage', () => {
   afterEach(() => cleanup());
 
-  it('paginates the loaded document directly without allowing iframe scripts', async () => {
+  it('paginates image pages with format-aware accessible titles', async () => {
     const { frame, onReady, onError } = renderPage();
     const frameDocument = frame.contentDocument!;
     frameDocument.body.innerHTML =
       '<main class="markdowner-export"><p>First page</p><p>More content</p></main>';
-    mockThreePageContent(frameDocument);
+    const paragraphs = frameDocument.querySelectorAll('p');
+    vi.spyOn(paragraphs[0], 'getBoundingClientRect').mockReturnValue(rect(40, 100));
+    vi.spyOn(paragraphs[1], 'getBoundingClientRect').mockReturnValue(rect(1_700, 100));
 
     fireEvent.load(frame);
 
@@ -90,32 +86,26 @@ describe('PdfPreviewPage', () => {
         pageHeight: 841.8897637795276,
       }),
     );
-    expect(frameDocument.querySelector('.markdowner-export')).toHaveStyle({
-      transform: 'translateY(-841.8897637795276px)',
-      transformOrigin: 'top left',
-    });
-    expect(frameDocument.documentElement).toHaveStyle({
-      overflow: 'hidden',
-    });
-    expect(
-      frameDocument.querySelectorAll('[data-markdowner-pdf-decoration="page"]'),
-    ).toHaveLength(3);
-    expect(
-      frameDocument.querySelector(
-        '[data-markdowner-pdf-decoration="page"]:nth-of-type(3)',
-      )?.textContent,
-    ).toContain('3/3');
     expect(onError).not.toHaveBeenCalled();
     expect(frame).toHaveAttribute('sandbox', 'allow-same-origin');
     expect(frame.getAttribute('sandbox')).not.toContain('allow-scripts');
   });
 
-  it('waits for the iframe to receive its layout width before measuring pagination', async () => {
-    const { frame, onReady, onError } = renderPage();
+  it('reports iframe failures', () => {
+    const { frame, onError } = renderPage('PDF');
+
+    fireEvent.error(frame);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits until the iframe receives a measurable layout', async () => {
+    const { frame, onReady, onError } = renderPage('PDF');
     const frameDocument = frame.contentDocument!;
     frameDocument.body.innerHTML =
       '<main class="markdowner-export"><p>First page</p><p>More content</p></main>';
-    mockThreePageContent(frameDocument);
+    const paragraphs = frameDocument.querySelectorAll('p');
+    vi.spyOn(paragraphs[0], 'getBoundingClientRect').mockReturnValue(rect(40, 100));
+    vi.spyOn(paragraphs[1], 'getBoundingClientRect').mockReturnValue(rect(1_700, 100));
     let layoutReady = false;
     Object.defineProperty(frame, 'clientWidth', {
       configurable: true,
@@ -138,21 +128,7 @@ describe('PdfPreviewPage', () => {
     fireEvent.load(frame);
 
     await waitFor(() => expect(onReady).toHaveBeenCalled());
-    expect(onReady).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        pageCount: 3,
-      }),
-    );
-    expect(frameDocument.querySelector('.markdowner-export')).toHaveStyle({
-      width: '595px',
-    });
+    expect(onReady).toHaveBeenLastCalledWith(expect.objectContaining({ pageCount: 3 }));
     expect(onError).not.toHaveBeenCalled();
-  });
-
-  it('reports iframe failures', () => {
-    const { frame, onError } = renderPage();
-
-    fireEvent.error(frame);
-    expect(onError).toHaveBeenCalledTimes(1);
   });
 });

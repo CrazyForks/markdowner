@@ -5,6 +5,7 @@ import {
   PREVIEW_ZOOM_MIN_PERCENT,
   clampPreviewZoomPercent,
   fitPreviewZoomPercent,
+  fitPreviewWidthZoomPercent,
   previewPageSize,
   stepPreviewZoomPercent,
 } from './exportPreviewZoom';
@@ -39,6 +40,12 @@ describe('exportPreviewZoom', () => {
     expect(fitPreviewZoomPercent({ width: a4.width * 0.1, height: a4.height * 0.1 }, a4)).toBe(
       10,
     );
+  });
+
+  it('fits a continuous canvas by width without shrinking for its height', () => {
+    expect(fitPreviewWidthZoomPercent(400, 800)).toBe(50);
+    expect(fitPreviewWidthZoomPercent(1_200, 800)).toBe(100);
+    expect(fitPreviewWidthZoomPercent(0, 800)).toBe(100);
   });
 
   it('rounds irregular Fit values to manual 10% steps', () => {

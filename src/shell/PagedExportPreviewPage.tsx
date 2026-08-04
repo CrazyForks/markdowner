@@ -1,14 +1,16 @@
 import { useEffect, useRef } from 'react';
 
+import { waitForExportPreviewAssets, waitForExportPreviewLayout } from '@/lib/exportPreviewFrame';
+import type { PdfPageFurniture, PdfPageInsets } from '@/lib/exportPageLayout';
 import {
   PDF_PREVIEW_READY_MESSAGE,
   paginatePdfDocument,
   type PdfPreviewReadyMessage,
 } from '@/lib/pdfPagination';
-import type { PdfPageFurniture, PdfPageInsets } from '@/lib/exportPageLayout';
 import { MAX_PDF_PAGES } from '@/lib/pdfPaper';
 
-export interface PdfPreviewPageProps {
+export interface PagedExportPreviewPageProps {
+  formatLabel: 'PDF' | 'Image';
   html: string;
   token: string;
   pageIndex: number;
@@ -21,41 +23,8 @@ export interface PdfPreviewPageProps {
   onError: () => void;
 }
 
-async function waitForPreviewAssets(doc: Document): Promise<void> {
-  const fonts = doc.fonts?.ready
-    ? Promise.resolve(doc.fonts.ready).catch(() => undefined)
-    : Promise.resolve();
-  const images = Array.from(doc.images, (image) => {
-    if (image.complete) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      image.addEventListener('load', () => resolve(), { once: true });
-      image.addEventListener('error', () => resolve(), { once: true });
-    });
-  });
-  await Promise.all([fonts, ...images]);
-}
-
-async function waitForPreviewLayout(
-  frame: HTMLIFrameElement,
-  doc: Document,
-): Promise<void> {
-  const maxFrames = 60;
-  for (let frameIndex = 0; frameIndex < maxFrames; frameIndex += 1) {
-    if (
-      frame.clientWidth > 0 &&
-      frame.clientHeight > 0 &&
-      doc.documentElement.clientWidth > 0
-    ) {
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => resolve());
-    });
-  }
-  throw new Error('PDF preview did not receive a measurable layout.');
-}
-
-export function PdfPreviewPage({
+export function PagedExportPreviewPage({
+  formatLabel,
   html,
   token,
   pageIndex,
@@ -66,7 +35,7 @@ export function PdfPreviewPage({
   backgroundColor,
   onReady,
   onError,
-}: PdfPreviewPageProps) {
+}: PagedExportPreviewPageProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -83,15 +52,10 @@ export function PdfPreviewPage({
       return;
     }
 
-    void waitForPreviewAssets(frameDocument)
-      .then(() => waitForPreviewLayout(frame, frameDocument))
+    void waitForExportPreviewAssets(frameDocument)
+      .then(() => waitForExportPreviewLayout(frame, frameDocument))
       .then(() => {
-        if (
-          iframeRef.current !== frame ||
-          frame.contentDocument !== frameDocument
-        ) {
-          return;
-        }
+        if (iframeRef.current !== frame || frame.contentDocument !== frameDocument) return;
         const result = paginatePdfDocument(frameDocument, {
           pageWidth: width,
           pageHeight: height,
@@ -125,7 +89,7 @@ export function PdfPreviewPage({
     >
       <iframe
         ref={iframeRef}
-        title={`PDF preview page ${pageIndex + 1}`}
+        title={`${formatLabel} preview page ${pageIndex + 1}`}
         sandbox="allow-same-origin"
         srcDoc={html}
         onLoad={paginatePage}
