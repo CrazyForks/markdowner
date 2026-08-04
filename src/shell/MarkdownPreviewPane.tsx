@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
+import { GFM_REMARK_PLUGINS } from '@/lib/gfm';
 import { createSourceLineMarkdownComponents } from '@/lib/sourceLineComponents';
 import { MARKDOWN_CONTENT_SCOPE_CLASS } from '@/lib/themeScope';
 import { cn } from '@/lib/utils';
@@ -45,7 +45,7 @@ export function MarkdownPreviewPane({
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={GFM_REMARK_PLUGINS}
         rehypePlugins={rehypePlugins}
         components={markdownComponents}
       >

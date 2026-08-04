@@ -201,6 +201,7 @@ import {
   normalizeOpenDialogPaths,
 } from './lib/fileDialogOptions';
 import { getErrorMessage } from './lib/errors';
+import { GFM_MARKED_OPTIONS } from './lib/gfm';
 import { createMarkdownImageExtension } from './lib/wysiwygImageExtension';
 import { WYSIWYG_LINK_OPTIONS } from './lib/wysiwygLinkOptions';
 import {
@@ -1937,12 +1938,7 @@ export default function App() {
       MarkdownLinkInputRule,
       WysiwygFindHighlight,
       WysiwygSkillHighlight,
-      Markdown.configure({
-        markedOptions: {
-          gfm: true,
-          breaks: false,
-        },
-      }),
+      Markdown.configure({ markedOptions: GFM_MARKED_OPTIONS }),
     ],
     [],
   );

@@ -1,9 +1,9 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
 import { readImagesBase64, type EmbeddedImageResult } from './desktop';
+import { GFM_REMARK_PLUGINS } from './gfm';
 import {
   inferInlineCodePreset,
   normalizeExportCodeBlockTheme,
@@ -452,7 +452,7 @@ export function renderMarkdownToHtml(
     createElement(
       ReactMarkdown,
       {
-        remarkPlugins: [remarkGfm],
+        remarkPlugins: GFM_REMARK_PLUGINS,
         components: createSourceLineMarkdownComponents({ activeDocumentPath, resolveImageSrc }),
       },
       source,

@@ -32,6 +32,7 @@ import {
   shouldSuppressDuplicateImeTextInput,
   shouldSuppressSyntheticImeEnter,
 } from '@/lib/wysiwygKeyboard';
+import { GFM_MARKED_OPTIONS } from '@/lib/gfm';
 import { WYSIWYG_LINK_OPTIONS } from '@/lib/wysiwygLinkOptions';
 import './styles.css';
 
@@ -62,7 +63,7 @@ function Playground() {
       TaskList,
       TaskItem.configure({ nested: true }),
       MarkdownLinkInputRule,
-      Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
+      Markdown.configure({ markedOptions: GFM_MARKED_OPTIONS }),
     ],
     content:
       '# Playground\n\nType here. Test: a table, a [link](https://example.com), and Korean 한글 입력.\n',
