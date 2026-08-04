@@ -215,7 +215,7 @@ dialog's explicit overwrite approval and an atomic same-directory replacement.
   count are validated in TypeScript and again at the native boundary.
 - Long image output has a 100,000,000-pixel maximum to bound memory and encode
   time.
-- WebP width and height may not exceed 16,384 pixels. JPEG width and height may
+- WebP width and height may not exceed 16,383 pixels. JPEG width and height may
   not exceed 65,535 pixels. PNG dimensions remain subject to the shared pixel
   budget and its 2,147,483,647-pixel axis limit.
 - Invalid, zero, non-finite, or overflowed dimensions fail closed.
