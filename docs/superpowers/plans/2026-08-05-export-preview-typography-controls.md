@@ -191,6 +191,7 @@ return {
   ...pageLayout,
   ...paper,
   preset,
+  fontSize: current.fontSize,
   codeBlockTheme: current.codeBlockTheme,
   codeBlockFontSize: current.codeBlockFontSize,
   codeBlockLineHeight: current.codeBlockLineHeight,
