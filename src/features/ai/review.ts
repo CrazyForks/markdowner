@@ -1,4 +1,4 @@
-import type { AiRunRequest, AiRunResult } from './types';
+import type { AiRunRequest, AiRunResult, AiTask } from "./types";
 
 export interface AiReview {
   id: string;
@@ -7,7 +7,7 @@ export interface AiReview {
   sourceDocumentName: string;
   sourceSnapshot: string;
   request: AiRunRequest;
-  status: 'running' | 'complete' | 'failed' | 'cancelled';
+  status: "running" | "complete" | "failed" | "cancelled";
   statusMessage: string | null;
   runResult: AiRunResult | null;
   createdAt: number;
@@ -23,7 +23,7 @@ export interface ReviewActions {
 export function createAiReview(
   request: AiRunRequest,
   runResult: AiRunResult,
-  sourceDocumentName = 'Untitled',
+  sourceDocumentName = "Untitled",
   now = Date.now(),
 ): AiReview {
   return {
@@ -33,7 +33,7 @@ export function createAiReview(
     sourceDocumentName,
     sourceSnapshot: request.source,
     request,
-    status: 'complete',
+    status: "complete",
     statusMessage: null,
     runResult,
     createdAt: now,
@@ -42,7 +42,7 @@ export function createAiReview(
 
 export function createPendingAiReview(
   request: AiRunRequest,
-  sourceDocumentName = 'Untitled',
+  sourceDocumentName = "Untitled",
   now = Date.now(),
 ): AiReview {
   return {
@@ -52,8 +52,8 @@ export function createPendingAiReview(
     sourceDocumentName,
     sourceSnapshot: request.source,
     request,
-    status: 'running',
-    statusMessage: 'AI request in progress…',
+    status: "running",
+    statusMessage: "AI request in progress…",
     runResult: null,
     createdAt: now,
   };
@@ -61,7 +61,7 @@ export function createPendingAiReview(
 
 export function settlePendingAiReview(
   review: AiReview,
-  status: 'failed' | 'cancelled',
+  status: "failed" | "cancelled",
   statusMessage: string,
 ): AiReview {
   return {
@@ -80,13 +80,17 @@ export function isReviewSourceCurrent(
 }
 
 export function resolveReviewActions(input: {
+  task: AiTask;
   sourcePresent: boolean;
   sourceRevisionMatches: boolean;
   validationPassed: boolean;
 }): ReviewActions {
   const validResult = input.validationPassed;
   const canApply =
-    validResult && input.sourcePresent && input.sourceRevisionMatches;
+    input.task !== "summary" &&
+    validResult &&
+    input.sourcePresent &&
+    input.sourceRevisionMatches;
 
   return {
     applySelected: canApply,
