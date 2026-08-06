@@ -1133,70 +1133,100 @@ section[data-mode='Wysiwyg'] {
   background: var(--border);
 }
 
-/* Floating link editor popup (portal to body). Appears above or below the
-   anchor under the caret or mouse cursor. */
+/* Explicit link details card / editor (portal to body). */
 .link-popup {
   position: fixed;
   z-index: 60;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 8px;
+  width: min(360px, calc(100vw - 16px));
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 12px;
+  border-radius: 10px;
   background: var(--popover);
   color: var(--popover-foreground);
   border: 1px solid var(--border);
   box-shadow:
     0 10px 28px rgba(0, 0, 0, 0.2),
     0 2px 4px rgba(0, 0, 0, 0.08);
-  user-select: none;
   animation: link-popup-in 90ms ease-out;
-  max-width: min(420px, calc(100vw - 16px));
 }
 @keyframes link-popup-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.link-popup-input {
-  flex: 1 1 auto;
-  min-width: 180px;
-  height: 28px;
-  padding: 0 8px;
+.link-popup-card,
+.link-popup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.link-popup-url {
+  overflow: hidden;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.link-popup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.link-popup-field input {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--background);
   color: var(--foreground);
   font-size: 13px;
+  font-weight: 400;
   outline: none;
-  /* `.link-popup` sets `user-select: none` to keep its chrome unselectable;
-     that inherits into this input and, in WebKit (WKWebView), breaks caret
-     placement and text selection — clicking the URL text to edit it stops
-     working. Restore normal text interaction here. */
   -webkit-user-select: text;
   user-select: text;
 }
-.link-popup-input:focus-visible {
+.link-popup-field input:focus-visible {
   border-color: var(--ring);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent);
 }
-.link-popup-separator {
-  width: 1px;
-  height: 18px;
-  margin: 0 2px;
-  background: var(--border);
+.link-popup-field input[aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+.link-popup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .link-popup-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 9px;
   border-radius: 6px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background-color 80ms ease, color 80ms ease;
+  transition:
+    background-color 80ms ease,
+    border-color 80ms ease,
+    color 80ms ease;
 }
 .link-popup-button:hover {
   background: var(--muted);
@@ -1204,9 +1234,31 @@ section[data-mode='Wysiwyg'] {
 }
 .link-popup-button:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: -2px;
+  outline-offset: 1px;
+}
+.link-popup-button.is-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.link-popup-button.is-primary:hover {
+  background: color-mix(in srgb, var(--primary) 88%, transparent);
+}
+.link-popup-button.is-danger {
+  color: var(--destructive);
 }
 .link-popup-button.is-danger:hover {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+}
+.link-popup-status,
+.link-popup-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.link-popup-status {
+  color: var(--muted-foreground);
+}
+.link-popup-error {
   color: var(--destructive);
 }
 

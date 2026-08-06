@@ -7,11 +7,24 @@
  * publish/subscribe site so downstream listeners stay in sync.
  */
 
-export type EditorOverlayEvent = 'link:edit-request' | 'link:open' | 'slash:open-at-cursor';
+export type EditorOverlayEvent =
+  | 'link:edit-request'
+  | 'link:inspect-request'
+  | 'link:open'
+  | 'slash:open-at-cursor';
 
 interface LinkEditRequest {
-  /** When true, request the URL input to take focus immediately. */
+  /** Deprecated compatibility field; every explicit edit request now focuses the URL. */
   focusInput?: boolean;
+  /** Source range replaced only after the user applies the form. */
+  replaceRange?: { from: number; to: number };
+  /** Optional initial label, used by entry points such as the slash menu. */
+  initialDisplayText?: string;
+}
+
+interface LinkInspectRequest {
+  /** ProseMirror document position inside the clicked link. */
+  position: number;
 }
 
 interface LinkOpenRequest {
@@ -32,11 +45,13 @@ interface SlashOpenAtCursorRequest {
 
 type PayloadFor<E extends EditorOverlayEvent> = E extends 'link:edit-request'
   ? LinkEditRequest
-  : E extends 'link:open'
-    ? LinkOpenRequest
-    : E extends 'slash:open-at-cursor'
-      ? SlashOpenAtCursorRequest
-      : never;
+  : E extends 'link:inspect-request'
+    ? LinkInspectRequest
+    : E extends 'link:open'
+      ? LinkOpenRequest
+      : E extends 'slash:open-at-cursor'
+        ? SlashOpenAtCursorRequest
+        : never;
 
 type Listener<E extends EditorOverlayEvent> = (payload: PayloadFor<E>) => void;
 
