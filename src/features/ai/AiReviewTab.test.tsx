@@ -1,19 +1,19 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AiRunRequest, AiRunResult } from "./types";
-import { createAiReview, createPendingAiReview } from "./review";
-import { AiReviewTab } from "./AiReviewTab";
+import type { AiRunRequest, AiRunResult } from './types';
+import { createAiReview, createPendingAiReview } from './review';
+import { AiReviewTab } from './AiReviewTab';
 
 afterEach(cleanup);
 
 const request: AiRunRequest = {
-  requestId: "request-1",
-  documentId: "doc-1",
-  source: "# PRD\n\nVague.",
+  requestId: 'request-1',
+  documentId: 'doc-1',
+  source: '# PRD\n\nVague.',
   selection: null,
-  task: "prd",
-  model: "z-ai/glm-5.2",
+  task: 'prd',
+  model: 'z-ai/glm-5.2',
   targetLanguage: null,
   instruction: null,
   zdrOnly: true,
@@ -22,45 +22,45 @@ const request: AiRunRequest = {
 };
 
 const runResult: AiRunResult = {
-  requestId: "request-1",
-  documentId: "doc-1",
-  task: "prd",
-  model: "z-ai/glm-5.2",
-  generationId: "generation-1",
+  requestId: 'request-1',
+  documentId: 'doc-1',
+  task: 'prd',
+  model: 'z-ai/glm-5.2',
+  generationId: 'generation-1',
   result: {
-    sourceRevisionHash: "revision-1",
-    proposedMarkdown: "# PRD\n\nMeasurable.",
+    sourceRevisionHash: 'revision-1',
+    proposedMarkdown: '# PRD\n\nMeasurable.',
     validation: {
       passed: true,
       issues: [],
     },
     operations: [
       {
-        id: "operation-1",
-        kind: "replace",
-        targetSegmentId: "segment-1",
+        id: 'operation-1',
+        kind: 'replace',
+        targetSegmentId: 'segment-1',
         sourceRange: { start: 7, end: 13 },
-        originalMarkdown: "Vague.",
-        proposedMarkdown: "Measurable.",
-        findingIds: ["finding-1"],
+        originalMarkdown: 'Vague.',
+        proposedMarkdown: 'Measurable.',
+        findingIds: ['finding-1'],
       },
     ],
     hunks: [
       {
-        operationId: "operation-1",
+        operationId: 'operation-1',
         sourceRange: { start: 7, end: 13 },
-        originalMarkdown: "Vague.",
-        proposedMarkdown: "Measurable.",
+        originalMarkdown: 'Vague.',
+        proposedMarkdown: 'Measurable.',
       },
     ],
-    summary: "Make the requirement measurable.",
+    summary: 'Make the requirement measurable.',
     findings: [
       {
-        id: "finding-1",
-        severity: "high",
-        category: "ambiguity",
-        evidenceSegmentId: "segment-1",
-        rationale: "No measurable threshold.",
+        id: 'finding-1',
+        severity: 'high',
+        category: 'ambiguity',
+        evidenceSegmentId: 'segment-1',
+        rationale: 'No measurable threshold.',
       },
     ],
     assumptions: [],
@@ -80,39 +80,35 @@ const runResult: AiRunResult = {
   retryAfterSeconds: null,
 };
 
-describe("AiReviewTab", () => {
-  it("renders a Summary as an open-only new-document proposal", () => {
+describe('AiReviewTab', () => {
+  it('renders a Summary as an open-only new-document proposal', () => {
     const onOpenAsDocument = vi.fn();
     const summaryRequest: AiRunRequest = {
       ...request,
-      task: "summary",
-      targetLanguage: "ko",
+      task: 'summary',
+      targetLanguage: 'ko',
     };
     const summaryResult: AiRunResult = {
       ...runResult,
-      task: "summary",
+      task: 'summary',
       result: runResult.result
         ? {
             ...runResult.result,
-            proposedMarkdown: "# 요약\n\n핵심 내용",
+            proposedMarkdown: '# 요약\n\n핵심 내용',
             operations: [],
             hunks: [],
-            summary: "Summary ready.",
+            summary: 'Summary ready.',
             findings: [],
             assumptions: [],
-            detectedSourceLanguage: "en",
-            targetLanguage: "ko",
+            detectedSourceLanguage: 'en',
+            targetLanguage: 'ko',
           }
         : null,
     };
 
     render(
       <AiReviewTab
-        review={createAiReview(
-          summaryRequest,
-          summaryResult,
-          "requirements.md",
-        )}
+        review={createAiReview(summaryRequest, summaryResult, 'requirements.md')}
         currentSource={request.source}
         sourcePresent
         onApply={vi.fn()}
@@ -122,40 +118,30 @@ describe("AiReviewTab", () => {
       />,
     );
 
+    expect(screen.getByRole('heading', { name: 'Summary proposal' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Summary preview' })).toBeVisible();
+    expect(screen.getByText('Detected en · Summary ko')).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "Summary proposal" }),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("heading", { name: "Summary preview" }),
-    ).toBeVisible();
-    expect(screen.getByText("Detected en · Summary ko")).toBeVisible();
-    expect(
-      screen.getByRole("region", { name: "Summary preview" }),
-    ).toHaveTextContent("# 요약 핵심 내용");
-    expect(
-      screen.queryByRole("button", { name: "Apply all" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Apply selected" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "Proposed changes" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole('region', { name: 'Summary preview' }),
+    ).toHaveTextContent('# 요약 핵심 내용');
+    expect(screen.queryByRole('button', { name: 'Apply all' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply selected' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Proposed changes' })).not.toBeInTheDocument();
 
-    const openSummaryButton = screen.getByRole("button", {
-      name: "Open summary as new document",
+    const openSummaryButton = screen.getByRole('button', {
+      name: 'Open summary as new document',
     });
     expect(openSummaryButton).toBeEnabled();
     fireEvent.click(openSummaryButton);
 
-    expect(onOpenAsDocument).toHaveBeenCalledWith("# 요약\n\n핵심 내용");
+    expect(onOpenAsDocument).toHaveBeenCalledWith('# 요약\n\n핵심 내용');
   });
 
-  it("renders a non-applicable running state before a full-document result arrives", () => {
+  it('renders a non-applicable running state before a full-document result arrives', () => {
     render(
       <AiReviewTab
-        review={createPendingAiReview(request, "requirements.md")}
+        review={createPendingAiReview(request, 'requirements.md')}
         currentSource={request.source}
         sourcePresent
         onApply={vi.fn()}
@@ -166,15 +152,15 @@ describe("AiReviewTab", () => {
     );
 
     expect(screen.getByText(/AI request in progress/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply all" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Rerun" })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply all' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Rerun' })).toBeDisabled();
   });
 
-  it("renders findings and diff hunks, then applies the full validated proposal", () => {
+  it('renders findings and diff hunks, then applies the full validated proposal', () => {
     const onApply = vi.fn();
     render(
       <AiReviewTab
-        review={createAiReview(request, runResult, "requirements.md")}
+        review={createAiReview(request, runResult, 'requirements.md')}
         currentSource={request.source}
         sourcePresent
         onApply={onApply}
@@ -184,23 +170,23 @@ describe("AiReviewTab", () => {
       />,
     );
 
-    expect(screen.getByText("No measurable threshold.")).toBeInTheDocument();
-    expect(screen.getByText("− Vague.")).toBeInTheDocument();
-    expect(screen.getByText("+ Measurable.")).toBeInTheDocument();
+    expect(screen.getByText('No measurable threshold.')).toBeInTheDocument();
+    expect(screen.getByText('− Vague.')).toBeInTheDocument();
+    expect(screen.getByText('+ Measurable.')).toBeInTheDocument();
     expect(
       screen.getByText(/Prompt 100 · Completion 20 · Total 120/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/\$0.0020 · calculated/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Apply all" }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply all' }));
 
-    expect(onApply).toHaveBeenCalledWith("# PRD\n\nMeasurable.");
+    expect(onApply).toHaveBeenCalledWith('# PRD\n\nMeasurable.');
   });
 
-  it("disables apply when the source changed but keeps the proposal exportable", () => {
+  it('disables apply when the source changed but keeps the proposal exportable', () => {
     render(
       <AiReviewTab
-        review={createAiReview(request, runResult, "requirements.md")}
+        review={createAiReview(request, runResult, 'requirements.md')}
         currentSource="# PRD\n\nChanged locally."
         sourcePresent
         onApply={vi.fn()}
@@ -211,27 +197,27 @@ describe("AiReviewTab", () => {
     );
 
     expect(screen.getByText(/source document changed/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply all" })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply all' })).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Open as new document" }),
+      screen.getByRole('button', { name: 'Open as new document' }),
     ).toBeEnabled();
   });
 
-  it("supports translation-only review and exposes language and hunk controls", () => {
+  it('supports translation-only review and exposes language and hunk controls', () => {
     const translationRequest: AiRunRequest = {
       ...request,
-      task: "translation",
-      targetLanguage: "ko",
+      task: 'translation',
+      targetLanguage: 'ko',
     };
     const translationResult: AiRunResult = {
       ...runResult,
-      task: "translation",
+      task: 'translation',
       result: runResult.result
         ? {
             ...runResult.result,
-            proposedMarkdown: "# 요구사항\n\n측정 가능합니다.",
-            detectedSourceLanguage: "en",
-            targetLanguage: "ko",
+            proposedMarkdown: '# 요구사항\n\n측정 가능합니다.',
+            detectedSourceLanguage: 'en',
+            targetLanguage: 'ko',
           }
         : null,
     };
@@ -241,7 +227,7 @@ describe("AiReviewTab", () => {
         review={createAiReview(
           translationRequest,
           translationResult,
-          "requirements.md",
+          'requirements.md',
         )}
         currentSource={request.source}
         sourcePresent
@@ -254,19 +240,15 @@ describe("AiReviewTab", () => {
 
     expect(screen.getByText(/Detected en · Target ko/i)).toBeInTheDocument();
     expect(
-      screen.getByRole("checkbox", { name: /Select change for segment-1/i }),
+      screen.getByRole('checkbox', { name: /Select change for segment-1/i }),
     ).toBeChecked();
-    expect(screen.getByRole("heading", { name: "Source" })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Source' })).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Show translation only" }),
+      screen.getByRole('button', { name: 'Show translation only' }),
     );
 
-    expect(
-      screen.queryByRole("heading", { name: "Source" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Translation" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Source' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Translation' })).toBeInTheDocument();
   });
 });

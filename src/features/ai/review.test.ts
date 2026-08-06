@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from 'vitest';
 
-import { resolveReviewActions } from "./review";
+import { resolveReviewActions } from './review';
 
-describe("resolveReviewActions", () => {
-  it("keeps stale results inspectable without allowing either apply action", () => {
+describe('resolveReviewActions', () => {
+  it('keeps stale results inspectable without allowing either apply action', () => {
     expect(
       resolveReviewActions({
-        task: "prd",
+        task: 'prd',
         sourcePresent: true,
         sourceRevisionMatches: false,
         validationPassed: true,
@@ -19,10 +19,10 @@ describe("resolveReviewActions", () => {
     });
   });
 
-  it("blocks every result-consuming action when validation failed", () => {
+  it('blocks every result-consuming action when validation failed', () => {
     expect(
       resolveReviewActions({
-        task: "prd",
+        task: 'prd',
         sourcePresent: true,
         sourceRevisionMatches: true,
         validationPassed: false,
@@ -35,10 +35,10 @@ describe("resolveReviewActions", () => {
     });
   });
 
-  it("allows all review actions for a valid result whose source is current", () => {
+  it('allows all review actions for a valid result whose source is current', () => {
     expect(
       resolveReviewActions({
-        task: "prd",
+        task: 'prd',
         sourcePresent: true,
         sourceRevisionMatches: true,
         validationPassed: true,
@@ -51,10 +51,10 @@ describe("resolveReviewActions", () => {
     });
   });
 
-  it("keeps validated summaries open-only even when the source is current", () => {
+  it('keeps validated summaries open-only even when the source is current', () => {
     expect(
       resolveReviewActions({
-        task: "summary",
+        task: 'summary',
         sourcePresent: true,
         sourceRevisionMatches: true,
         validationPassed: true,

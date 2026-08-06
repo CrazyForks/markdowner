@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -6,15 +6,15 @@ import {
   FileDiff,
   LoaderCircle,
   RotateCcw,
-} from "lucide-react";
+} from 'lucide-react';
 
-import { Button } from "@/components/ui/button";
+import { Button } from '@/components/ui/button';
 
 import {
   isReviewSourceCurrent,
   resolveReviewActions,
   type AiReview,
-} from "./review";
+} from './review';
 
 export interface AiReviewTabProps {
   review: AiReview;
@@ -41,18 +41,18 @@ export function AiReviewTab({
     () => document?.operations.map((operation) => operation.id) ?? [],
   );
   const [renderingSelection, setRenderingSelection] = useState(false);
-  const [selectionError, setSelectionError] = useState("");
+  const [selectionError, setSelectionError] = useState('');
   const [translationView, setTranslationView] = useState<
-    "split" | "translation"
-  >("split");
+    'split' | 'translation'
+  >('split');
   const sourceScrollRef = useRef<HTMLElement>(null);
   const translationScrollRef = useRef<HTMLElement>(null);
   const synchronizingScroll = useRef(false);
 
   useEffect(() => {
     setSelectedIds(document?.operations.map((operation) => operation.id) ?? []);
-    setSelectionError("");
-    setTranslationView("split");
+    setSelectionError('');
+    setTranslationView('split');
   }, [document]);
 
   const sourceCurrent = isReviewSourceCurrent(review, currentSource);
@@ -72,7 +72,7 @@ export function AiReviewTab({
   const handleApplySelected = async () => {
     if (!selectedEnabled) return;
     setRenderingSelection(true);
-    setSelectionError("");
+    setSelectionError('');
     try {
       onApply(await onRenderSelected(selectedIds));
     } catch (reason) {
@@ -85,9 +85,9 @@ export function AiReviewTab({
   const usage = runResult?.usage ?? null;
   const cost =
     usage?.costUsd === null || usage?.costUsd === undefined
-      ? "cost unavailable"
+      ? 'cost unavailable'
       : `$${usage.costUsd.toFixed(4)} · ${
-          usage.costCalculated ? "calculated" : "provider"
+          usage.costCalculated ? 'calculated' : 'provider'
         }`;
 
   return (
@@ -107,36 +107,33 @@ export function AiReviewTab({
               className="mt-1 flex items-center gap-2 text-lg font-semibold"
             >
               <FileDiff className="size-5" />
-              {review.request.task === "summary"
-                ? "Summary proposal"
-                : review.request.task === "translation"
-                  ? "Translation proposal"
-                  : review.request.task === "custom"
-                    ? "Document transformation"
-                    : "PRD improvement proposal"}
+              {review.request.task === 'summary'
+                ? 'Summary proposal'
+                : review.request.task === 'translation'
+                  ? 'Translation proposal'
+                  : review.request.task === 'custom'
+                    ? 'Document transformation'
+                    : 'PRD improvement proposal'}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {review.status === "running"
-                ? "The request is streaming. Results remain non-applicable until validation completes."
-                : (review.statusMessage ??
+              {review.status === 'running'
+                ? 'The request is streaming. Results remain non-applicable until validation completes.'
+                : review.statusMessage ??
                   document?.summary ??
-                  "The response could not be validated.")}
+                  'The response could not be validated.'}
             </p>
-            {review.request.task === "translation" && document ? (
+            {review.request.task === 'translation' && document ? (
               <p className="mt-1 text-xs text-muted-foreground">
-                Detected {document.detectedSourceLanguage ?? "unknown"} · Target{" "}
-                {document.targetLanguage ??
-                  review.request.targetLanguage ??
-                  "unknown"}
+                Detected {document.detectedSourceLanguage ?? 'unknown'} · Target{' '}
+                {document.targetLanguage ?? review.request.targetLanguage ?? 'unknown'}
               </p>
             ) : null}
-            {review.request.task === "summary" && document ? (
+            {review.request.task === 'summary' && document ? (
               <p className="mt-1 text-xs text-muted-foreground">
-                Detected {document.detectedSourceLanguage ?? "unknown"} ·
-                Summary{" "}
+                Detected {document.detectedSourceLanguage ?? 'unknown'} · Summary{' '}
                 {document.targetLanguage ??
                   review.request.targetLanguage ??
-                  "same as source"}
+                  'same as source'}
               </p>
             ) : null}
           </div>
@@ -145,8 +142,8 @@ export function AiReviewTab({
             {usage ? (
               <>
                 <p>
-                  Prompt {usage.promptTokens.toLocaleString()} · Completion{" "}
-                  {usage.completionTokens.toLocaleString()} · Total{" "}
+                  Prompt {usage.promptTokens.toLocaleString()} · Completion{' '}
+                  {usage.completionTokens.toLocaleString()} · Total{' '}
                   {usage.totalTokens.toLocaleString()}
                 </p>
                 <p>{cost}</p>
@@ -160,7 +157,7 @@ export function AiReviewTab({
           </div>
         </header>
 
-        {review.status === "running" ? (
+        {review.status === 'running' ? (
           <p
             role="status"
             className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm"
@@ -170,7 +167,7 @@ export function AiReviewTab({
           </p>
         ) : null}
 
-        {review.status === "failed" || review.status === "cancelled" ? (
+        {review.status === 'failed' || review.status === 'cancelled' ? (
           <p
             role="alert"
             className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100"
@@ -186,17 +183,17 @@ export function AiReviewTab({
             className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100"
           >
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            {review.request.task === "summary"
+            {review.request.task === 'summary'
               ? !sourcePresent
-                ? "The source document is no longer open. This summary was generated from the captured source snapshot and can still be opened as a new document."
-                : "The source document changed after this request. This summary remains based on the captured source snapshot and can only be opened as a new document."
+                ? 'The source document is no longer open. This summary was generated from the captured source snapshot and can still be opened as a new document.'
+                : 'The source document changed after this request. This summary remains based on the captured source snapshot and can only be opened as a new document.'
               : !sourcePresent
-                ? "The source document is no longer open. Apply is disabled."
-                : "The source document changed after this request. Apply is disabled; rerun or open the proposal as a new document."}
+                ? 'The source document is no longer open. Apply is disabled.'
+                : 'The source document changed after this request. Apply is disabled; rerun or open the proposal as a new document.'}
           </p>
         ) : null}
 
-        {review.status === "complete" && !validationPassed ? (
+        {review.status === 'complete' && !validationPassed ? (
           <section
             aria-labelledby="ai-validation-heading"
             className="rounded-md border border-destructive/30 bg-destructive/5 p-4"
@@ -232,7 +229,7 @@ export function AiReviewTab({
 
         {document ? (
           <>
-            {review.request.task === "translation" ? (
+            {review.request.task === 'translation' ? (
               <section aria-labelledby="ai-translation-comparison-heading">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h2
@@ -249,12 +246,10 @@ export function AiReviewTab({
                     <Button
                       type="button"
                       size="sm"
-                      variant={
-                        translationView === "split" ? "secondary" : "ghost"
-                      }
-                      aria-pressed={translationView === "split"}
+                      variant={translationView === 'split' ? 'secondary' : 'ghost'}
+                      aria-pressed={translationView === 'split'}
                       aria-label="Show source and translation"
-                      onClick={() => setTranslationView("split")}
+                      onClick={() => setTranslationView('split')}
                     >
                       Side by side
                     </Button>
@@ -262,13 +257,11 @@ export function AiReviewTab({
                       type="button"
                       size="sm"
                       variant={
-                        translationView === "translation"
-                          ? "secondary"
-                          : "ghost"
+                        translationView === 'translation' ? 'secondary' : 'ghost'
                       }
-                      aria-pressed={translationView === "translation"}
+                      aria-pressed={translationView === 'translation'}
                       aria-label="Show translation only"
-                      onClick={() => setTranslationView("translation")}
+                      onClick={() => setTranslationView('translation')}
                     >
                       Translation only
                     </Button>
@@ -276,12 +269,12 @@ export function AiReviewTab({
                 </div>
                 <div
                   className={
-                    translationView === "split"
-                      ? "grid min-h-80 gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-2"
-                      : "grid min-h-80 overflow-hidden rounded-md border border-border"
+                    translationView === 'split'
+                      ? 'grid min-h-80 gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-2'
+                      : 'grid min-h-80 overflow-hidden rounded-md border border-border'
                   }
                 >
-                  {translationView === "split" ? (
+                  {translationView === 'split' ? (
                     <article
                       ref={sourceScrollRef}
                       className="max-h-[65vh] overflow-y-auto bg-background p-4"
@@ -319,7 +312,7 @@ export function AiReviewTab({
               </section>
             ) : null}
 
-            {review.request.task === "summary" ? (
+            {review.request.task === 'summary' ? (
               <section aria-labelledby="ai-summary-preview-heading">
                 <h2
                   id="ai-summary-preview-heading"
@@ -333,8 +326,7 @@ export function AiReviewTab({
               </section>
             ) : null}
 
-            {review.request.task !== "summary" &&
-            document.findings.length > 0 ? (
+            {review.request.task !== 'summary' && document.findings.length > 0 ? (
               <section aria-labelledby="ai-findings-heading">
                 <h2 id="ai-findings-heading" className="text-sm font-semibold">
                   Findings
@@ -365,62 +357,59 @@ export function AiReviewTab({
               </section>
             ) : null}
 
-            {review.request.task !== "summary" ? (
-              <section aria-labelledby="ai-changes-heading">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 id="ai-changes-heading" className="text-sm font-semibold">
-                    Proposed changes
-                  </h2>
-                  <span className="text-xs text-muted-foreground">
-                    {selectedIds.length} of {document.operations.length}{" "}
-                    selected
-                  </span>
-                </div>
-                <div className="mt-2 grid gap-3">
-                  {document.hunks.map((hunk) => {
-                    const operation = document.operations.find(
-                      (candidate) => candidate.id === hunk.operationId,
-                    );
-                    const checked = selectedSet.has(hunk.operationId);
-                    return (
-                      <article
-                        key={hunk.operationId}
-                        className="overflow-hidden rounded-md border border-border"
-                      >
-                        <label className="flex cursor-pointer items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium">
-                          <input
-                            type="checkbox"
-                            aria-label={`Select change for ${
-                              operation?.targetSegmentId ?? hunk.operationId
-                            }`}
-                            checked={checked}
-                            disabled={!actions.applySelected}
-                            onChange={(event) =>
-                              setSelectedIds((current) =>
-                                event.target.checked
-                                  ? [...current, hunk.operationId]
-                                  : current.filter(
-                                      (id) => id !== hunk.operationId,
-                                    ),
-                              )
-                            }
-                          />
-                          {operation?.kind.replace(/_/g, " ") ?? "change"} ·{" "}
-                          {operation?.targetSegmentId ?? hunk.operationId}
-                        </label>
-                        <pre className="overflow-x-auto whitespace-pre-wrap p-3 text-xs leading-relaxed">
-                          <span className="block bg-red-500/10 text-red-800 dark:text-red-200">
-                            − {hunk.originalMarkdown}
-                          </span>
-                          <span className="mt-1 block bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">
-                            + {hunk.proposedMarkdown}
-                          </span>
-                        </pre>
-                      </article>
-                    );
-                  })}
-                </div>
-              </section>
+            {review.request.task !== 'summary' ? (
+            <section aria-labelledby="ai-changes-heading">
+              <div className="flex items-center justify-between gap-3">
+                <h2 id="ai-changes-heading" className="text-sm font-semibold">
+                  Proposed changes
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {selectedIds.length} of {document.operations.length} selected
+                </span>
+              </div>
+              <div className="mt-2 grid gap-3">
+                {document.hunks.map((hunk) => {
+                  const operation = document.operations.find(
+                    (candidate) => candidate.id === hunk.operationId,
+                  );
+                  const checked = selectedSet.has(hunk.operationId);
+                  return (
+                    <article
+                      key={hunk.operationId}
+                      className="overflow-hidden rounded-md border border-border"
+                    >
+                      <label className="flex cursor-pointer items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select change for ${
+                            operation?.targetSegmentId ?? hunk.operationId
+                          }`}
+                          checked={checked}
+                          disabled={!actions.applySelected}
+                          onChange={(event) =>
+                            setSelectedIds((current) =>
+                              event.target.checked
+                                ? [...current, hunk.operationId]
+                                : current.filter((id) => id !== hunk.operationId),
+                            )
+                          }
+                        />
+                        {operation?.kind.replace(/_/g, ' ') ?? 'change'} ·{' '}
+                        {operation?.targetSegmentId ?? hunk.operationId}
+                      </label>
+                      <pre className="overflow-x-auto whitespace-pre-wrap p-3 text-xs leading-relaxed">
+                        <span className="block bg-red-500/10 text-red-800 dark:text-red-200">
+                          − {hunk.originalMarkdown}
+                        </span>
+                        <span className="mt-1 block bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">
+                          + {hunk.proposedMarkdown}
+                        </span>
+                      </pre>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
             ) : null}
 
             {document.assumptions.length > 0 || document.warnings.length > 0 ? (
@@ -451,12 +440,10 @@ export function AiReviewTab({
         ) : null}
 
         <footer className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background/95 py-3 backdrop-blur">
-          {review.request.task === "summary" ? (
+          {review.request.task === 'summary' ? (
             <Button
               type="button"
-              onClick={() =>
-                document && onOpenAsDocument(document.proposedMarkdown)
-              }
+              onClick={() => document && onOpenAsDocument(document.proposedMarkdown)}
               disabled={!actions.openAsDocument || !document}
             >
               <CopyPlus />
@@ -502,7 +489,7 @@ export function AiReviewTab({
             type="button"
             variant="ghost"
             onClick={() => onRerun(review)}
-            disabled={review.status === "running"}
+            disabled={review.status === 'running'}
           >
             <RotateCcw />
             Rerun
@@ -522,7 +509,7 @@ export function AiReviewTab({
 }
 
 function errorMessage(reason: unknown): string {
-  if (reason && typeof reason === "object" && "message" in reason) {
+  if (reason && typeof reason === 'object' && 'message' in reason) {
     return String(reason.message);
   }
   return reason instanceof Error ? reason.message : String(reason);
