@@ -1,8 +1,8 @@
 use markdowner_core::ai_document::{
-    AiDocumentEnvelope, ByteRange, OperationKind, PrdFinding, PrdOperation, PrdResponse,
-    ProtectionPolicy, SelectionResponse, TranslationResponse, TranslationSegment, ValidationIssueCode,
-    markdown_block_ranges, validate_prd_response, validate_selection_response,
-    validate_translation,
+    AI_SCHEMA_VERSION, AiDocumentEnvelope, ByteRange, OperationKind, PrdFinding, PrdOperation,
+    PrdResponse, ProtectionPolicy, SelectionResponse, SummaryResponse, TranslationResponse,
+    TranslationSegment, ValidationIssueCode, markdown_block_ranges, validate_prd_response,
+    validate_selection_response, validate_summary_response, validate_translation,
 };
 use serde::Deserialize;
 
@@ -29,6 +29,111 @@ fn translated_identity(envelope: &AiDocumentEnvelope) -> TranslationResponse {
             .collect(),
         warnings: Vec::new(),
     }
+}
+
+fn summary_response(
+    detected_source_language: &str,
+    summary_language: &str,
+    summary_markdown: &str,
+) -> SummaryResponse {
+    SummaryResponse {
+        schema_version: AI_SCHEMA_VERSION,
+        detected_source_language: detected_source_language.to_string(),
+        summary_language: summary_language.to_string(),
+        summary_markdown: summary_markdown.to_string(),
+        warnings: vec!["Date copied from source.".to_string()],
+    }
+}
+
+#[test]
+fn summary_validation_builds_a_standalone_operation_free_document() {
+    let envelope =
+        AiDocumentEnvelope::new("doc-1", "# Plan\n\nShip Friday.", None).expect("envelope");
+
+    let validated = validate_summary_response(
+        &envelope,
+        summary_response("en", "ko", "# 요약\n\n금요일에 출시합니다."),
+        Some("ko-KR"),
+    )
+    .expect("valid summary");
+
+    assert_eq!(
+        validated.proposed_markdown,
+        "# 요약\n\n금요일에 출시합니다."
+    );
+    assert!(validated.operations.is_empty());
+    assert!(validated.hunks.is_empty());
+    assert!(validated.findings.is_empty());
+    assert!(validated.assumptions.is_empty());
+    assert_eq!(validated.detected_source_language.as_deref(), Some("en"));
+    assert_eq!(validated.target_language.as_deref(), Some("ko"));
+    assert_eq!(validated.warnings, vec!["Date copied from source."]);
+}
+
+#[test]
+fn summary_validation_rejects_invalid_content_and_languages() {
+    let envelope = AiDocumentEnvelope::new("doc-1", "English source", None).expect("envelope");
+    let cases = [
+        (
+            summary_response("en", "ko", "   \n"),
+            Some("ko"),
+            ValidationIssueCode::EmptySummary,
+        ),
+        (
+            summary_response("en", "ko", "# Sum\0mary"),
+            Some("ko"),
+            ValidationIssueCode::InvalidSummary,
+        ),
+        (
+            SummaryResponse {
+                schema_version: AI_SCHEMA_VERSION + 1,
+                ..summary_response("en", "ko", "# 요약")
+            },
+            Some("ko"),
+            ValidationIssueCode::InvalidSchemaVersion,
+        ),
+        (
+            summary_response("", "ko", "# 요약"),
+            Some("ko"),
+            ValidationIssueCode::InvalidLanguage,
+        ),
+        (
+            summary_response("en", "", "# Summary"),
+            None,
+            ValidationIssueCode::InvalidLanguage,
+        ),
+        (
+            summary_response("en", "ja", "# Summary"),
+            Some("ko"),
+            ValidationIssueCode::LanguageMismatch,
+        ),
+        (
+            summary_response("en-US", "ko", "# 요약"),
+            None,
+            ValidationIssueCode::LanguageMismatch,
+        ),
+    ];
+
+    for (response, requested_language, expected_code) in cases {
+        let error = validate_summary_response(&envelope, response, requested_language)
+            .expect_err("invalid summary must fail closed");
+        assert_eq!(error.issues[0].code, expected_code);
+    }
+}
+
+#[test]
+fn source_language_summary_accepts_matching_primary_subtags() {
+    let envelope = AiDocumentEnvelope::new("doc-1", "English source", None).expect("envelope");
+
+    let validated = validate_summary_response(
+        &envelope,
+        summary_response("en-US", "en-GB", "# Summary"),
+        None,
+    )
+    .expect("matching primary language");
+
+    assert_eq!(validated.detected_source_language.as_deref(), Some("en-us"));
+    assert_eq!(validated.target_language.as_deref(), Some("en-gb"));
 }
 
 #[test]

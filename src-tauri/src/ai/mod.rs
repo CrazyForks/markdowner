@@ -8,8 +8,9 @@ use std::{
 
 use markdowner_core::ai_document::{
     AiDocumentEnvelope, ByteRange, PrdResponse, ProtectionPolicy, SelectionResponse,
-    TranslationResponse, ValidatedDocument, ValidationError, validate_batched_translation,
-    validate_prd_response, validate_selection_response, validate_translation,
+    SummaryResponse, TranslationResponse, ValidatedDocument, ValidationError,
+    validate_batched_translation, validate_prd_response, validate_selection_response,
+    validate_summary_response, validate_translation,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, ipc::Channel};
@@ -31,7 +32,7 @@ use self::{
     keychain::{AiKeyStatus, KeychainService},
     openrouter::{
         AiCompletionRequest, AiKeyMetadata, AiModel, AiModelPricing, AiTask, AiUsage,
-        OpenRouterClient, PROMPT_VERSION, PrdInterviewCompletionRequest, redact_sensitive,
+        OpenRouterClient, PrdInterviewCompletionRequest, prompt_version_for_task, redact_sensitive,
     },
 };
 
@@ -1135,6 +1136,7 @@ pub async fn ai_run(
         &envelope,
         request.task,
         &completion.content,
+        request.target_language.as_deref(),
         completion.finish_reason.as_deref(),
     );
     if let Some(validated) = &result {
@@ -1379,6 +1381,7 @@ async fn run_chunked_translation(
             &chunk_envelope,
             AiTask::Translation,
             &completion.content,
+            request.target_language.as_deref(),
             completion.finish_reason.as_deref(),
         );
         match translation_retry_subdivision(&chunk, &chunk_issues) {
@@ -1626,7 +1629,7 @@ fn record_history_start(state: &AiState, request: &AiRunRequest, envelope: &AiDo
         status: RunStatus::Running,
         scope_json,
         source_hash: envelope.revision_hash.clone(),
-        prompt_version: PROMPT_VERSION.to_string(),
+        prompt_version: prompt_version_for_task(request.task).to_string(),
         result_json: None,
         error_json: None,
         usage_json: None,
@@ -1782,6 +1785,22 @@ fn validate_run_request(request: &AiRunRequest) -> Result<(), AiError> {
             "Choose a translation target language.",
         ));
     }
+    if request.task == AiTask::Summary {
+        if request.selection.is_some() {
+            return Err(AiError::new(
+                "invalid_summary_scope",
+                "Summary supports only the current whole document.",
+            ));
+        }
+        if let Some(language) = request.target_language.as_deref()
+            && !is_valid_language_identifier(language)
+        {
+            return Err(AiError::new(
+                "invalid_summary_language",
+                "Choose a valid Summary language.",
+            ));
+        }
+    }
     if request.task == AiTask::Custom
         && request
             .instruction
@@ -1800,6 +1819,7 @@ fn validate_provider_result(
     envelope: &AiDocumentEnvelope,
     task: AiTask,
     content: &str,
+    requested_language: Option<&str>,
     finish_reason: Option<&str>,
 ) -> (Option<ValidatedDocument>, Vec<AiValidationIssue>) {
     if finish_reason == Some("length") {
@@ -1813,6 +1833,12 @@ fn validate_provider_result(
         );
     }
     let validated = match task {
+        AiTask::Summary => serde_json::from_str::<SummaryResponse>(content)
+            .map_err(schema_error)
+            .and_then(|response| {
+                validate_summary_response(envelope, response, requested_language)
+                    .map_err(validation_issues)
+            }),
         AiTask::Translation => serde_json::from_str::<TranslationResponse>(content)
             .map_err(schema_error)
             .and_then(|response| {
@@ -1840,6 +1866,15 @@ fn validate_provider_result(
         Ok(validated) => (Some(validated), Vec::new()),
         Err(issues) => (None, issues),
     }
+}
+
+fn is_valid_language_identifier(language: &str) -> bool {
+    let trimmed = language.trim();
+    !trimmed.is_empty()
+        && trimmed.len() <= 64
+        && trimmed
+            .split('-')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_alphanumeric()))
 }
 
 fn schema_error(error: serde_json::Error) -> Vec<AiValidationIssue> {
@@ -1899,11 +1934,114 @@ mod tests {
     use super::{
         AiRunRequest, AiState, CatalogCache, RequestScheduler, SchemaFailure,
         classify_schema_error,
-        openrouter::{AiModel, AiModelPricing, AiTask},
+        openrouter::{AiModel, AiModelPricing, AiTask, SUMMARY_PROMPT_VERSION},
         prepare_translation_resume, record_history_start, translation_retry_subdivision,
-        validate_provider_result,
+        validate_provider_result, validate_run_request,
     };
     use markdowner_core::ai_document::{AiDocumentEnvelope, ByteRange};
+
+    fn summary_run_request() -> AiRunRequest {
+        AiRunRequest {
+            request_id: "summary-run".to_string(),
+            document_id: "doc-1".to_string(),
+            source: "# Source\n\nOriginal facts.".to_string(),
+            selection: None,
+            task: AiTask::Summary,
+            model: "z-ai/glm-5.2".to_string(),
+            target_language: None,
+            instruction: None,
+            zdr_only: true,
+            max_output_tokens: 4_096,
+            record_history: true,
+            scope: None,
+            interview_id: None,
+            resume: false,
+        }
+    }
+
+    #[test]
+    fn summary_request_accepts_source_or_valid_target_language() {
+        let source_language = summary_run_request();
+        assert!(validate_run_request(&source_language).is_ok());
+
+        let explicit_language = AiRunRequest {
+            target_language: Some("ko-KR".to_string()),
+            ..summary_run_request()
+        };
+        assert!(validate_run_request(&explicit_language).is_ok());
+    }
+
+    #[test]
+    fn summary_request_rejects_selection_and_invalid_language() {
+        let selected = AiRunRequest {
+            selection: Some(ByteRange { start: 0, end: 1 }),
+            ..summary_run_request()
+        };
+        assert_eq!(
+            validate_run_request(&selected).unwrap_err().code,
+            "invalid_summary_scope"
+        );
+
+        let invalid_language = AiRunRequest {
+            target_language: Some("ko_KR".to_string()),
+            ..summary_run_request()
+        };
+        assert_eq!(
+            validate_run_request(&invalid_language).unwrap_err().code,
+            "invalid_summary_language"
+        );
+    }
+
+    #[test]
+    fn summary_provider_result_validates_with_requested_language() {
+        let envelope =
+            AiDocumentEnvelope::new("doc-1", "# Source\n\nOriginal facts.", None).unwrap();
+        let response = serde_json::json!({
+            "schema_version": 1,
+            "detected_source_language": "en",
+            "summary_language": "ko",
+            "summary_markdown": "# 요약\n\n원본의 사실입니다.",
+            "warnings": []
+        })
+        .to_string();
+
+        let (result, issues) = validate_provider_result(
+            &envelope,
+            AiTask::Summary,
+            &response,
+            Some("ko-KR"),
+            None,
+        );
+
+        assert!(issues.is_empty());
+        assert_eq!(
+            result.map(|document| document.proposed_markdown),
+            Some("# 요약\n\n원본의 사실입니다.".to_string())
+        );
+    }
+
+    #[test]
+    fn summary_history_start_records_the_summary_prompt_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = AiState::new(directory.path().to_path_buf()).unwrap();
+        let request = summary_run_request();
+        let envelope =
+            AiDocumentEnvelope::new(&request.document_id, &request.source, None).unwrap();
+
+        record_history_start(&state, &request, &envelope);
+
+        assert_eq!(
+            state
+                .history
+                .store()
+                .unwrap()
+                .detail(&request.request_id)
+                .unwrap()
+                .unwrap()
+                .prompt_version,
+            SUMMARY_PROMPT_VERSION
+        );
+    }
 
     #[tokio::test]
     async fn limits_two_app_requests_and_one_per_document() {
@@ -2052,7 +2190,7 @@ mod tests {
         let envelope = AiDocumentEnvelope::new("doc-1", "# PRD\n\nVague.", None).unwrap();
 
         let (result, issues) =
-            validate_provider_result(&envelope, AiTask::Prd, "not valid json", None);
+            validate_provider_result(&envelope, AiTask::Prd, "not valid json", None, None);
 
         assert!(result.is_none());
         assert_eq!(issues.len(), 1);
@@ -2094,7 +2232,7 @@ mod tests {
         let truncated = r#"{"schema_version":1,"detected_source_language":"en","target_language":"ko","segments":[{"id":"s1","translated_text":"unfinished"#;
 
         let (result, issues) =
-            validate_provider_result(&envelope, AiTask::Translation, truncated, None);
+            validate_provider_result(&envelope, AiTask::Translation, truncated, None, None);
 
         assert!(result.is_none());
         assert_eq!(issues[0].code, "response_truncated");
@@ -2131,8 +2269,13 @@ mod tests {
                     })).collect::<Vec<_>>(),
                 })
                 .to_string();
-                let (result, issues) =
-                    validate_provider_result(&child_envelope, AiTask::Translation, &response, None);
+                let (result, issues) = validate_provider_result(
+                    &child_envelope,
+                    AiTask::Translation,
+                    &response,
+                    None,
+                    None,
+                );
                 assert!(issues.is_empty());
                 result.unwrap().proposed_markdown
             })
@@ -2160,7 +2303,7 @@ mod tests {
         .unwrap();
 
         let (_, issues) =
-            validate_provider_result(&envelope, AiTask::Translation, "{}", Some("length"));
+            validate_provider_result(&envelope, AiTask::Translation, "{}", None, Some("length"));
 
         assert_eq!(issues[0].code, "response_truncated");
         assert!(
@@ -2182,7 +2325,7 @@ mod tests {
         })
         .to_string();
         let (prd_result, prd_issues) =
-            validate_provider_result(&envelope, AiTask::Prd, &prd, None);
+            validate_provider_result(&envelope, AiTask::Prd, &prd, None, None);
         assert!(prd_result.is_some());
         assert!(prd_issues.is_empty());
 
@@ -2202,7 +2345,7 @@ mod tests {
         })
         .to_string();
         let (translation_result, translation_issues) =
-            validate_provider_result(&envelope, AiTask::Translation, &translation, None);
+            validate_provider_result(&envelope, AiTask::Translation, &translation, None, None);
         assert!(translation_result.is_some());
         assert!(translation_issues.is_empty());
     }
@@ -2227,7 +2370,7 @@ mod tests {
         .to_string();
 
         let (result, issues) =
-            validate_provider_result(&envelope, AiTask::Custom, &response, None);
+            validate_provider_result(&envelope, AiTask::Custom, &response, None, None);
 
         assert_eq!(
             result.map(|result| result.proposed_markdown),
@@ -2256,7 +2399,7 @@ mod tests {
         .to_string();
 
         let (result, issues) =
-            validate_provider_result(&envelope, AiTask::Custom, &response, None);
+            validate_provider_result(&envelope, AiTask::Custom, &response, None, None);
 
         assert!(result.is_none());
         assert!(!issues.is_empty());

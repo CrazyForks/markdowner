@@ -812,6 +812,7 @@ fn stored_run_from_row(row: &Row<'_>) -> rusqlite::Result<StoredRun> {
 fn task_name(task: AiTask) -> &'static str {
     match task {
         AiTask::Prd => "prd",
+        AiTask::Summary => "summary",
         AiTask::Translation => "translation",
         AiTask::Custom => "custom",
     }
@@ -820,6 +821,7 @@ fn task_name(task: AiTask) -> &'static str {
 fn parse_task(value: &str) -> Option<AiTask> {
     match value {
         "prd" => Some(AiTask::Prd),
+        "summary" => Some(AiTask::Summary),
         "translation" => Some(AiTask::Translation),
         "custom" => Some(AiTask::Custom),
         _ => None,
@@ -893,6 +895,21 @@ mod tests {
             started_at,
             finished_at: None,
         }
+    }
+
+    #[test]
+    fn history_round_trips_summary_task_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HistoryStore::open(&directory.path().join("history.sqlite3")).unwrap();
+        let mut run = fixture_run("summary-run", 10);
+        run.task = AiTask::Summary;
+
+        store.insert_run(&run).unwrap();
+
+        assert_eq!(
+            store.detail(&run.id).unwrap().unwrap().task,
+            AiTask::Summary
+        );
     }
 
     #[test]

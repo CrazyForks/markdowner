@@ -186,6 +186,21 @@ pub struct TranslationResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SummaryResponse {
+    #[serde(alias = "schema_version")]
+    pub schema_version: u32,
+    #[serde(alias = "detected_source_language")]
+    pub detected_source_language: String,
+    #[serde(alias = "summary_language")]
+    pub summary_language: String,
+    #[serde(alias = "summary_markdown")]
+    pub summary_markdown: String,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrdFinding {
     pub id: String,
     pub severity: String,
@@ -375,6 +390,10 @@ pub enum ValidationIssueCode {
     UnknownProtectedToken,
     MarkdownStructureChanged,
     SelectionRequired,
+    EmptySummary,
+    InvalidSummary,
+    InvalidLanguage,
+    LanguageMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -496,6 +515,82 @@ pub fn validate_translation(
         scope: envelope.scope(),
         segments: envelope.segments.clone(),
     })
+}
+
+pub fn validate_summary_response(
+    envelope: &AiDocumentEnvelope,
+    response: SummaryResponse,
+    requested_language: Option<&str>,
+) -> Result<ValidatedDocument, ValidationError> {
+    validate_schema_version(response.schema_version)?;
+    if response.summary_markdown.trim().is_empty() {
+        return Err(ValidationError::single(
+            ValidationIssueCode::EmptySummary,
+            "Summary Markdown cannot be empty.",
+        ));
+    }
+    if response.summary_markdown.contains('\0') {
+        return Err(ValidationError::single(
+            ValidationIssueCode::InvalidSummary,
+            "Summary Markdown contains an invalid NUL character.",
+        ));
+    }
+
+    let detected_source_language =
+        normalize_language_identifier(&response.detected_source_language)?;
+    let summary_language = normalize_language_identifier(&response.summary_language)?;
+    let expected_language = requested_language
+        .map(normalize_language_identifier)
+        .transpose()?
+        .unwrap_or_else(|| detected_source_language.clone());
+    if primary_language(&summary_language) != primary_language(&expected_language) {
+        return Err(ValidationError::single(
+            ValidationIssueCode::LanguageMismatch,
+            format!(
+                "Summary language {summary_language} does not match requested language {expected_language}."
+            ),
+        ));
+    }
+
+    Ok(ValidatedDocument {
+        source_revision_hash: envelope.revision_hash.clone(),
+        proposed_markdown: response.summary_markdown,
+        validation: ValidationReport {
+            passed: true,
+            issues: Vec::new(),
+        },
+        operations: Vec::new(),
+        hunks: Vec::new(),
+        summary: None,
+        findings: Vec::new(),
+        assumptions: Vec::new(),
+        detected_source_language: Some(detected_source_language),
+        target_language: Some(summary_language),
+        warnings: response.warnings,
+        source: envelope.source.clone(),
+        scope: envelope.scope(),
+        segments: envelope.segments.clone(),
+    })
+}
+
+fn normalize_language_identifier(language: &str) -> Result<String, ValidationError> {
+    let normalized = language.trim().to_ascii_lowercase();
+    if normalized.is_empty()
+        || normalized.len() > 64
+        || normalized
+            .split('-')
+            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+    {
+        return Err(ValidationError::single(
+            ValidationIssueCode::InvalidLanguage,
+            "Language identifiers must use non-empty ASCII alphanumeric subtags separated by hyphens.",
+        ));
+    }
+    Ok(normalized)
+}
+
+fn primary_language(language: &str) -> &str {
+    language.split('-').next().unwrap_or(language)
 }
 
 pub fn validate_batched_translation(
