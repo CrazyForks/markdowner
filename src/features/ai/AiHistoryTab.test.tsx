@@ -76,6 +76,34 @@ describe('AiHistoryTab', () => {
     await waitFor(() => expect(clear).toHaveBeenCalledTimes(1));
   });
 
+  it('labels a Summary history entry independently', async () => {
+    const summaryRun: AiHistoryDetail = {
+      ...run,
+      id: 'summary-run',
+      task: 'summary',
+      resultJson: JSON.stringify({ proposedMarkdown: '# Summary' }),
+    };
+
+    render(
+      <AiHistoryTab
+        history={{ items: [summaryRun], page: 0, pageSize: 20, total: 1 }}
+        loading={false}
+        error={null}
+        onPageChange={vi.fn()}
+        onReload={vi.fn()}
+        services={{
+          detail: vi.fn().mockResolvedValue(summaryRun),
+          deleteRun: vi.fn(),
+          clear: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Open run summary-run/i }));
+
+    expect(await screen.findByRole('heading', { name: 'Summarize document' })).toBeVisible();
+  });
+
   it('offers an interrupted PRD interview as a resumable history action', async () => {
     const interrupted: AiHistoryDetail = {
       ...run,

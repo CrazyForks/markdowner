@@ -1,4 +1,4 @@
-export type AiTask = 'prd' | 'translation' | 'custom';
+export type AiTask = 'prd' | 'summary' | 'translation' | 'custom';
 export type AiScope = 'document' | 'selection';
 
 export interface AiDocumentRef {

@@ -481,8 +481,10 @@ describe('AI settings', () => {
   it('defaults every AI task to GLM with Korean translation and ZDR enabled', () => {
     expect(DEFAULT_SETTINGS).toMatchObject({
       aiPrdModel: 'z-ai/glm-5.2',
+      aiSummaryModel: 'z-ai/glm-5.2',
       aiTranslationModel: 'z-ai/glm-5.2',
       aiCustomPromptModel: 'z-ai/glm-5.2',
+      aiSummaryTargetLanguage: 'source',
       aiTranslationTargetLanguage: 'en',
       aiZdrOnly: true,
       aiCloudDisclosureAccepted: false,
@@ -496,8 +498,10 @@ describe('AI settings', () => {
     invokeMock.mockResolvedValue({
       autoSave: true,
       aiPrdModel: '',
+      aiSummaryModel: 42,
       aiTranslationModel: 'moonshotai/kimi-k3',
       aiCustomPromptModel: 42,
+      aiSummaryTargetLanguage: false,
       aiTranslationTargetLanguage: false,
       aiZdrOnly: 'no',
       aiCloudDisclosureAccepted: true,
@@ -508,8 +512,10 @@ describe('AI settings', () => {
     await expect(loadSettings()).resolves.toMatchObject({
       autoSave: true,
       aiPrdModel: 'z-ai/glm-5.2',
+      aiSummaryModel: 'z-ai/glm-5.2',
       aiTranslationModel: 'moonshotai/kimi-k3',
       aiCustomPromptModel: 'z-ai/glm-5.2',
+      aiSummaryTargetLanguage: 'source',
       aiTranslationTargetLanguage: 'en',
       aiZdrOnly: true,
       aiCloudDisclosureAccepted: true,

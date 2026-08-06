@@ -18,6 +18,7 @@ export const WHOLE_DOCUMENT_TOKEN_LIMIT = 50_000;
 export const SELECTION_TOKEN_LIMIT = 20_000;
 export const DEFAULT_AI_OUTPUT_TOKEN_LIMIT = 4_096;
 export const PRD_AI_OUTPUT_TOKEN_LIMIT = 16_384;
+export const SUMMARY_SOURCE_LANGUAGE = 'source';
 
 const PINNED_NAMES: Record<(typeof PINNED_AI_MODELS)[number], string> = {
   'z-ai/glm-5.2': 'GLM 5.2',

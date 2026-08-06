@@ -74,6 +74,29 @@ where
     Ok(normalize_target_language(value))
 }
 
+fn normalize_summary_target_language(value: serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|candidate| {
+            !candidate.is_empty()
+                && candidate.len() <= 64
+                && candidate
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "source".to_string())
+}
+
+fn deserialize_summary_target_language<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(normalize_summary_target_language(value))
+}
+
 fn deserialize_ai_default_scope<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -186,9 +209,13 @@ pub struct Settings {
     #[serde(deserialize_with = "deserialize_ai_model")]
     pub ai_prd_model: String,
     #[serde(deserialize_with = "deserialize_ai_model")]
+    pub ai_summary_model: String,
+    #[serde(deserialize_with = "deserialize_ai_model")]
     pub ai_translation_model: String,
     #[serde(deserialize_with = "deserialize_ai_model")]
     pub ai_custom_prompt_model: String,
+    #[serde(deserialize_with = "deserialize_summary_target_language")]
+    pub ai_summary_target_language: String,
     #[serde(deserialize_with = "deserialize_target_language")]
     pub ai_translation_target_language: String,
     #[serde(deserialize_with = "deserialize_bool_or_true")]
@@ -252,8 +279,10 @@ impl Default for Settings {
             keybinding_overrides: BTreeMap::new(),
             ignore_list: crate::storage::default_ignore_list(),
             ai_prd_model: DEFAULT_AI_MODEL.to_string(),
+            ai_summary_model: DEFAULT_AI_MODEL.to_string(),
             ai_translation_model: DEFAULT_AI_MODEL.to_string(),
             ai_custom_prompt_model: DEFAULT_AI_MODEL.to_string(),
+            ai_summary_target_language: "source".to_string(),
             ai_translation_target_language: default_ai_translation_target_language(),
             ai_zdr_only: true,
             ai_cloud_disclosure_accepted: false,
@@ -661,8 +690,10 @@ mod tests {
         let parsed: Settings = serde_json::from_value(serde_json::json!({
             "autoSave": true,
             "aiPrdModel": 7,
+            "aiSummaryModel": 42,
             "aiTranslationModel": "",
             "aiCustomPromptModel": "vendor/model",
+            "aiSummaryTargetLanguage": false,
             "aiTranslationTargetLanguage": false,
             "aiZdrOnly": "yes",
             "aiCloudDisclosureAccepted": true,
@@ -672,8 +703,10 @@ mod tests {
         .expect("settings parse");
 
         assert_eq!(parsed.ai_prd_model, "z-ai/glm-5.2");
+        assert_eq!(parsed.ai_summary_model, "z-ai/glm-5.2");
         assert_eq!(parsed.ai_translation_model, "z-ai/glm-5.2");
         assert_eq!(parsed.ai_custom_prompt_model, "vendor/model");
+        assert_eq!(parsed.ai_summary_target_language, "source");
         assert_eq!(parsed.ai_translation_target_language, "en");
         assert!(parsed.ai_zdr_only);
         assert!(parsed.ai_cloud_disclosure_accepted);
@@ -683,8 +716,10 @@ mod tests {
 
         let serialized = serde_json::to_value(parsed).expect("settings serialize");
         assert_eq!(serialized["aiPrdModel"], "z-ai/glm-5.2");
+        assert_eq!(serialized["aiSummaryModel"], "z-ai/glm-5.2");
         assert_eq!(serialized["aiTranslationModel"], "z-ai/glm-5.2");
         assert_eq!(serialized["aiCustomPromptModel"], "vendor/model");
+        assert_eq!(serialized["aiSummaryTargetLanguage"], "source");
         assert_eq!(serialized["aiTranslationTargetLanguage"], "en");
         assert_eq!(serialized["aiZdrOnly"], true);
         assert_eq!(serialized["aiCloudDisclosureAccepted"], true);

@@ -127,8 +127,10 @@ export interface Settings extends InlineStyleColorSettings {
    */
   ignoreList: string[];
   aiPrdModel: string;
+  aiSummaryModel: string;
   aiTranslationModel: string;
   aiCustomPromptModel: string;
+  aiSummaryTargetLanguage: string;
   aiTranslationTargetLanguage: string;
   aiZdrOnly: boolean;
   aiCloudDisclosureAccepted: boolean;
@@ -265,8 +267,10 @@ export const DEFAULT_SETTINGS: Settings = {
   keybindingOverrides: {},
   ignoreList: [...DEFAULT_IGNORE_LIST],
   aiPrdModel: DEFAULT_AI_MODEL,
+  aiSummaryModel: DEFAULT_AI_MODEL,
   aiTranslationModel: DEFAULT_AI_MODEL,
   aiCustomPromptModel: DEFAULT_AI_MODEL,
+  aiSummaryTargetLanguage: 'source',
   aiTranslationTargetLanguage: defaultAiTranslationTargetLanguage(),
   aiZdrOnly: true,
   aiCloudDisclosureAccepted: false,
@@ -553,6 +557,7 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   }
   for (const key of [
     'aiPrdModel',
+    'aiSummaryModel',
     'aiTranslationModel',
     'aiCustomPromptModel',
   ] as const) {
@@ -568,6 +573,16 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
     } else {
       merged[key] = value.trim();
     }
+  }
+  if (
+    typeof merged.aiSummaryTargetLanguage !== 'string' ||
+    merged.aiSummaryTargetLanguage.trim().length === 0 ||
+    merged.aiSummaryTargetLanguage.length > 64 ||
+    !/^[A-Za-z0-9-]+$/.test(merged.aiSummaryTargetLanguage)
+  ) {
+    merged.aiSummaryTargetLanguage = 'source';
+  } else {
+    merged.aiSummaryTargetLanguage = merged.aiSummaryTargetLanguage.trim();
   }
   if (
     typeof merged.aiTranslationTargetLanguage !== 'string' ||

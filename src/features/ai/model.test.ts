@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_AI_MODEL,
   PINNED_AI_MODELS,
+  SUMMARY_SOURCE_LANGUAGE,
   detectDocumentLanguage,
   estimateAiRun,
   orderModels,
+  outputTokenLimitForTask,
   resolveUsageCost,
   resolveRunGate,
   searchLanguages,
@@ -65,6 +67,23 @@ describe('AI model policy', () => {
     );
 
     expect(option.enabled).toBe(true);
+  });
+
+  it('requires structured output and the standard token budget for Summary', () => {
+    const structured = orderModels(
+      [model({ id: 'structured/text' })],
+      'summary',
+    ).find((option) => option.id === 'structured/text');
+    const plain = orderModels(
+      [model({ id: 'plain/text', supportedParameters: [] })],
+      'summary',
+    ).find((option) => option.id === 'plain/text');
+
+    expect(structured?.enabled).toBe(true);
+    expect(plain?.disabledReason).toMatch(/Structured output/);
+    expect(outputTokenLimitForTask('summary')).toBe(4_096);
+    expect(outputTokenLimitForTask('prd')).toBe(16_384);
+    expect(SUMMARY_SOURCE_LANGUAGE).toBe('source');
   });
 });
 

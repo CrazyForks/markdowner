@@ -164,6 +164,7 @@ function formatElapsed(seconds: number): string {
 
 export function taskLabel(task: AiTask): string {
   if (task === 'prd') return 'Improve PRD';
+  if (task === 'summary') return 'Summarize document';
   if (task === 'translation') return 'Translate document';
   return 'Custom prompt';
 }

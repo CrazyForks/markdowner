@@ -27,7 +27,7 @@ const LIFECYCLES = new Set<AiLifecycle>([
   'started',
   'validation_failed',
 ]);
-const TASKS = new Set<AiTask>(['prd', 'translation', 'custom']);
+const TASKS = new Set<AiTask>(['prd', 'summary', 'translation', 'custom']);
 const MODEL_PATTERN = /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:-]+$/;
 const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]{1,160}$/;
 

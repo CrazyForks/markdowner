@@ -59,4 +59,10 @@ describe('AI telemetry privacy', () => {
       }),
     ).toEqual({});
   });
+
+  it('keeps the Summary task identifier without content', () => {
+    expect(
+      sanitizeAiTelemetry({ task: 'summary', source: '# Private source' }),
+    ).toEqual({ task: 'summary' });
+  });
 });

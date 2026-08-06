@@ -46,4 +46,35 @@ describe('AiActivityTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Translate document' }));
     expect(onCancel).toHaveBeenCalledWith('run-1');
   });
+
+  it('labels and cancels a Summary run independently', () => {
+    const onCancel = vi.fn();
+    const run: AiActiveRun = {
+      requestId: 'summary-run',
+      task: 'summary',
+      model: 'z-ai/glm-5.2',
+      scope: {
+        kind: 'document',
+        target: { documentId: 'doc-1', path: '/notes.md', label: 'notes.md' },
+      },
+      status: 'running',
+      progress: {
+        stage: 'streaming',
+        fileCompleted: null,
+        fileTotal: null,
+        chunkCompleted: null,
+        chunkTotal: null,
+        label: null,
+        receivedCharacters: 120,
+      },
+      startedAt: 10,
+      cancelable: true,
+    };
+
+    render(<AiActivityTab runs={[run]} nowSeconds={20} onCancel={onCancel} />);
+
+    expect(screen.getByRole('heading', { name: 'Summarize document' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Summarize document' }));
+    expect(onCancel).toHaveBeenCalledWith('summary-run');
+  });
 });
