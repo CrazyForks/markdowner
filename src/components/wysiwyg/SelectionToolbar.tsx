@@ -184,25 +184,11 @@ export function SelectionToolbar({
     }
   };
 
-  // Trigger the inline link editor (the floating LinkPopup component) instead
-  // of falling back to window.prompt — the prompt is jarring inside a desktop
-  // app and steals focus across windows. The popup handles editing existing
-  // links naturally; for fresh selections we attach an `https://` placeholder
-  // so TipTap's link extension definitely applies the mark, then ask the
-  // popup to focus + select its URL input so the user immediately types over
-  // the placeholder.
+  // Opening the form is intent-only. LinkPopup captures the selection and the
+  // document remains byte-for-byte unchanged until the user presses Apply.
   const editLink = () => {
     if (!editor) return;
-    const hasLink = editor.isActive('link');
-    if (!hasLink) {
-      editor
-        .chain()
-        .focus()
-        .extendMarkRange('link')
-        .setLink({ href: 'https://' })
-        .run();
-    }
-    publishEditorEvent('link:edit-request', { focusInput: true });
+    publishEditorEvent('link:edit-request', {});
   };
 
   if (!enabled || !visible) return null;

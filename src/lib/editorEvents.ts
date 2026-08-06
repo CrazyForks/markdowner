@@ -14,8 +14,6 @@ export type EditorOverlayEvent =
   | 'slash:open-at-cursor';
 
 interface LinkEditRequest {
-  /** Deprecated compatibility field; every explicit edit request now focuses the URL. */
-  focusInput?: boolean;
   /** Source range replaced only after the user applies the form. */
   replaceRange?: { from: number; to: number };
   /** Optional initial label, used by entry points such as the slash menu. */

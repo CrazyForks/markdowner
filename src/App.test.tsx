@@ -503,6 +503,10 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
     markdown,
     lastSelection: null,
     insertContentAtMock: vi.fn(),
+    insertContentMock: vi.fn(),
+    setLinkMock: vi.fn(),
+    unsetLinkMock: vi.fn(),
+    isActive: vi.fn(() => false),
   };
   const mockSelectionAnchor = { parent: { type: { name: 'paragraph' } } };
 
@@ -652,6 +656,19 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
           return chain;
         },
       ),
+      insertContent: vi.fn((content: string) => {
+        editor.insertContentMock(content);
+        return chain;
+      }),
+      extendMarkRange: vi.fn(() => chain),
+      setLink: vi.fn((attributes: { href: string }) => {
+        editor.setLinkMock(attributes);
+        return chain;
+      }),
+      unsetLink: vi.fn(() => {
+        editor.unsetLinkMock();
+        return chain;
+      }),
     };
     return chain;
   });
@@ -6894,6 +6911,56 @@ describe('App recent documents', () => {
     // escape.
     expect(starterKit?.options?.trailingNode).not.toBe(false);
   });
+
+  it.each([
+    ['Cmd+K at a caret', { from: 3, to: 3 }, { metaKey: true, ctrlKey: false }],
+    ['Ctrl+K over a selection', { from: 1, to: 5 }, { metaKey: false, ctrlKey: true }],
+  ])(
+    '%s requests link editing without inserting or marking placeholders',
+    async (_label, selection, modifier) => {
+      const editor = createMockTiptapEditor('docs', [{ text: 'docs', from: 1 }]);
+      tiptapMockState.editor = editor;
+      bootstrapMock.mockResolvedValue(
+        baseSnapshot({
+          activeDocumentName: 'notes.md',
+          activeDocumentPath: '/tmp/project/notes.md',
+          activeDocumentSource: 'docs',
+          mode: 'Wysiwyg',
+        }),
+      );
+      const { default: App } = await import('./App');
+      const requested = vi.fn();
+      const unsubscribe = subscribeEditorEvent('link:edit-request', requested);
+      render(<App />);
+      await screen.findByTestId('mock-tiptap-editor');
+      editor.state.selection = {
+        ...editor.state.selection,
+        ...selection,
+        head: selection.to,
+      };
+
+      const event = {
+        key: 'k',
+        altKey: false,
+        shiftKey: false,
+        ...modifier,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent;
+      const handled = tiptapMockState.lastOptions.editorProps.handleKeyDown(
+        editor.view,
+        event,
+      );
+
+      expect(handled).toBe(true);
+      expect(event.preventDefault).toHaveBeenCalledOnce();
+      expect(requested).toHaveBeenCalledOnce();
+      expect(requested).toHaveBeenCalledWith({});
+      expect(editor.insertContentMock).not.toHaveBeenCalled();
+      expect(editor.setLinkMock).not.toHaveBeenCalled();
+      expect(editor.unsetLinkMock).not.toHaveBeenCalled();
+      unsubscribe();
+    },
+  );
 
   it('moves WYSIWYG PageDown two line-heights above the page target', async () => {
     const editor = createMockTiptapEditor('Line 1\nLine 2\nLine 3', [

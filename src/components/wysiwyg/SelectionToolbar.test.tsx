@@ -8,6 +8,8 @@ import {
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { subscribeEditorEvent } from '@/lib/editorEvents';
+
 import { SelectionToolbar } from './SelectionToolbar';
 
 function createSelectionEditor({
@@ -16,8 +18,34 @@ function createSelectionEditor({
 }: { inCodeBlock?: boolean; empty?: boolean } = {}) {
   const handlers = new Map<string, Set<() => void>>();
   const dom = document.createElement('div');
+  const chain = {
+    focus: vi.fn(),
+    toggleBold: vi.fn(),
+    toggleItalic: vi.fn(),
+    toggleStrike: vi.fn(),
+    toggleCode: vi.fn(),
+    extendMarkRange: vi.fn(),
+    insertContent: vi.fn(),
+    setLink: vi.fn(),
+    unsetLink: vi.fn(),
+    run: vi.fn().mockReturnValue(true),
+  };
+  for (const command of [
+    chain.focus,
+    chain.toggleBold,
+    chain.toggleItalic,
+    chain.toggleStrike,
+    chain.toggleCode,
+    chain.extendMarkRange,
+    chain.insertContent,
+    chain.setLink,
+    chain.unsetLink,
+  ]) {
+    command.mockReturnValue(chain);
+  }
 
   const editor: any = {
+    commandSpies: chain,
     isActive: vi.fn((name: string) => (name === 'codeBlock' ? inCodeBlock : false)),
     state: {
       selection: {
@@ -31,15 +59,7 @@ function createSelectionEditor({
       hasFocus: () => true,
       coordsAtPos: () => ({ top: 80, bottom: 100, left: 40, right: 60 }),
     },
-    chain: () => ({
-      focus: () => ({
-        toggleBold: () => ({ run: vi.fn() }),
-        toggleItalic: () => ({ run: vi.fn() }),
-        toggleStrike: () => ({ run: vi.fn() }),
-        toggleCode: () => ({ run: vi.fn() }),
-        extendMarkRange: () => ({ setLink: () => ({ run: vi.fn() }) }),
-      }),
-    }),
+    chain: vi.fn(() => chain),
     on: vi.fn((name: string, handler: () => void) => {
       if (!handlers.has(name)) handlers.set(name, new Set());
       handlers.get(name)?.add(handler);
@@ -117,5 +137,22 @@ describe('SelectionToolbar', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'AI prompt' }));
 
     expect(onAiSelection).toHaveBeenCalledWith({ from: 2, to: 6 });
+  });
+
+  it('requests explicit link editing without applying a placeholder mark', async () => {
+    const editor = createSelectionEditor();
+    const requested = vi.fn();
+    const unsubscribe = subscribeEditorEvent('link:edit-request', requested);
+    render(<SelectionToolbar editor={editor} />);
+    act(() => editor.emit('selectionUpdate'));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Link' }));
+
+    expect(requested).toHaveBeenCalledOnce();
+    expect(requested).toHaveBeenCalledWith({});
+    expect(editor.commandSpies.setLink).not.toHaveBeenCalled();
+    expect(editor.commandSpies.insertContent).not.toHaveBeenCalled();
+    expect(editor.commandSpies.unsetLink).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });

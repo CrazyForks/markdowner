@@ -2003,11 +2003,8 @@ export default function App() {
           publishEditorEvent('slash:open-at-cursor', { mode: 'convert' });
           return true;
         }
-        // Cmd+K (Ctrl+K on Win/Linux) — open the inline link editor at the
-        // current selection. Mirrors the convention used by Notion / Google
-        // Docs / Slack. We use the editor instance via the closure-stable ref
-        // because `view` here only exposes ProseMirror primitives, not Tiptap
-        // chain commands.
+        // Cmd+K (Ctrl+K on Win/Linux) opens the explicit link form. Capturing
+        // the current selection is read-only; Apply owns the only mutation.
         if (
           (event.metaKey || event.ctrlKey) &&
           !event.altKey &&
@@ -2017,26 +2014,7 @@ export default function App() {
           const ed = editorInstanceRef.current;
           if (ed) {
             event.preventDefault();
-            const { from, to } = ed.state.selection;
-            const hasLink = ed.isActive('link');
-            if (from === to && !hasLink) {
-              // Empty caret: insert literal "link" text, select it, and
-              // apply the link mark so the popup has a target to anchor on.
-              // Matches the slash-menu Link item.
-              ed.chain()
-                .focus()
-                .insertContent('link')
-                .setTextSelection({ from, to: from + 4 })
-                .setLink({ href: 'https://' })
-                .run();
-            } else if (!hasLink) {
-              ed.chain()
-                .focus()
-                .extendMarkRange('link')
-                .setLink({ href: 'https://' })
-                .run();
-            }
-            publishEditorEvent('link:edit-request', { focusInput: true });
+            publishEditorEvent('link:edit-request', {});
             return true;
           }
         }

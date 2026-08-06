@@ -1,7 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { publishEditorEvent } from '@/lib/editorEvents';
+import {
+  publishEditorEvent,
+  subscribeEditorEvent,
+} from '@/lib/editorEvents';
 
 const openDialogMock = vi.fn();
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -145,6 +148,48 @@ describe('SlashCommandMenu', () => {
     await waitFor(() => {
       expect(screen.queryByRole('menu', { name: /insert block/i })).not.toBeInTheDocument();
     });
+  });
+
+  it('keeps /link intact and publishes its replacement range', async () => {
+    const editor = createSlashEditor();
+    setSlashTextBefore(editor, '/link');
+    const chain: any = {
+      focus: vi.fn(),
+      deleteRange: vi.fn(),
+      insertContent: vi.fn(),
+      setTextSelection: vi.fn(),
+      extendMarkRange: vi.fn(),
+      setLink: vi.fn(),
+      run: vi.fn().mockReturnValue(true),
+    };
+    for (const command of [
+      chain.focus,
+      chain.deleteRange,
+      chain.insertContent,
+      chain.setTextSelection,
+      chain.extendMarkRange,
+      chain.setLink,
+    ]) {
+      command.mockReturnValue(chain);
+    }
+    editor.chain = vi.fn(() => chain);
+    const requested = vi.fn();
+    const unsubscribe = subscribeEditorEvent('link:edit-request', requested);
+
+    render(<SlashCommandMenu editor={editor} />);
+    act(() => editor.emit('update'));
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^link/i }));
+
+    expect(requested).toHaveBeenCalledWith({
+      replaceRange: { from: 1, to: 6 },
+      initialDisplayText: '',
+    });
+    expect(chain.deleteRange).not.toHaveBeenCalled();
+    expect(chain.setLink).not.toHaveBeenCalled();
+    expect(chain.insertContent).not.toHaveBeenCalled();
+    expect(editor.state.doc.textBetween()).toBe('/link');
+    unsubscribe();
   });
 
   it('flips the menu above the caret when there is no room below', async () => {

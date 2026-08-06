@@ -36,7 +36,12 @@ import {
 
 import { filterSlashItems } from './slashItemFilter';
 
-type SlashItemKind = 'block' | 'prompt-image' | 'pick-image' | 'skill-token';
+type SlashItemKind =
+  | 'block'
+  | 'link'
+  | 'prompt-image'
+  | 'pick-image'
+  | 'skill-token';
 
 type SlashItem = {
   id: string;
@@ -197,27 +202,7 @@ const SLASH_ITEMS: SlashItem[] = [
     description: 'Insert or convert text into a link.',
     keywords: ['link', 'url', 'hyperlink', 'anchor', '링크', '주소'],
     icon: LinkIcon,
-    run: (editor) => {
-      // Apply a placeholder link mark on whatever the caret currently covers,
-      // then ask the floating LinkPopup to focus its URL input so the user
-      // can type immediately. Mirrors the selection-toolbar Link flow.
-      const { from, to } = editor.state.selection;
-      if (from === to) {
-        editor
-          .chain()
-          .focus()
-          .insertContent('link')
-          .setTextSelection({ from, to: from + 4 })
-          .run();
-      }
-      editor
-        .chain()
-        .focus()
-        .extendMarkRange('link')
-        .setLink({ href: 'https://' })
-        .run();
-      publishEditorEvent('link:edit-request', { focusInput: true });
-    },
+    kind: 'link',
   },
 ];
 
@@ -722,6 +707,15 @@ export function SlashCommandMenu({
 
   const runItem = (item: SlashItem | undefined) => {
     if (!item || !editor || !menu.open) return;
+    if (item.kind === 'link') {
+      const { from, to } = menu;
+      setMenu({ open: false });
+      publishEditorEvent('link:edit-request', {
+        replaceRange: { from, to },
+        initialDisplayText: '',
+      });
+      return;
+    }
     if (item.kind === 'skill-token' && item.token) {
       const { from, to } = menu;
       setMenu({ open: false });
