@@ -6306,6 +6306,7 @@ describe('App recent documents', () => {
     render(<App />);
 
     const sourceEditor = await screen.findByRole('textbox', { name: /source editor/i });
+    sourceEditor.focus();
     (sourceEditor as HTMLTextAreaElement).setSelectionRange(0, 5);
 
     fireEvent.keyDown(window, { key: 'f', metaKey: true });
@@ -6338,6 +6339,7 @@ describe('App recent documents', () => {
   it('searches a dragged WYSIWYG selection immediately for find and replace', async () => {
     const source = 'Alpha beta Alpha';
     const editor = createMockTiptapEditor(source, [{ text: source, from: 1 }]);
+    editor.isFocused = true;
     editor.state.selection = {
       from: 1,
       to: 6,
@@ -6375,6 +6377,7 @@ describe('App recent documents', () => {
     });
 
     editor.commands.setTextSelection({ from: 7, to: 11 });
+    editor.isFocused = true;
 
     fireEvent.keyDown(window, { key: 'f', metaKey: true, altKey: true });
 

@@ -2574,7 +2574,7 @@ export default function App() {
   const selectedTextForFind = () => {
     if (currentMode === 'Wysiwyg') {
       const selection = editor?.state.selection;
-      if (!editor || !selection || selection.from === selection.to) {
+      if (!editor?.isFocused || !selection || selection.from === selection.to) {
         return null;
       }
 
@@ -2601,6 +2601,9 @@ export default function App() {
 
     const view = sourceEditorViewRef.current;
     if (view) {
+      if (!view.hasFocus) {
+        return null;
+      }
       const selection = view.state.selection.main;
       const from = Math.min(selection.anchor, selection.head);
       const to = Math.max(selection.anchor, selection.head);
@@ -2612,6 +2615,7 @@ export default function App() {
     const sourceTextarea = sourceEditorContainerRef.current?.querySelector('textarea');
     if (
       sourceTextarea instanceof HTMLTextAreaElement &&
+      document.activeElement === sourceTextarea &&
       sourceTextarea.selectionEnd > sourceTextarea.selectionStart
     ) {
       return sourceTextarea.value.slice(
