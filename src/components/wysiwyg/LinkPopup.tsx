@@ -111,8 +111,24 @@ export function LinkPopup({ editor, enabled = true }: Props) {
   const [href, setHref] = useState('');
   const containerRef = useRef<HTMLDivElement | null>(null);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
+  const copyStatusTimerRef = useRef<number | null>(null);
 
   const close = useCallback(() => setState({ mode: 'closed' }), []);
+
+  const closeAndFocusTarget = () => {
+    const target = targetForState(state);
+    close();
+    if (editor && target) editor.commands.focus(target.to);
+  };
+
+  useEffect(
+    () => () => {
+      if (copyStatusTimerRef.current !== null) {
+        window.clearTimeout(copyStatusTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const openFormForTarget = useCallback(
     (target: LinkTarget, anchor: AnchorRect) => {
@@ -325,6 +341,17 @@ export function LinkPopup({ editor, enabled = true }: Props) {
     try {
       await navigator.clipboard.writeText(state.target.href);
       setViewingStatus('URL copied');
+      if (copyStatusTimerRef.current !== null) {
+        window.clearTimeout(copyStatusTimerRef.current);
+      }
+      copyStatusTimerRef.current = window.setTimeout(() => {
+        copyStatusTimerRef.current = null;
+        setState(current =>
+          current.mode === 'viewing'
+            ? { ...current, status: null }
+            : current,
+        );
+      }, 1200);
     } catch {
       setViewingStatus('Could not copy URL');
     }
@@ -374,7 +401,7 @@ export function LinkPopup({ editor, enabled = true }: Props) {
   const handlePopupKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      close();
+      closeAndFocusTarget();
       return;
     }
     if (
@@ -393,7 +420,7 @@ export function LinkPopup({ editor, enabled = true }: Props) {
     const leavingBackward = event.shiftKey && active === focusable[0];
     const leavingForward =
       !event.shiftKey && active === focusable[focusable.length - 1];
-    if (leavingBackward || leavingForward) close();
+    if (leavingBackward || leavingForward) closeAndFocusTarget();
   };
 
   const handleBlur = (event: React.FocusEvent<HTMLDivElement>) => {
@@ -525,7 +552,11 @@ export function LinkPopup({ editor, enabled = true }: Props) {
             <button type="submit" className="link-popup-button is-primary">
               Apply
             </button>
-            <button type="button" className="link-popup-button" onClick={close}>
+            <button
+              type="button"
+              className="link-popup-button"
+              onClick={closeAndFocusTarget}
+            >
               Cancel
             </button>
           </div>

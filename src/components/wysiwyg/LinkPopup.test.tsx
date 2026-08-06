@@ -54,6 +54,7 @@ describe('LinkPopup', () => {
       left: 40,
       right: 80,
     });
+    vi.spyOn(window, 'scrollBy').mockImplementation(() => undefined);
     writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -65,6 +66,7 @@ describe('LinkPopup', () => {
     cleanup();
     editor.destroy();
     host.remove();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -159,11 +161,19 @@ describe('LinkPopup', () => {
 
   it('copies the URL and announces success', async () => {
     await openInspection();
+    vi.useFakeTimers();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy URL' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy URL' }));
+      await Promise.resolve();
+    });
 
     expect(writeText).toHaveBeenCalledWith('https://old.example');
-    expect(await screen.findByRole('status')).toHaveTextContent('URL copied');
+    expect(screen.getByRole('status')).toHaveTextContent('URL copied');
+
+    act(() => vi.advanceTimersByTime(1200));
+
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('keeps the card open and announces a clipboard failure', async () => {
@@ -350,5 +360,33 @@ describe('LinkPopup', () => {
 
     expect(screen.queryByTestId('link-popup')).toBeNull();
     expect(editor.getHTML()).toBe(before);
+  });
+
+  it.each([
+    ['Cancel', () => fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))],
+    [
+      'Escape',
+      () =>
+        fireEvent.keyDown(screen.getByRole('textbox', { name: 'Link URL' }), {
+          key: 'Escape',
+        }),
+    ],
+    [
+      'Tab past the final control',
+      () => {
+        const cancel = screen.getByRole('button', { name: 'Cancel' });
+        cancel.focus();
+        fireEvent.keyDown(cancel, { key: 'Tab' });
+      },
+    ],
+  ])('returns focus to the captured link boundary after %s', async (_label, dismiss) => {
+    await openEditor();
+    await flushPopupFrame();
+
+    dismiss();
+    await flushPopupFrame();
+
+    expect(editor.view.hasFocus()).toBe(true);
+    expect(editor.state.selection).toMatchObject({ from: 5, to: 5 });
   });
 });
