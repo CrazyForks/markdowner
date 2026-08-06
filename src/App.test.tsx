@@ -512,6 +512,17 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
 
   const rebuildDoc = () => ({
     content: { size: editor.markdown.length + 2 },
+    textBetween: (from: number, to: number, blockSeparator = '\n') =>
+      mutableSegments
+        .map((segment) => {
+          const start = Math.max(from, segment.from);
+          const end = Math.min(to, segment.from + segment.text.length);
+          return end > start
+            ? segment.text.slice(start - segment.from, end - segment.from)
+            : '';
+        })
+        .filter(Boolean)
+        .join(blockSeparator),
     descendants: (callback: (node: any, position: number) => void) => {
       mutableSegments.forEach((segment) => {
         callback({ isText: true, text: segment.text }, segment.from);
@@ -6277,6 +6288,105 @@ describe('App recent documents', () => {
       expect(within(search).getByText('2 of 3')).toBeInTheDocument();
       expect((sourceEditor as HTMLTextAreaElement).selectionStart).toBe(14);
       expect((sourceEditor as HTMLTextAreaElement).selectionEnd).toBe(19);
+    });
+  });
+
+  it('searches a dragged source selection immediately and focuses the requested field', async () => {
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: 'alpha beta alpha',
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    const sourceEditor = await screen.findByRole('textbox', { name: /source editor/i });
+    (sourceEditor as HTMLTextAreaElement).setSelectionRange(0, 5);
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+
+    let search = await screen.findByRole('search', { name: /find and replace/i });
+    let findInput = within(search).getByRole('textbox', { name: /find text/i });
+    expect(findInput).toHaveValue('alpha');
+    await waitFor(() => {
+      expect(findInput).toHaveFocus();
+      expect(within(search).getByText('1 of 2')).toBeInTheDocument();
+    });
+
+    (sourceEditor as HTMLTextAreaElement).focus();
+    (sourceEditor as HTMLTextAreaElement).setSelectionRange(6, 10);
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true, altKey: true });
+
+    search = await screen.findByRole('search', { name: /find and replace/i });
+    findInput = within(search).getByRole('textbox', { name: /find text/i });
+    const replaceInput = within(search).getByRole('textbox', {
+      name: /replace text/i,
+    });
+    expect(findInput).toHaveValue('beta');
+    await waitFor(() => {
+      expect(replaceInput).toHaveFocus();
+      expect(within(search).getByText('1 of 1')).toBeInTheDocument();
+    });
+  });
+
+  it('searches a dragged WYSIWYG selection immediately for find and replace', async () => {
+    const source = 'Alpha beta Alpha';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 1 }]);
+    editor.state.selection = {
+      from: 1,
+      to: 6,
+      anchor: 1,
+      head: 6,
+      empty: false,
+      $from: { parent: { type: { name: 'paragraph' } } },
+    };
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'notes.md',
+        activeDocumentPath: '/tmp/project/notes.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+    await screen.findByTestId('mock-tiptap-editor');
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 6 });
+    });
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+
+    let search = await screen.findByRole('search', { name: /find and replace/i });
+    let findInput = within(search).getByRole('textbox', { name: /find text/i });
+    expect(findInput).toHaveValue('Alpha');
+    await waitFor(() => {
+      expect(findInput).toHaveFocus();
+      expect(within(search).getByText('1 of 2')).toBeInTheDocument();
+    });
+
+    editor.commands.setTextSelection({ from: 7, to: 11 });
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true, altKey: true });
+
+    search = await screen.findByRole('search', { name: /find and replace/i });
+    findInput = within(search).getByRole('textbox', { name: /find text/i });
+    const replaceInput = within(search).getByRole('textbox', {
+      name: /replace text/i,
+    });
+    expect(findInput).toHaveValue('beta');
+    await waitFor(() => {
+      expect(replaceInput).toHaveFocus();
+      expect(within(search).getByText('1 of 1')).toBeInTheDocument();
     });
   });
 

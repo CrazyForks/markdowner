@@ -553,6 +553,10 @@ export default function App() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isFindReplaceOpen, setIsFindReplaceOpen] = useState(false);
   const [isFindReplaceReplaceMode, setIsFindReplaceReplaceMode] = useState(false);
+  const [findFocusRequest, setFindFocusRequest] = useState<{
+    target: 'find' | 'replace';
+    token: number;
+  }>({ target: 'find', token: 0 });
   const [findQuery, setFindQuery] = useState('');
   const [findReplacement, setFindReplacement] = useState('');
   const [findOptions, setFindOptions] = useState<FindReplaceOptions>({
@@ -2567,13 +2571,75 @@ export default function App() {
     }
   }, [activeDocumentOpen]);
 
+  const selectedTextForFind = () => {
+    if (currentMode === 'Wysiwyg') {
+      const selection = editor?.state.selection;
+      if (!editor || !selection || selection.from === selection.to) {
+        return null;
+      }
+
+      const from = Math.min(selection.from, selection.to);
+      const to = Math.max(selection.from, selection.to);
+      try {
+        const selectedText = editor.state.doc.textBetween(from, to, '\n', '\n');
+        if (selectedText.length > 0) {
+          return selectedText;
+        }
+      } catch {
+        // Fall back to the serialized Markdown range below.
+      }
+
+      const source = flushWysiwygDraftNow() ?? localDraftRef.current;
+      const markdownFrom = wysiwygMarkdownOffsetAtPosition(editor, from);
+      const markdownTo = wysiwygMarkdownOffsetAtPosition(editor, to);
+      const selectedText = source.slice(
+        Math.min(markdownFrom, markdownTo),
+        Math.max(markdownFrom, markdownTo),
+      );
+      return selectedText.length > 0 ? selectedText : null;
+    }
+
+    const view = sourceEditorViewRef.current;
+    if (view) {
+      const selection = view.state.selection.main;
+      const from = Math.min(selection.anchor, selection.head);
+      const to = Math.max(selection.anchor, selection.head);
+      if (to > from) {
+        return localDraftRef.current.slice(from, to);
+      }
+    }
+
+    const sourceTextarea = sourceEditorContainerRef.current?.querySelector('textarea');
+    if (
+      sourceTextarea instanceof HTMLTextAreaElement &&
+      sourceTextarea.selectionEnd > sourceTextarea.selectionStart
+    ) {
+      return sourceTextarea.value.slice(
+        sourceTextarea.selectionStart,
+        sourceTextarea.selectionEnd,
+      );
+    }
+
+    return null;
+  };
+
   const openFindReplace = (replaceMode: boolean) => {
     if (!activeDocumentOpen) {
       return;
     }
 
+    const selectedText = selectedTextForFind();
+    if (selectedText !== null) {
+      setFindQuery(selectedText);
+      setActiveFindMatchIndex(0);
+    }
+    isFindReplaceOpenRef.current = true;
     setIsFindReplaceOpen(true);
     setIsFindReplaceReplaceMode(replaceMode);
+    setFindFocusRequest((current) => ({
+      target: replaceMode ? 'replace' : 'find',
+      token: current.token + 1,
+    }));
   };
 
   const handleFindQueryChange = (query: string) => {
@@ -6928,6 +6994,8 @@ export default function App() {
               query={findQuery}
               replacement={findReplacement}
               replaceMode={isFindReplaceReplaceMode}
+              focusTarget={findFocusRequest.target}
+              focusRequestToken={findFocusRequest.token}
               options={findOptions}
               activeMatchNumber={activeFindMatchNumber}
               matchCount={findMatchCount}

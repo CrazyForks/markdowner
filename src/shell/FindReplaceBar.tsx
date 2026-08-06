@@ -8,7 +8,14 @@ import {
   WholeWord,
   X,
 } from 'lucide-react';
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +26,8 @@ interface FindReplaceBarProps {
   query: string;
   replacement: string;
   replaceMode: boolean;
+  focusTarget: 'find' | 'replace';
+  focusRequestToken: number;
   options: FindReplaceOptions;
   activeMatchNumber: number;
   matchCount: number;
@@ -39,6 +48,8 @@ export function FindReplaceBar({
   query,
   replacement,
   replaceMode,
+  focusTarget,
+  focusRequestToken,
   options,
   activeMatchNumber,
   matchCount,
@@ -55,6 +66,12 @@ export function FindReplaceBar({
   onClose,
 }: FindReplaceBarProps) {
   const findInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
+  const focusRequestedInput = useCallback(() => {
+    const target = focusTarget === 'replace' ? replaceInputRef.current : findInputRef.current;
+    target?.focus();
+    target?.select();
+  }, [focusTarget]);
   // Buffer the find input locally so live typing does not re-run the search on
   // every keystroke. The committed query (parent state) only advances when the
   // user presses Enter.
@@ -73,9 +90,13 @@ export function FindReplaceBar({
           : 'No matches';
 
   useLayoutEffect(() => {
-    findInputRef.current?.focus();
-    findInputRef.current?.select();
-  }, []);
+    focusRequestedInput();
+  }, [focusRequestToken, focusRequestedInput]);
+
+  useEffect(() => {
+    const animationFrame = window.requestAnimationFrame(focusRequestedInput);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [focusRequestToken, focusRequestedInput]);
 
   // Re-sync local input when the committed query changes from outside (e.g.
   // bar reopens with a previously-stored query).
@@ -218,6 +239,7 @@ export function FindReplaceBar({
             </label>
             <Input
               id="markdowner-replace-text"
+              ref={replaceInputRef}
               value={replacement}
               onChange={(event) => onReplacementChange(event.target.value)}
               onKeyDown={handleReplaceKeyDown}
