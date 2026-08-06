@@ -25,16 +25,20 @@ export interface OpenRouterSettingsProps {
   zdrOnly: boolean;
   disclosureAccepted: boolean;
   prdModel: string;
+  summaryModel: string;
   translationModel: string;
   customPromptModel: string;
+  summaryTargetLanguage: string;
   translationTargetLanguage: string;
   defaultScope: 'document' | 'workspace';
   historyEnabled: boolean;
   onZdrOnlyChange: (enabled: boolean) => void;
   onDisclosureAcceptedChange: (accepted: boolean) => void;
   onPrdModelChange: (model: string) => void;
+  onSummaryModelChange: (model: string) => void;
   onTranslationModelChange: (model: string) => void;
   onCustomPromptModelChange: (model: string) => void;
+  onSummaryTargetLanguageChange: (language: string) => void;
   onTranslationTargetLanguageChange: (language: string) => void;
   onDefaultScopeChange: (scope: 'document' | 'workspace') => void;
   onHistoryEnabledChange: (enabled: boolean) => void;
@@ -52,16 +56,20 @@ export function OpenRouterSettings({
   zdrOnly,
   disclosureAccepted,
   prdModel,
+  summaryModel,
   translationModel,
   customPromptModel,
+  summaryTargetLanguage,
   translationTargetLanguage,
   defaultScope,
   historyEnabled,
   onZdrOnlyChange,
   onDisclosureAcceptedChange,
   onPrdModelChange,
+  onSummaryModelChange,
   onTranslationModelChange,
   onCustomPromptModelChange,
+  onSummaryTargetLanguageChange,
   onTranslationTargetLanguageChange,
   onDefaultScopeChange,
   onHistoryEnabledChange,
@@ -277,6 +285,12 @@ export function OpenRouterSettings({
             onChange={onPrdModelChange}
           />
           <ModelDefaultSelect
+            id="ai-summary-default-model"
+            label="Summary default model"
+            value={summaryModel}
+            onChange={onSummaryModelChange}
+          />
+          <ModelDefaultSelect
             id="ai-translation-default-model"
             label="Translation default model"
             value={translationModel}
@@ -288,6 +302,22 @@ export function OpenRouterSettings({
             value={customPromptModel}
             onChange={onCustomPromptModelChange}
           />
+          <div className="grid gap-1.5">
+            <Label htmlFor="ai-summary-language">Summary language</Label>
+            <select
+              id="ai-summary-language"
+              aria-label="Summary language"
+              className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={summaryTargetLanguage}
+              onChange={(event) => onSummaryTargetLanguageChange(event.target.value)}
+            >
+              <option value="source">Same as source</option>
+              <option value="ko">Korean · ko</option>
+              <option value="en">English · en</option>
+              <option value="ja">Japanese · ja</option>
+              <option value="zh">Chinese · zh</option>
+            </select>
+          </div>
           <div className="grid gap-1.5">
             <Label htmlFor="ai-default-target-language">Translation target</Label>
             <Input

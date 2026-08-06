@@ -1501,8 +1501,10 @@ export function SettingsPanel({
           zdrOnly={settings.aiZdrOnly}
           disclosureAccepted={settings.aiCloudDisclosureAccepted}
           prdModel={settings.aiPrdModel}
+          summaryModel={settings.aiSummaryModel}
           translationModel={settings.aiTranslationModel}
           customPromptModel={settings.aiCustomPromptModel}
+          summaryTargetLanguage={settings.aiSummaryTargetLanguage}
           translationTargetLanguage={settings.aiTranslationTargetLanguage}
           defaultScope={settings.aiDefaultScope}
           historyEnabled={settings.aiHistoryEnabled}
@@ -1515,11 +1517,17 @@ export function SettingsPanel({
           onPrdModelChange={(aiPrdModel) =>
             onSettingsChange({ ...settings, aiPrdModel })
           }
+          onSummaryModelChange={(aiSummaryModel) =>
+            onSettingsChange({ ...settings, aiSummaryModel })
+          }
           onTranslationModelChange={(aiTranslationModel) =>
             onSettingsChange({ ...settings, aiTranslationModel })
           }
           onCustomPromptModelChange={(aiCustomPromptModel) =>
             onSettingsChange({ ...settings, aiCustomPromptModel })
+          }
+          onSummaryTargetLanguageChange={(aiSummaryTargetLanguage) =>
+            onSettingsChange({ ...settings, aiSummaryTargetLanguage })
           }
           onTranslationTargetLanguageChange={(aiTranslationTargetLanguage) =>
             onSettingsChange({ ...settings, aiTranslationTargetLanguage })

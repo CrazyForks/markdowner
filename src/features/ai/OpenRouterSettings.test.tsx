@@ -7,20 +7,62 @@ afterEach(() => cleanup());
 
 const defaultProps = {
   prdModel: 'z-ai/glm-5.2',
+  summaryModel: 'z-ai/glm-5.2',
   translationModel: 'z-ai/glm-5.2',
   customPromptModel: 'z-ai/glm-5.2',
+  summaryTargetLanguage: 'source',
   translationTargetLanguage: 'ko',
   defaultScope: 'document' as const,
   historyEnabled: true,
   onPrdModelChange: vi.fn(),
+  onSummaryModelChange: vi.fn(),
   onTranslationModelChange: vi.fn(),
   onCustomPromptModelChange: vi.fn(),
+  onSummaryTargetLanguageChange: vi.fn(),
   onTranslationTargetLanguageChange: vi.fn(),
   onDefaultScopeChange: vi.fn(),
   onHistoryEnabledChange: vi.fn(),
 };
 
 describe('OpenRouterSettings', () => {
+  it('changes Summary defaults without changing Translation language', async () => {
+    const onSummaryModelChange = vi.fn();
+    const onSummaryTargetLanguageChange = vi.fn();
+    const onTranslationTargetLanguageChange = vi.fn();
+    render(
+      <OpenRouterSettings
+        {...defaultProps}
+        zdrOnly
+        disclosureAccepted
+        onZdrOnlyChange={vi.fn()}
+        onDisclosureAcceptedChange={vi.fn()}
+        onSummaryModelChange={onSummaryModelChange}
+        onSummaryTargetLanguageChange={onSummaryTargetLanguageChange}
+        onTranslationTargetLanguageChange={onTranslationTargetLanguageChange}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({ configured: false, maskedLabel: null }),
+          saveKey: vi.fn(),
+          verifyKey: vi.fn(),
+          deleteKey: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText('Summary default model')).toHaveValue('z-ai/glm-5.2');
+    expect(screen.getByLabelText('Summary language')).toHaveValue('source');
+
+    fireEvent.change(screen.getByLabelText('Summary default model'), {
+      target: { value: 'moonshotai/kimi-k3' },
+    });
+    fireEvent.change(screen.getByLabelText('Summary language'), {
+      target: { value: 'ko' },
+    });
+
+    expect(onSummaryModelChange).toHaveBeenCalledWith('moonshotai/kimi-k3');
+    expect(onSummaryTargetLanguageChange).toHaveBeenCalledWith('ko');
+    expect(onTranslationTargetLanguageChange).not.toHaveBeenCalled();
+  });
+
   it('groups connection, defaults, and history and privacy controls', async () => {
     const onDefaultScopeChange = vi.fn();
     const onHistoryEnabledChange = vi.fn();

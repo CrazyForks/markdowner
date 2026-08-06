@@ -26,6 +26,7 @@ import {
   resolveUsageCost,
   resolveRunGate,
   searchLanguages,
+  SUMMARY_SOURCE_LANGUAGE,
 } from './model';
 import type {
   AiByteRange,
@@ -149,6 +150,9 @@ export function AiWorkbenchPanel({
   const [targetLanguage, setTargetLanguage] = useState(
     settings.aiTranslationTargetLanguage,
   );
+  const [summaryLanguage, setSummaryLanguage] = useState(
+    settings.aiSummaryTargetLanguage,
+  );
   const [languageQuery, setLanguageQuery] = useState('');
   const [instruction, setInstruction] = useState('');
   const [keyStatus, setKeyStatus] = useState<AiKeyStatus | null>(null);
@@ -209,23 +213,23 @@ export function AiWorkbenchPanel({
   }, [services]);
 
   useEffect(() => {
-    const defaultModel =
-      task === 'prd'
-        ? settings.aiPrdModel
-        : task === 'translation'
-          ? settings.aiTranslationModel
-          : settings.aiCustomPromptModel;
+    const defaultModel = defaultModelForTask(settings, task);
     setModel(defaultModel);
+    setLanguageQuery('');
     setConfirmed(false);
   }, [
     settings.aiCustomPromptModel,
     settings.aiPrdModel,
+    settings.aiSummaryModel,
     settings.aiTranslationModel,
     task,
   ]);
 
   useEffect(() => {
     setRunScope((current) => {
+      if (task === 'summary') {
+        return { kind: 'document', target: currentDocument };
+      }
       if (current.kind === 'workspace') {
         if (!workspaceRoot) return { kind: 'document', target: currentDocument };
         return {
@@ -306,8 +310,12 @@ export function AiWorkbenchPanel({
     };
   }, [configured, selectedModelId, services, settings.aiZdrOnly]);
 
+  const effectiveRunScope: AiRunScope =
+    task === 'summary' ? { kind: 'document', target: currentDocument } : runScope;
   const targetDocument =
-    runScope.kind === 'document' ? runScope.target : runScope.target ?? currentDocument;
+    effectiveRunScope.kind === 'document'
+      ? effectiveRunScope.target
+      : effectiveRunScope.target ?? currentDocument;
   const scopedSource =
     targetDocument.documentId === documentId
       ? source
@@ -333,12 +341,7 @@ export function AiWorkbenchPanel({
   const languages = searchLanguages(languageQuery).slice(0, 12);
   const requiresInstruction = task === 'custom';
   const targetRequired = task === 'translation';
-  const taskDefaultModel =
-    task === 'prd'
-      ? settings.aiPrdModel
-      : task === 'translation'
-        ? settings.aiTranslationModel
-        : settings.aiCustomPromptModel;
+  const taskDefaultModel = defaultModelForTask(settings, task);
   const detectedSourceLanguage = useMemo(
     () => (targetRequired ? detectDocumentLanguage(source) : null),
     [source, targetRequired],
@@ -357,7 +360,7 @@ export function AiWorkbenchPanel({
     !pricingLoading &&
     configured &&
     disclosureAccepted &&
-    (runScope.kind === 'document' ||
+    (effectiveRunScope.kind === 'document' ||
       (task === 'translation' && workspaceDocumentPaths.length > 0)) &&
     scopedSource.length > 0 &&
     selectedModel?.enabled === true &&
@@ -365,7 +368,7 @@ export function AiWorkbenchPanel({
     (gate?.kind !== 'confirm' || confirmed) &&
     (!requiresInstruction || instruction.trim().length > 0) &&
     (!targetRequired || targetLanguage.trim().length > 0) &&
-    !(runScope.kind === 'document' && sameLanguage);
+    !(effectiveRunScope.kind === 'document' && sameLanguage);
 
   const chooseTargetLanguage = (language: string) => {
     setTargetLanguage(language);
@@ -378,6 +381,17 @@ export function AiWorkbenchPanel({
     }
   };
 
+  const chooseSummaryLanguage = (language: string) => {
+    setSummaryLanguage(language);
+    setLanguageQuery('');
+    if (language !== settings.aiSummaryTargetLanguage) {
+      onSettingsChange({
+        ...settings,
+        aiSummaryTargetLanguage: language,
+      });
+    }
+  };
+
   const chooseModel = (modelId: string) => {
     setModel(modelId);
     setModelQuery('');
@@ -386,13 +400,7 @@ export function AiWorkbenchPanel({
 
   const saveModelAsDefault = () => {
     if (!selectedModel || selectedModel.id === taskDefaultModel) return;
-    onSettingsChange(
-      task === 'prd'
-        ? { ...settings, aiPrdModel: selectedModel.id }
-        : task === 'translation'
-          ? { ...settings, aiTranslationModel: selectedModel.id }
-          : { ...settings, aiCustomPromptModel: selectedModel.id },
-    );
+    onSettingsChange(settingsWithDefaultModel(settings, task, selectedModel.id));
   };
 
   const handleRun = async () => {
@@ -406,15 +414,23 @@ export function AiWorkbenchPanel({
       requestId,
       documentId: targetDocument.documentId,
       source: scopedSource,
-      selection: targetDocument.documentId === documentId ? selection : null,
+      selection:
+        task !== 'summary' && targetDocument.documentId === documentId
+          ? selection
+          : null,
       task,
       model: selectedModel.id,
-      targetLanguage: targetRequired ? targetLanguage : null,
+      targetLanguage:
+        task === 'translation'
+          ? targetLanguage
+          : task === 'summary' && summaryLanguage !== SUMMARY_SOURCE_LANGUAGE
+            ? summaryLanguage
+            : null,
       instruction: instruction.trim() || null,
       zdrOnly: settings.aiZdrOnly,
       maxOutputTokens,
       recordHistory: settings.aiHistoryEnabled,
-      scope: runScope,
+      scope: effectiveRunScope,
     };
     const resumable =
       task === 'translation' && settings.aiHistoryEnabled
@@ -715,7 +731,7 @@ export function AiWorkbenchPanel({
           AI Feature
         </h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Improve, translate, or transform the active Markdown document.
+          Improve, summarize, translate, or transform the active Markdown document.
         </p>
       </header> : null}
 
@@ -752,23 +768,33 @@ export function AiWorkbenchPanel({
             onChange={(event) => setTask(event.target.value as AiTask)}
           >
             <option value="prd">Improve PRD</option>
+            <option value="summary">Summarize document</option>
             <option value="translation">Translate document</option>
             <option value="custom">Custom prompt</option>
           </select>
         </div>
 
-        <AiScopePicker
-          value={runScope}
-          task={task}
-          currentDocument={currentDocument}
-          openDocuments={openDocuments}
-          workspaceRoot={workspaceRoot}
-          workspaceFileCount={workspaceDocumentCount}
-          disabled={Boolean(runningRequestId)}
-          onChange={setRunScope}
-        />
+        {task === 'summary' ? (
+          <div className="grid gap-1.5">
+            <Label>Scope</Label>
+            <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+              Current document · {currentDocument.label}
+            </p>
+          </div>
+        ) : (
+          <AiScopePicker
+            value={runScope}
+            task={task}
+            currentDocument={currentDocument}
+            openDocuments={openDocuments}
+            workspaceRoot={workspaceRoot}
+            workspaceFileCount={workspaceDocumentCount}
+            disabled={Boolean(runningRequestId)}
+            onChange={setRunScope}
+          />
+        )}
 
-        {runScope.kind === 'workspace' ? (
+        {task !== 'summary' && runScope.kind === 'workspace' ? (
           <p className="text-xs text-muted-foreground">
             Workspace execution will read only the selected Markdown scope and will
             never modify files without review.
@@ -912,6 +938,54 @@ export function AiWorkbenchPanel({
                 language before running.
               </p>
             ) : null}
+          </div>
+        ) : null}
+
+        {task === 'summary' ? (
+          <div className="grid gap-2">
+            <Label htmlFor="ai-summary-language">Summary language</Label>
+            <Input
+              id="ai-summary-language"
+              value={languageQuery || summaryLanguage}
+              onFocus={() => setLanguageQuery('')}
+              onChange={(event) => {
+                setLanguageQuery(event.target.value);
+                if (/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*$/.test(event.target.value)) {
+                  chooseSummaryLanguage(event.target.value);
+                }
+              }}
+              placeholder="Search by language or BCP 47 code"
+              disabled={Boolean(runningRequestId)}
+            />
+            <div className="flex flex-wrap gap-1.5" aria-label="Summary language choices">
+              <button
+                type="button"
+                className={
+                  summaryLanguage === SUMMARY_SOURCE_LANGUAGE
+                    ? 'rounded-md bg-accent px-2 py-1 text-xs text-accent-foreground'
+                    : 'rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground'
+                }
+                onClick={() => chooseSummaryLanguage(SUMMARY_SOURCE_LANGUAGE)}
+                disabled={Boolean(runningRequestId)}
+              >
+                Same as source · {SUMMARY_SOURCE_LANGUAGE}
+              </button>
+              {languages.map((language) => (
+                <button
+                  type="button"
+                  key={language.code}
+                  className={
+                    language.code === summaryLanguage
+                      ? 'rounded-md bg-accent px-2 py-1 text-xs text-accent-foreground'
+                      : 'rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground'
+                  }
+                  onClick={() => chooseSummaryLanguage(language.code)}
+                  disabled={Boolean(runningRequestId)}
+                >
+                  {language.name} · {language.code}
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -1267,7 +1341,31 @@ function languageName(code: string): string {
 }
 
 function taskLabel(task: AiTask): string {
-  return task === 'prd' ? 'PRD' : task === 'translation' ? 'translation' : 'custom';
+  return task === 'prd'
+    ? 'PRD'
+    : task === 'summary'
+      ? 'Summary'
+      : task === 'translation'
+        ? 'translation'
+        : 'custom';
+}
+
+function defaultModelForTask(settings: Settings, task: AiTask): string {
+  if (task === 'prd') return settings.aiPrdModel;
+  if (task === 'summary') return settings.aiSummaryModel;
+  if (task === 'translation') return settings.aiTranslationModel;
+  return settings.aiCustomPromptModel;
+}
+
+function settingsWithDefaultModel(
+  settings: Settings,
+  task: AiTask,
+  model: string,
+): Settings {
+  if (task === 'prd') return { ...settings, aiPrdModel: model };
+  if (task === 'summary') return { ...settings, aiSummaryModel: model };
+  if (task === 'translation') return { ...settings, aiTranslationModel: model };
+  return { ...settings, aiCustomPromptModel: model };
 }
 
 function searchModels(

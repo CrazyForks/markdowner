@@ -27,6 +27,99 @@ const glm: AiModel = {
 };
 
 describe('AiWorkbenchPanel', () => {
+  it('summarizes the current document in the source language without a selection', async () => {
+    const run = vi.fn().mockImplementation(async (request: AiRunRequest) => runResult(request));
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        documentPath="/vault/notes.md"
+        documentLabel="notes.md"
+        source={'# Source\n\nOriginal facts.'}
+        selection={{ start: 2, end: 8 }}
+        workspaceRoot="/vault"
+        workspaceDocumentCount={3}
+        settings={{ ...DEFAULT_SETTINGS, aiCloudDisclosureAccepted: true }}
+        onSettingsChange={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({ configured: true, maskedLabel: '••••secret' }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          run,
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI task' }), {
+      target: { value: 'summary' },
+    });
+
+    expect(screen.getByText('Current document · notes.md')).toBeVisible();
+    expect(screen.queryByRole('option', { name: /Workspace/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Summary language')).toHaveValue('source');
+    const runButton = await screen.findByRole('button', { name: 'Run' });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: 'summary',
+        documentId: 'doc-1',
+        source: '# Source\n\nOriginal facts.',
+        selection: null,
+        targetLanguage: null,
+        maxOutputTokens: 4_096,
+        recordHistory: true,
+        scope: expect.objectContaining({ kind: 'document' }),
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it('persists and requests an explicit Summary language independently', async () => {
+    const run = vi.fn().mockImplementation(async (request: AiRunRequest) => runResult(request));
+    const onSettingsChange = vi.fn();
+    render(
+      <AiWorkbenchPanel
+        documentId="doc-1"
+        documentLabel="notes.md"
+        source={'# Source\n\nOriginal facts.'}
+        selection={null}
+        settings={{ ...DEFAULT_SETTINGS, aiCloudDisclosureAccepted: true }}
+        onSettingsChange={onSettingsChange}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({ configured: true, maskedLabel: '••••secret' }),
+          listModels: vi.fn().mockResolvedValue([glm]),
+          run,
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI task' }), {
+      target: { value: 'summary' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Korean · ko/i }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aiSummaryTargetLanguage: 'ko',
+        aiTranslationTargetLanguage: DEFAULT_SETTINGS.aiTranslationTargetLanguage,
+      }),
+    );
+    const runButton = screen.getByRole('button', { name: 'Run' });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ task: 'summary', targetLanguage: 'ko' }),
+      expect.any(Function),
+    );
+  });
+
   it('shows task defaults, estimate, key onboarding, and running cancellation', async () => {
     const run = vi.fn(
       () =>
