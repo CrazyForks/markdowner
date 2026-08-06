@@ -13,6 +13,7 @@
  */
 export const WYSIWYG_LINK_OPTIONS = {
   openOnClick: false,
+  enableClickSelection: true,
   autolink: false,
   linkOnPaste: false,
   // The extension's paste rule (addPasteRules) is registered regardless of

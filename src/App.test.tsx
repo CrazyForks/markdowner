@@ -11,6 +11,7 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppSnapshot, EditorMode } from './lib/desktop';
+import { subscribeEditorEvent } from './lib/editorEvents';
 
 const bootstrapMock = vi.fn();
 const activeDocumentDiskSourceMock = vi.fn();
@@ -592,6 +593,7 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
     dispatch: vi.fn(),
     focus: vi.fn(),
     coordsAtPos: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
+    posAtDOM: vi.fn(() => 1),
     // The WYSIWYG link interceptor attaches a capture-phase click listener to
     // the editor DOM; tests dispatch real clicks on anchors appended here.
     dom: document.createElement('div'),
@@ -817,6 +819,10 @@ describe('App recent documents', () => {
     dragDropHandler = undefined;
     menuCommandHandler = undefined;
     updateSnapshotHandler = undefined;
+    Object.defineProperty(navigator, 'platform', {
+      configurable: true,
+      value: 'MacIntel',
+    });
     window.localStorage.removeItem('markdowner.sidebarOpen');
     window.localStorage.removeItem('markdowner.sidebarWidth');
     window.localStorage.removeItem('markdowner.exportStyle.v1');
@@ -6466,7 +6472,7 @@ describe('App recent documents', () => {
     );
   });
 
-  it('opens a clicked WYSIWYG markdown link in the current tab', async () => {
+  it('inspects an ordinary WYSIWYG markdown link without navigating', async () => {
     const editor = createMockTiptapEditor('[Next](./next.md)', [{ text: 'Next', from: 1 }]);
     tiptapMockState.editor = editor;
     bootstrapMock.mockResolvedValue(
@@ -6491,6 +6497,8 @@ describe('App recent documents', () => {
     );
 
     const { default: App } = await import('./App');
+    const inspected = vi.fn();
+    const unsubscribe = subscribeEditorEvent('link:inspect-request', inspected);
 
     render(<App />);
 
@@ -6499,19 +6507,16 @@ describe('App recent documents', () => {
 
     expect(event.defaultPrevented).toBe(true);
     await waitFor(() => {
-      expect(resolveMarkdownLinkMock).toHaveBeenCalledWith(
-        './next.md',
-        '/tmp/project/current.md',
-      );
-      expect(openDocumentMock).toHaveBeenCalledWith('/tmp/project/next.md');
+      expect(inspected).toHaveBeenCalledWith({ position: 1 });
     });
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /next\.md/i })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      );
-    });
-    expect(screen.queryByRole('tab', { name: /current\.md/i })).not.toBeInTheDocument();
+    expect(resolveMarkdownLinkMock).not.toHaveBeenCalled();
+    expect(openDocumentMock).not.toHaveBeenCalled();
+    expect(openExternalUrlMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('tab', { name: /current\.md/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    unsubscribe();
   });
 
   it('opens a Cmd-clicked WYSIWYG markdown link in a new tab', async () => {
@@ -6555,7 +6560,36 @@ describe('App recent documents', () => {
     });
   });
 
-  it('opens a WYSIWYG HTTP link in the default browser instead of a document tab', async () => {
+  it('rejects a Cmd-clicked unsafe WYSIWYG link before resolution', async () => {
+    const editor = createMockTiptapEditor('[Bad](javascript:alert(1))', [
+      { text: 'Bad', from: 1 },
+    ]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'current.md',
+        activeDocumentPath: '/tmp/project/current.md',
+        activeDocumentSource: '[Bad](javascript:alert(1))',
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: /current\.md/i });
+    const event = clickSurfaceLink(editor.view.dom, 'javascript:alert(1)', {
+      metaKey: true,
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(resolveMarkdownLinkMock).not.toHaveBeenCalled();
+    expect(openDocumentMock).not.toHaveBeenCalled();
+    expect(openExternalUrlMock).not.toHaveBeenCalled();
+  });
+
+  it('opens a Cmd-clicked WYSIWYG HTTP link in the default browser', async () => {
     const editor = createMockTiptapEditor('[Web](https://example.com)', [
       { text: 'Web', from: 1 },
     ]);
@@ -6578,7 +6612,7 @@ describe('App recent documents', () => {
     render(<App />);
 
     await screen.findByRole('tab', { name: /current\.md/i });
-    clickSurfaceLink(editor.view.dom, 'https://example.com');
+    clickSurfaceLink(editor.view.dom, 'https://example.com', { metaKey: true });
 
     await waitFor(() => {
       expect(openExternalUrlMock).toHaveBeenCalledWith('https://example.com');
@@ -6671,7 +6705,7 @@ describe('App recent documents', () => {
     await screen.findByRole('tab', { name: /current\.md/i });
 
     // Follow the link → next.md
-    clickSurfaceLink(editor.view.dom, './next.md');
+    clickSurfaceLink(editor.view.dom, './next.md', { metaKey: true });
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /next\.md/i })).toHaveAttribute(
         'aria-selected',

@@ -21,6 +21,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { createCodeBlockExtension } from '@/components/wysiwyg/codeBlockExtension';
 import { MarkdownerHeading } from '@/components/wysiwyg/headingExtension';
 import { ImeDebugOverlay } from '@/components/wysiwyg/ImeDebugOverlay';
+import { isAllowedLinkHref } from '@/components/wysiwyg/linkEditing';
 import { MarkdownLinkInputRule } from '@/components/wysiwyg/markdownLinkInputRule';
 import { PreventTableHoverSelection } from '@/components/wysiwyg/preventTableHoverSelection';
 import { TableArrowNavigation } from '@/components/wysiwyg/tableArrowNavigation';
@@ -2424,14 +2425,26 @@ export default function App() {
     });
   }, [editor, settings.highlightSkillTokens, skillTokenNames]);
 
-  // Follow markdown links clicked in the WYSIWYG surface. Capture phase beats
-  // both WebKit's native anchor navigation and ProseMirror's flaky handleClick.
+  // Inspect ordinary WYSIWYG clicks and reserve navigation for modifier-click.
+  // Capture phase beats both WebKit's native anchor navigation and
+  // ProseMirror's flaky handleClick.
   useEffect(() => {
     if (!editor) return;
     return attachMarkdownLinkClickInterceptor(
       editor.view.dom as HTMLElement,
-      (href, options) => {
-        void openEditorMarkdownLink(href, options);
+      {
+        onInspect: anchor => {
+          try {
+            const position = editor.view.posAtDOM(anchor, 0);
+            publishEditorEvent('link:inspect-request', { position });
+          } catch {
+            // The DOM changed between click capture and position lookup.
+          }
+        },
+        onOpen: (href, options) => {
+          if (!isAllowedLinkHref(href)) return;
+          void openEditorMarkdownLink(href, options);
+        },
       },
     );
   }, [editor]);

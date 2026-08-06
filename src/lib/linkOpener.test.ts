@@ -72,53 +72,120 @@ describe('attachMarkdownLinkClickInterceptor', () => {
   function setup() {
     const surface = document.createElement('div');
     surface.innerHTML = '<p>Read <a href="./next.md"><span>next</span></a></p>';
+    surface.addEventListener('click', event => event.preventDefault());
     document.body.appendChild(surface);
+    const onInspect = vi.fn();
     const onOpen = vi.fn();
-    const cleanup = attachMarkdownLinkClickInterceptor(surface, onOpen);
+    const cleanup = attachMarkdownLinkClickInterceptor(surface, {
+      onInspect,
+      onOpen,
+    });
+    const anchor = surface.querySelector('a') as HTMLAnchorElement;
     const span = surface.querySelector('span') as HTMLElement;
-    return { surface, onOpen, cleanup, span };
+    return { surface, anchor, onInspect, onOpen, cleanup, span };
   }
 
-  it('routes an anchor click to onOpen and cancels the default navigation', () => {
-    const { onOpen, cleanup, span } = setup();
+  it('routes an ordinary anchor click only to inspection', () => {
+    const { anchor, onInspect, onOpen, cleanup, span } = setup();
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
 
     span.dispatchEvent(event);
 
-    expect(onOpen).toHaveBeenCalledWith('./next.md', { openInNewTab: false });
+    expect(onInspect).toHaveBeenCalledWith(anchor);
+    expect(onOpen).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(true);
     cleanup();
   });
 
-  it('treats Cmd/Ctrl-click as an open-in-new-tab request', () => {
-    const { onOpen, cleanup, span } = setup();
+  it('routes Cmd-click only to opening on macOS', () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(navigator, 'platform');
+    Object.defineProperty(navigator, 'platform', {
+      configurable: true,
+      value: 'MacIntel',
+    });
+    const { onInspect, onOpen, cleanup, span } = setup();
 
-    span.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }));
-    expect(onOpen).toHaveBeenLastCalledWith('./next.md', { openInNewTab: true });
+    try {
+      const event = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        metaKey: true,
+      });
+      span.dispatchEvent(event);
 
-    span.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
-    expect(onOpen).toHaveBeenLastCalledWith('./next.md', { openInNewTab: true });
-    cleanup();
+      expect(onOpen).toHaveBeenCalledWith('./next.md', {
+        openInNewTab: true,
+      });
+      expect(onInspect).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(true);
+    } finally {
+      cleanup();
+      if (originalPlatform) {
+        Object.defineProperty(navigator, 'platform', originalPlatform);
+      }
+    }
+  });
+
+  it('routes Ctrl-click only to opening outside macOS', () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(navigator, 'platform');
+    Object.defineProperty(navigator, 'platform', {
+      configurable: true,
+      value: 'Win32',
+    });
+    const { onInspect, onOpen, cleanup, span } = setup();
+
+    try {
+      span.dispatchEvent(
+        new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+        }),
+      );
+
+      expect(onOpen).toHaveBeenCalledWith('./next.md', {
+        openInNewTab: true,
+      });
+      expect(onInspect).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      if (originalPlatform) {
+        Object.defineProperty(navigator, 'platform', originalPlatform);
+      }
+    }
   });
 
   it('ignores clicks that miss an anchor and non-left buttons', () => {
-    const { surface, onOpen, cleanup, span } = setup();
+    const { surface, onInspect, onOpen, cleanup, span } = setup();
 
     surface.querySelector('p')?.firstChild?.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     );
     span.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 1 }));
 
+    expect(onInspect).not.toHaveBeenCalled();
     expect(onOpen).not.toHaveBeenCalled();
     cleanup();
   });
 
+  it('stops propagation for every handled link click', () => {
+    const { surface, cleanup, span } = setup();
+    const bubbled = vi.fn();
+    surface.addEventListener('click', bubbled);
+
+    span.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(bubbled).not.toHaveBeenCalled();
+    cleanup();
+  });
+
   it('stops firing once cleaned up', () => {
-    const { onOpen, cleanup, span } = setup();
+    const { onInspect, onOpen, cleanup, span } = setup();
     cleanup();
 
     span.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 
+    expect(onInspect).not.toHaveBeenCalled();
     expect(onOpen).not.toHaveBeenCalled();
   });
 });

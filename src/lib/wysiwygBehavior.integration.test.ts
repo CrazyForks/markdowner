@@ -101,6 +101,17 @@ function collectDocumentFeatures(editor: Editor) {
   return { nodeTypes, markTypes, linkHrefs };
 }
 
+describe('WYSIWYG link interaction configuration', () => {
+  it('selects clicked links without enabling native opening or implicit links', () => {
+    expect(WYSIWYG_LINK_OPTIONS).toMatchObject({
+      enableClickSelection: true,
+      openOnClick: false,
+      autolink: false,
+      linkOnPaste: false,
+    });
+  });
+});
+
 describe('WYSIWYG behaviour — markdown input rules', () => {
   let editor: Editor;
   beforeEach(() => {

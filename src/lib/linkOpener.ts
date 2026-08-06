@@ -13,22 +13,35 @@ export function findClickedAnchorHref(
   target: EventTarget | null,
   container: Element | null = null,
 ): string | null {
+  return findClickedAnchor(target, container)?.getAttribute('href') || null;
+}
+
+function findClickedAnchor(
+  target: EventTarget | null,
+  container: Element | null = null,
+): HTMLAnchorElement | null {
   const element =
     typeof Element !== 'undefined' && target instanceof Element
       ? target
       : typeof Node !== 'undefined' && target instanceof Node
         ? target.parentElement
         : null;
-  const anchor = element?.closest('a');
+  const anchor = element?.closest('a') as HTMLAnchorElement | null;
   if (!anchor) return null;
   if (container && !container.contains(anchor)) return null;
-  return anchor.getAttribute('href') || null;
+  return anchor.hasAttribute('href') ? anchor : null;
+}
+
+export interface MarkdownLinkClickHandlers {
+  onInspect: (anchor: HTMLAnchorElement) => void;
+  onOpen: (href: string, options: { openInNewTab: true }) => void;
 }
 
 /**
  * Capture-phase click interceptor for a rendered markdown surface (the WYSIWYG
  * contenteditable or the split-view preview pane). When a rendered anchor is
- * clicked it cancels the default action and routes the href to `onOpen`.
+ * clicked it cancels the default action. Ordinary clicks inspect the anchor;
+ * the platform's modifier-click intent is the only route to opening it.
  *
  * Why capture phase + preventDefault here instead of ProseMirror's
  * `editorProps.handleClick` or React's bubble-phase `onClick`: inside a Tauri
@@ -43,16 +56,21 @@ export function findClickedAnchorHref(
  */
 export function attachMarkdownLinkClickInterceptor(
   surface: HTMLElement,
-  onOpen: (href: string, options: { openInNewTab: boolean }) => void,
+  handlers: MarkdownLinkClickHandlers,
 ): () => void {
   const handleClick = (event: MouseEvent) => {
     // Left button only; let a prior handler that already acted win.
     if (event.button !== 0 || event.defaultPrevented) return;
-    const href = findClickedAnchorHref(event.target, surface);
-    if (!href) return;
+    const anchor = findClickedAnchor(event.target, surface);
+    const href = anchor?.getAttribute('href');
+    if (!anchor || !href) return;
     event.preventDefault();
     event.stopPropagation();
-    onOpen(href, { openInNewTab: event.metaKey || event.ctrlKey });
+    if (isOpenLinkClick(event)) {
+      handlers.onOpen(href, { openInNewTab: true });
+      return;
+    }
+    handlers.onInspect(anchor);
   };
   surface.addEventListener('click', handleClick, true);
   return () => surface.removeEventListener('click', handleClick, true);

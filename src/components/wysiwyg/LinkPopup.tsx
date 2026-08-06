@@ -194,6 +194,9 @@ export function LinkPopup({ editor, enabled = true }: Props) {
 
   useEffect(() => {
     if (!editor || !enabled) return;
+    if (typeof editor.on !== 'function' || typeof editor.off !== 'function') {
+      return;
+    }
 
     const onTransaction = ({ transaction }: { transaction: { docChanged: boolean } }) => {
       if (!transaction.docChanged) return;
