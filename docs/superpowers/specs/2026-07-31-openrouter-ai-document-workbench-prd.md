@@ -123,8 +123,8 @@ Acceptance criteria:
   남은 key limit, 만료일 중 API가 제공한 값만 표시한다.
 - 키 교체와 삭제를 지원한다. 삭제 후 모든 AI 실행 진입점은 설정 안내 상태로
   돌아간다.
-- 키 값이나 Authorization header는 오류, diagnostics, PostHog 이벤트에
-  포함되지 않는다.
+- 키 값이나 Authorization header는 오류나 diagnostics 로그에 포함되지 않으며
+  별도 분석 서비스로 보내지 않는다.
 - 최초 연결 시 문서 내용이 OpenRouter와 선택된 model provider로 전송된다는
   고지를 한 번 명시적으로 승인해야 한다.
 
