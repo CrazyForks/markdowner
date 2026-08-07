@@ -10025,44 +10025,6 @@ describe('App recent documents', () => {
     });
   });
 
-  it('persists Usage analytics opt-out from the Settings dialog through save_settings', async () => {
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'load_settings') {
-        return {
-          autoSave: false,
-          editorFontSize: 14,
-          editorFontFamily: '',
-          editorLineWrap: true,
-        };
-      }
-      return undefined;
-    });
-
-    const { default: App } = await import('./App');
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('load_settings');
-    });
-
-    fireEvent.keyDown(window, { key: ',', metaKey: true });
-
-    const dialog = await screen.findByTestId('settings-panel');
-    const analyticsToggle = within(dialog).getByLabelText(/share anonymous usage data/i);
-    await waitFor(() => {
-      expect(analyticsToggle).toHaveAttribute('data-state', 'checked');
-    });
-
-    fireEvent.click(analyticsToggle);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('save_settings', {
-        settings: expect.objectContaining({ analyticsEnabled: false }),
-      });
-    });
-  });
-
   it('records local diagnostics after Diagnostics Logging is enabled', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_settings') {

@@ -99,8 +99,6 @@ export interface Settings extends InlineStyleColorSettings {
   pdfPaperWidthMm: number;
   pdfPaperHeightMm: number;
   diagnosticsEnabled: boolean;
-  /** Opt-in (default on) sharing of anonymous, content-free usage analytics. */
-  analyticsEnabled: boolean;
   showMinimap: boolean;
   tableDensity: 'compact' | 'normal';
   tableViewMode: 'normal' | 'inline';
@@ -249,7 +247,6 @@ export const DEFAULT_SETTINGS: Settings = {
   pdfPaperWidthMm: DEFAULT_PDF_PAPER.paperWidthMm,
   pdfPaperHeightMm: DEFAULT_PDF_PAPER.paperHeightMm,
   diagnosticsEnabled: true,
-  analyticsEnabled: true,
   showMinimap: true,
   tableDensity: 'compact',
   tableViewMode: 'normal',
@@ -551,9 +548,6 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   }
   if (typeof merged.defaultAppPromptSeen !== 'boolean') {
     merged.defaultAppPromptSeen = DEFAULT_SETTINGS.defaultAppPromptSeen;
-  }
-  if (typeof merged.analyticsEnabled !== 'boolean') {
-    merged.analyticsEnabled = DEFAULT_SETTINGS.analyticsEnabled;
   }
   for (const key of [
     'aiPrdModel',

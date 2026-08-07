@@ -86,6 +86,13 @@ describe('SettingsPanel update section', () => {
     expect(screen.queryByText(/gfm|github flavored markdown/i)).toBeNull();
   });
 
+  it('does not expose anonymous usage data sharing', () => {
+    renderPanel();
+
+    expect(screen.queryByText(/share anonymous usage data/i)).toBeNull();
+    expect(screen.queryByTestId('settings-analytics-section')).toBeNull();
+  });
+
   it('shows the update action and fires onUpdateAction when available', () => {
     const onUpdateAction = vi.fn();
     renderPanel({ updateInfo: availableUpdate, onUpdateAction });
