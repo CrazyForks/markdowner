@@ -12,6 +12,7 @@ import {
   aiVerifyKey,
 } from '@/lib/desktop';
 
+import { PINNED_AI_MODEL_CHOICES } from './model';
 import type { AiKeyMetadata, AiKeyStatus } from './types';
 
 export interface OpenRouterSettingsServices {
@@ -424,11 +425,6 @@ export function OpenRouterSettings({
   );
 }
 
-const PINNED_MODEL_CHOICES = [
-  { id: 'z-ai/glm-5.2', label: 'GLM 5.2' },
-  { id: 'moonshotai/kimi-k3', label: 'Kimi K3' },
-] as const;
-
 function ModelDefaultSelect({
   id,
   label,
@@ -440,7 +436,7 @@ function ModelDefaultSelect({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const known = PINNED_MODEL_CHOICES.some((choice) => choice.id === value);
+  const known = PINNED_AI_MODEL_CHOICES.some((choice) => choice.id === value);
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{label}</Label>
@@ -451,7 +447,7 @@ function ModelDefaultSelect({
         onChange={(event) => onChange(event.target.value)}
       >
         {!known ? <option value={value}>{value} · unavailable</option> : null}
-        {PINNED_MODEL_CHOICES.map((choice) => (
+        {PINNED_AI_MODEL_CHOICES.map((choice) => (
           <option key={choice.id} value={choice.id}>
             {choice.label} · {choice.id}
           </option>

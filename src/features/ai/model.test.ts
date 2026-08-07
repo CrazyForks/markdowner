@@ -32,11 +32,17 @@ function model(overrides: Partial<AiModel>): AiModel {
 }
 
 describe('AI model policy', () => {
-  it('uses GLM by default and pins Kimi directly after it', () => {
+  it('uses GLM by default and pins the curated popular model catalog', () => {
     expect(DEFAULT_AI_MODEL).toBe('z-ai/glm-5.2');
     expect(PINNED_AI_MODELS).toEqual([
       'z-ai/glm-5.2',
       'moonshotai/kimi-k3',
+      'deepseek/deepseek-v4-flash-0731',
+      'google/gemini-3.6-flash',
+      'minimax/minimax-m3',
+      'anthropic/claude-sonnet-4.6',
+      'openai/gpt-oss-120b',
+      'x-ai/grok-4.5',
     ]);
   });
 
@@ -50,10 +56,14 @@ describe('AI model policy', () => {
       'translation',
     );
 
-    expect(options.slice(0, 2).map((entry) => entry.id)).toEqual([
-      'z-ai/glm-5.2',
-      'moonshotai/kimi-k3',
-    ]);
+    expect(options.slice(0, PINNED_AI_MODELS.length).map((entry) => entry.id)).toEqual(
+      PINNED_AI_MODELS,
+    );
+    expect(options.find((entry) => entry.id === 'openai/gpt-oss-120b')).toMatchObject({
+      contextLength: 131_072,
+      pinned: true,
+      enabled: true,
+    });
     expect(options.find((entry) => entry.id === 'plain/text')).toMatchObject({
       enabled: false,
       disabledReason: 'Structured output is required for this task.',

@@ -25,6 +25,39 @@ const defaultProps = {
 };
 
 describe('OpenRouterSettings', () => {
+  it('offers popular OpenRouter models for every task default', () => {
+    render(
+      <OpenRouterSettings
+        {...defaultProps}
+        zdrOnly
+        disclosureAccepted
+        onZdrOnlyChange={vi.fn()}
+        onDisclosureAcceptedChange={vi.fn()}
+        services={{
+          keyStatus: vi.fn().mockResolvedValue({ configured: false, maskedLabel: null }),
+          saveKey: vi.fn(),
+          verifyKey: vi.fn(),
+          deleteKey: vi.fn(),
+        }}
+      />,
+    );
+
+    const summaryModels = Array.from(
+      (screen.getByLabelText('Summary default model') as HTMLSelectElement).options,
+      (option) => option.value,
+    );
+    expect(summaryModels).toEqual([
+      'z-ai/glm-5.2',
+      'moonshotai/kimi-k3',
+      'deepseek/deepseek-v4-flash-0731',
+      'google/gemini-3.6-flash',
+      'minimax/minimax-m3',
+      'anthropic/claude-sonnet-4.6',
+      'openai/gpt-oss-120b',
+      'x-ai/grok-4.5',
+    ]);
+  });
+
   it('changes Summary defaults without changing Translation language', async () => {
     const onSummaryModelChange = vi.fn();
     const onSummaryTargetLanguageChange = vi.fn();

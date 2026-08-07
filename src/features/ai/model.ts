@@ -10,20 +10,36 @@ import type {
 export type { AiModel, AiModelOption, AiScope, AiTask } from './types';
 
 export const DEFAULT_AI_MODEL = 'z-ai/glm-5.2';
-export const PINNED_AI_MODELS = [
-  DEFAULT_AI_MODEL,
-  'moonshotai/kimi-k3',
+export const PINNED_AI_MODEL_CHOICES = [
+  { id: DEFAULT_AI_MODEL, label: 'GLM 5.2', contextLength: 1_048_576 },
+  { id: 'moonshotai/kimi-k3', label: 'Kimi K3', contextLength: 1_048_576 },
+  {
+    id: 'deepseek/deepseek-v4-flash-0731',
+    label: 'DeepSeek V4 Flash',
+    contextLength: 1_048_576,
+  },
+  {
+    id: 'google/gemini-3.6-flash',
+    label: 'Gemini 3.6 Flash',
+    contextLength: 1_048_576,
+  },
+  { id: 'minimax/minimax-m3', label: 'MiniMax M3', contextLength: 1_048_576 },
+  {
+    id: 'anthropic/claude-sonnet-4.6',
+    label: 'Claude Sonnet 4.6',
+    contextLength: 1_000_000,
+  },
+  { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B', contextLength: 131_072 },
+  { id: 'x-ai/grok-4.5', label: 'Grok 4.5', contextLength: 500_000 },
 ] as const;
+type PinnedAiModelId = (typeof PINNED_AI_MODEL_CHOICES)[number]['id'];
+export const PINNED_AI_MODELS: readonly PinnedAiModelId[] =
+  PINNED_AI_MODEL_CHOICES.map((choice) => choice.id);
 export const WHOLE_DOCUMENT_TOKEN_LIMIT = 50_000;
 export const SELECTION_TOKEN_LIMIT = 20_000;
 export const DEFAULT_AI_OUTPUT_TOKEN_LIMIT = 4_096;
 export const PRD_AI_OUTPUT_TOKEN_LIMIT = 16_384;
 export const SUMMARY_SOURCE_LANGUAGE = 'source';
-
-const PINNED_NAMES: Record<(typeof PINNED_AI_MODELS)[number], string> = {
-  'z-ai/glm-5.2': 'GLM 5.2',
-  'moonshotai/kimi-k3': 'Kimi K3',
-};
 
 const COMMON_LANGUAGE_CODES = [
   'ko',
@@ -106,12 +122,13 @@ export interface TranslationLanguage {
 
 export type DetectedDocumentLanguage = 'en' | 'ja' | 'ko' | 'zh';
 
-function fallbackPinnedModel(id: (typeof PINNED_AI_MODELS)[number]): AiModel {
+function fallbackPinnedModel(id: PinnedAiModelId): AiModel {
+  const choice = PINNED_AI_MODEL_CHOICES.find((candidate) => candidate.id === id)!;
   return {
     id,
-    name: PINNED_NAMES[id],
+    name: choice.label,
     description: 'Pinned OpenRouter model; live availability is checked before running.',
-    contextLength: 1_048_576,
+    contextLength: choice.contextLength,
     inputModalities: ['text'],
     outputModalities: ['text'],
     supportedParameters: ['response_format', 'structured_outputs'],
@@ -153,10 +170,10 @@ export function orderModels(
   return [...byId.values()]
     .sort((left, right) => {
       const leftPinned = PINNED_AI_MODELS.indexOf(
-        left.id as (typeof PINNED_AI_MODELS)[number],
+        left.id as PinnedAiModelId,
       );
       const rightPinned = PINNED_AI_MODELS.indexOf(
-        right.id as (typeof PINNED_AI_MODELS)[number],
+        right.id as PinnedAiModelId,
       );
       if (leftPinned >= 0 || rightPinned >= 0) {
         if (leftPinned < 0) return 1;
@@ -172,7 +189,7 @@ export function orderModels(
       return {
         ...model,
         pinned: PINNED_AI_MODELS.includes(
-          model.id as (typeof PINNED_AI_MODELS)[number],
+          model.id as PinnedAiModelId,
         ),
         enabled,
         disabledReason: enabled
