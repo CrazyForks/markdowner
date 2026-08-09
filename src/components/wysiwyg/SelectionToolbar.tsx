@@ -253,7 +253,7 @@ export function SelectionToolbar({
         <>
           <span aria-hidden className="selection-toolbar-separator" />
           <ToolbarButton
-            label="AI prompt"
+            label="AI actions"
             active={false}
             onClick={() => {
               if (!editor) return;

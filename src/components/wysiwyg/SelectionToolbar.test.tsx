@@ -134,7 +134,7 @@ describe('SelectionToolbar', () => {
       editor.emit('selectionUpdate');
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'AI prompt' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'AI actions' }));
 
     expect(onAiSelection).toHaveBeenCalledWith({ from: 2, to: 6 });
   });

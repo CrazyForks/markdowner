@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { LoaderCircle, Sparkles, Square, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,11 @@ import type { Settings } from '@/lib/settings';
 
 import { orderModels, resolveUsageCost } from './model';
 import type { AiSelectionSnapshot } from './selection';
+import {
+  resolveSelectionInstruction,
+  SELECTION_ACTIONS,
+  type SelectionActionId,
+} from './selectionActions';
 import type {
   AiKeyStatus,
   AiModel,
@@ -40,6 +45,7 @@ export interface AiSelectionPopoverProps {
     snapshot: AiSelectionSnapshot,
     request: AiRunRequest,
   ) => void;
+  onLocalAgent?: (snapshot: AiSelectionSnapshot) => void;
   services?: AiSelectionServices;
 }
 
@@ -55,15 +61,18 @@ export function AiSelectionPopover({
   settings,
   onClose,
   onResult,
+  onLocalAgent,
   services = DEFAULT_SERVICES,
 }: AiSelectionPopoverProps) {
   const [prompt, setPrompt] = useState('');
+  const [actionId, setActionId] = useState<SelectionActionId>('improve');
   const [models, setModels] = useState<AiModel[]>([]);
   const [model, setModel] = useState(settings.aiCustomPromptModel);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [runningRequestId, setRunningRequestId] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,10 +111,11 @@ export function AiSelectionPopover({
     modelOptions.find((candidate) => candidate.id === model) ??
     modelOptions[0] ??
     null;
+  const instruction = resolveSelectionInstruction(actionId, prompt);
   const canRun =
     configured === true &&
     settings.aiCloudDisclosureAccepted &&
-    prompt.trim().length > 0 &&
+    instruction !== null &&
     selectedModel?.enabled === true &&
     !runningRequestId;
 
@@ -120,7 +130,7 @@ export function AiSelectionPopover({
       task: 'custom',
       model: selectedModel.id,
       targetLanguage: null,
-      instruction: prompt.trim(),
+      instruction,
       zdrOnly: settings.aiZdrOnly,
       maxOutputTokens: 4_096,
       recordHistory: settings.aiHistoryEnabled,
@@ -205,14 +215,35 @@ export function AiSelectionPopover({
 
       <div className="mt-3 grid gap-3">
         <div className="grid gap-1.5">
+          <div className="flex flex-wrap gap-1.5" aria-label="Selection actions">
+            {SELECTION_ACTIONS.map((action) => (
+              <Button
+                key={action.id}
+                type="button"
+                size="sm"
+                variant={actionId === action.id ? 'secondary' : 'outline'}
+                aria-pressed={actionId === action.id}
+                disabled={Boolean(runningRequestId)}
+                onClick={() => {
+                  setActionId(action.id);
+                  if (action.id === 'custom') promptRef.current?.focus();
+                }}
+              >
+                {action.label}
+              </Button>
+            ))}
+          </div>
           <Label htmlFor="ai-selection-prompt">Prompt for selected text</Label>
           <textarea
             id="ai-selection-prompt"
-            autoFocus
+            ref={promptRef}
             rows={3}
             value={prompt}
             disabled={Boolean(runningRequestId)}
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) => {
+              setPrompt(event.target.value);
+              setActionId('custom');
+            }}
             placeholder="Describe how to transform only this selection…"
             className="w-full resize-y rounded-md border border-input bg-background px-2 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
@@ -261,14 +292,23 @@ export function AiSelectionPopover({
               Cancel
             </Button>
           ) : (
-            <Button
-              type="button"
-              onClick={() => void handleRun()}
-              disabled={!canRun}
-            >
-              <Sparkles />
-              Run on selection
-            </Button>
+            <>
+              <Button
+                type="button"
+                onClick={() => void handleRun()}
+                disabled={!canRun}
+              >
+                <Sparkles />
+                Run on selection
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onLocalAgent?.(snapshot)}
+              >
+                Use local agent
+              </Button>
+            </>
           )}
           <span className="text-[11px] text-muted-foreground">
             {settings.aiZdrOnly ? 'ZDR only' : 'Provider retention allowed'}

@@ -111,4 +111,58 @@ describe('AiSelectionPopover', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('selects presets without running and delegates local-agent actions', async () => {
+    const snapshot = captureSourceSelection('alpha beta', 6, 10, 'doc-1');
+    if (!snapshot) throw new Error('selection required');
+    const run = vi.fn();
+    const onLocalAgent = vi.fn();
+
+    render(
+      <AiSelectionPopover
+        snapshot={snapshot}
+        settings={{ ...DEFAULT_SETTINGS, aiCloudDisclosureAccepted: true }}
+        onClose={vi.fn()}
+        onResult={vi.fn()}
+        onLocalAgent={onLocalAgent}
+        services={{
+          keyStatus: vi.fn(async () => ({ configured: true, maskedLabel: 'sk-or-…test' })),
+          listModels: vi.fn(async () => []),
+          run,
+          cancel: vi.fn(async () => true),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Improve' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Make table' }));
+    expect(run).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Use local agent' }));
+    expect(onLocalAgent).toHaveBeenCalledWith(snapshot);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('focuses the custom instruction field when selected', () => {
+    const snapshot = captureSourceSelection('alpha beta', 6, 10, 'doc-1');
+    if (!snapshot) throw new Error('selection required');
+    render(
+      <AiSelectionPopover
+        snapshot={snapshot}
+        settings={DEFAULT_SETTINGS}
+        onClose={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn(async () => ({ configured: false, maskedLabel: null })),
+          listModels: vi.fn(),
+          run: vi.fn(),
+          cancel: vi.fn(),
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Custom instruction' }));
+    expect(screen.getByLabelText('Prompt for selected text')).toHaveFocus();
+  });
 });
