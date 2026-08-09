@@ -54,7 +54,7 @@ export function isValidLocalAgentTargetSnapshot(
   if (snapshot.surface === 'source') return snapshot.proseMirrorRange === null;
   return (
     snapshot.proseMirrorRange !== null &&
-    isProseMirrorRangeValid(snapshot.proseMirrorRange) &&
+    isProseMirrorRangeOrdered(snapshot.proseMirrorRange) &&
     (snapshot.proseMirrorRange.start === snapshot.proseMirrorRange.end) ===
       collapsed
   );
@@ -84,7 +84,7 @@ export function captureWysiwygLocalAgentTarget(input: {
   markdownEnd?: number;
   proseMirrorFrom: number;
   proseMirrorTo: number;
-  proseMirrorDocumentSize?: number;
+  proseMirrorDocumentSize: number;
   documentId: string;
 }): LocalAgentTargetSnapshot | null {
   const anchor = input.markdownAnchor ?? input.markdownStart;
@@ -96,7 +96,10 @@ export function captureWysiwygLocalAgentTarget(input: {
     end: input.proseMirrorTo,
   };
   if (
-    !isProseMirrorRangeValid(proseMirrorRange, input.proseMirrorDocumentSize)
+    !isProseMirrorRangeWithinDocument(
+      proseMirrorRange,
+      input.proseMirrorDocumentSize,
+    )
   ) {
     return null;
   }
@@ -181,7 +184,7 @@ export function applyWysiwygLocalAgentResult(input: {
         ) => { run: () => boolean };
       };
     };
-    state?: { doc: { content: { size: number } } };
+    state: { doc: { content: { size: number } } };
   };
   snapshot: LocalAgentTargetSnapshot;
   currentDocumentId: string;
@@ -194,10 +197,11 @@ export function applyWysiwygLocalAgentResult(input: {
   if (input.snapshot.surface !== 'wysiwyg' || !range || !proseMirrorRange) {
     return false;
   }
+  const documentSize = input.editor.state?.doc?.content?.size;
   if (
-    !isProseMirrorRangeValid(
+    !isProseMirrorRangeWithinDocument(
       proseMirrorRange,
-      input.editor.state?.doc.content.size,
+      documentSize,
     )
   ) {
     return false;
@@ -307,14 +311,28 @@ function isRangeWithin(range: AiByteRange, maximum: number): boolean {
   );
 }
 
-function isProseMirrorRangeValid(
+function isProseMirrorRangeOrdered(
   range: AiByteRange,
-  documentSize?: number,
 ): boolean {
-  if (!isRangeWithin(range, documentSize ?? Number.MAX_SAFE_INTEGER)) {
-    return false;
-  }
-  return documentSize === undefined || Number.isInteger(documentSize);
+  return (
+    Number.isInteger(range.start) &&
+    Number.isInteger(range.end) &&
+    range.start >= 0 &&
+    range.end >= range.start
+  );
+}
+
+function isProseMirrorRangeWithinDocument(
+  range: AiByteRange,
+  documentSize: unknown,
+): boolean {
+  return (
+    typeof documentSize === 'number' &&
+    Number.isInteger(documentSize) &&
+    documentSize >= 0 &&
+    isProseMirrorRangeOrdered(range) &&
+    range.end <= documentSize
+  );
 }
 
 function clampCharacterOffset(source: string, value: number): number {

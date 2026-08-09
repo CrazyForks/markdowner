@@ -97,6 +97,7 @@ describe('local-agent targets', () => {
       markdownHead: 10,
       proseMirrorFrom: 7,
       proseMirrorTo: 11,
+      proseMirrorDocumentSize: 12,
       documentId: 'doc-1',
     });
     expect(target).toMatchObject({
@@ -118,6 +119,16 @@ describe('local-agent targets', () => {
   });
 
   it('requires WYSIWYG markdown and ProseMirror ranges to have the same collapse state', () => {
+    expect(
+      captureWysiwygLocalAgentTarget({
+        source: 'alpha',
+        markdownAnchor: 2,
+        markdownHead: 2,
+        proseMirrorFrom: 7,
+        proseMirrorTo: 7,
+        documentId: 'doc-1',
+      } as never),
+    ).toBeNull();
     expect(
       captureWysiwygLocalAgentTarget({
         source: 'alpha',
@@ -265,6 +276,7 @@ describe('local-agent targets', () => {
       markdownHead: 10,
       proseMirrorFrom: 7,
       proseMirrorTo: 11,
+      proseMirrorDocumentSize: 12,
       documentId: 'doc-1',
     });
     if (!snapshot) throw new Error('target required');
@@ -302,6 +314,7 @@ describe('local-agent targets', () => {
       markdownHead: 2,
       proseMirrorFrom: 7,
       proseMirrorTo: 7,
+      proseMirrorDocumentSize: 12,
       documentId: 'doc-1',
     });
     if (!snapshot) throw new Error('target required');
@@ -324,6 +337,33 @@ describe('local-agent targets', () => {
       }),
     ).toBe(false);
     expect(insertContentAt).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before starting a WYSIWYG chain without the current document size', () => {
+    const snapshot = captureWysiwygLocalAgentTarget({
+      source: 'alpha',
+      markdownAnchor: 2,
+      markdownHead: 2,
+      proseMirrorFrom: 7,
+      proseMirrorTo: 7,
+      proseMirrorDocumentSize: 12,
+      documentId: 'doc-1',
+    });
+    if (!snapshot) throw new Error('target required');
+    const request = requestFor(snapshot);
+    const chain = vi.fn();
+
+    expect(
+      applyWysiwygLocalAgentResult({
+        editor: { chain } as never,
+        snapshot,
+        currentDocumentId: 'doc-1',
+        currentSource: 'alpha',
+        request,
+        result: resultFor(request),
+      }),
+    ).toBe(false);
+    expect(chain).not.toHaveBeenCalled();
   });
 
   it('converts any captured target into a range-free document target', () => {
