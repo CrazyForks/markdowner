@@ -277,12 +277,32 @@ fn parse_claude_result(bytes: &[u8]) -> Result<LocalAgentPayload, LocalAgentErro
     if output.result_type != "result"
         || output.subtype != "success"
         || output.is_error
+        || !matches!(output.terminal_reason, ClaudeTerminalReason::Completed)
+        || output.api_error_status.is_some()
         || output.num_turns == 0
         || output.session_id.is_empty()
         || output.uuid.is_empty()
+        || output
+            .user_message_uuid
+            .as_ref()
+            .is_some_and(ClaudeString::is_empty)
+        || output
+            .origin
+            .as_ref()
+            .is_some_and(|origin| !origin.has_valid_metadata())
+        || output
+            .request_sent_wall_ms
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        || output
+            .time_origin_ms
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
         || output.result.contains('\0')
         || output.session_id.contains('\0')
         || output.uuid.contains('\0')
+        || matches!(
+            output.stop_reason.as_deref(),
+            Some("tool_deferred" | "tool_deferred_unavailable")
+        )
         || output
             .stop_reason
             .as_deref()
@@ -290,18 +310,28 @@ fn parse_claude_result(bytes: &[u8]) -> Result<LocalAgentPayload, LocalAgentErro
         || !output.total_cost_usd.is_finite()
         || output.total_cost_usd < 0.0
         || !output.permission_denials.is_empty()
-        || !output.errors.is_empty()
+        || output.deferred_tool_use.is_some()
     {
         return Err(LocalAgentError::InvalidAdapterResult);
     }
     let _documented_metadata = (
         output.duration_ms,
         output.duration_api_ms,
+        output.ttft_ms,
+        output.ttft_stream_ms,
+        output.time_to_request_ms,
+        output.user_message_uuid,
+        output.request_sent_wall_ms,
+        output.time_to_request_from_spawn_ms,
+        output.warm_spare_claimed,
+        output.time_origin_ms,
         output.result,
         output.stop_reason,
         output.usage,
         output.model_usage,
         output.fast_mode_state,
+        output.fast_mode_disabled_reason,
+        output.origin,
     );
     validate_payload(output.structured_output)
 }
@@ -526,25 +556,48 @@ struct ClaudeResultEnvelope {
     #[serde(rename = "type")]
     result_type: String,
     subtype: String,
-    is_error: bool,
     duration_ms: u64,
     duration_api_ms: u64,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    ttft_ms: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    ttft_stream_ms: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    time_to_request_ms: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    user_message_uuid: Option<ClaudeString>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    request_sent_wall_ms: Option<f64>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    time_to_request_from_spawn_ms: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    warm_spare_claimed: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    time_origin_ms: Option<f64>,
+    is_error: bool,
+    #[serde(default)]
+    api_error_status: Option<i64>,
     num_turns: u64,
     result: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     stop_reason: Option<String>,
-    session_id: String,
     total_cost_usd: f64,
     usage: DuplicateSafeObject,
     #[serde(rename = "modelUsage")]
     model_usage: DuplicateSafeObject,
-    permission_denials: Vec<DuplicateSafeIgnored>,
+    permission_denials: Vec<ClaudePermissionDenial>,
     structured_output: LocalAgentPayload,
-    uuid: String,
-    #[serde(default)]
-    errors: Vec<String>,
-    #[serde(default, deserialize_with = "deserialize_fast_mode_state")]
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    deferred_tool_use: Option<ClaudeDeferredToolUse>,
+    terminal_reason: ClaudeTerminalReason,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
     fast_mode_state: Option<ClaudeFastModeState>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    fast_mode_disabled_reason: Option<ClaudeFastModeDisabledReason>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+    origin: Option<ClaudeMessageOrigin>,
+    uuid: String,
+    session_id: String,
 }
 
 #[derive(Deserialize)]
@@ -555,13 +608,205 @@ enum ClaudeFastModeState {
     Cooldown,
 }
 
-fn deserialize_fast_mode_state<'de, D>(
-    deserializer: D,
-) -> Result<Option<ClaudeFastModeState>, D::Error>
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ClaudeFastModeDisabledReason {
+    Free,
+    Preference,
+    ExtraUsageDisabled,
+    NetworkError,
+    Unknown,
+    NotFirstParty,
+    DisabledByEnv,
+    ModelNotAllowed,
+    SdkOptInRequired,
+    Pending,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ClaudeTerminalReason {
+    BlockingLimit,
+    RapidRefillBreaker,
+    PromptTooLong,
+    ImageError,
+    ModelError,
+    ApiError,
+    MalformedToolUseExhausted,
+    AbortedStreaming,
+    AbortedTools,
+    StopHookPrevented,
+    HookStopped,
+    ToolDeferred,
+    MaxTurns,
+    BackgroundRequested,
+    Completed,
+    BudgetExhausted,
+    StructuredOutputRetryExhausted,
+    ToolDeferredUnavailable,
+    TurnSetupFailed,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudePermissionDenial {
+    #[serde(rename = "tool_name")]
+    _tool_name: ClaudeString,
+    #[serde(rename = "tool_use_id")]
+    _tool_use_id: ClaudeString,
+    #[serde(rename = "tool_input")]
+    _tool_input: DuplicateSafeObject,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClaudeDeferredToolUse {
+    #[serde(rename = "id")]
+    _id: ClaudeString,
+    #[serde(rename = "name")]
+    _name: ClaudeString,
+    #[serde(rename = "input")]
+    _input: DuplicateSafeObject,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+enum ClaudeMessageOrigin {
+    #[serde(rename = "human")]
+    Human {},
+    #[serde(rename = "channel")]
+    Channel { server: ClaudeString },
+    #[serde(rename = "peer")]
+    Peer {
+        from: ClaudeString,
+        #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+        name: Option<ClaudeString>,
+        #[serde(
+            default,
+            rename = "fromSession",
+            deserialize_with = "deserialize_non_null_optional"
+        )]
+        from_session: Option<ClaudeString>,
+        #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+        inbound_origin: Option<ClaudeString>,
+        #[serde(
+            default,
+            rename = "senderTaskId",
+            deserialize_with = "deserialize_non_null_optional"
+        )]
+        sender_task_id: Option<ClaudeString>,
+        #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+        body: Option<ClaudeString>,
+        #[serde(
+            default,
+            rename = "verifiedPeerPid",
+            deserialize_with = "deserialize_non_null_optional"
+        )]
+        verified_peer_pid: Option<f64>,
+    },
+    #[serde(rename = "task-notification")]
+    TaskNotification {
+        #[serde(default, deserialize_with = "deserialize_non_null_optional")]
+        subkind: Option<ClaudeTaskNotificationSubkind>,
+    },
+    #[serde(rename = "coordinator")]
+    Coordinator {},
+    #[serde(rename = "unclassified")]
+    Unclassified {},
+    #[serde(rename = "observer")]
+    Observer {
+        from: ClaudeString,
+        #[serde(rename = "senderTaskId")]
+        sender_task_id: ClaudeString,
+    },
+    #[serde(rename = "auto-continuation")]
+    AutoContinuation {},
+    #[serde(rename = "observer-activity")]
+    ObserverActivity {},
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ClaudeTaskNotificationSubkind {
+    ScheduledTrigger,
+    PeerSendMessage,
+}
+
+struct ClaudeString(String);
+
+impl ClaudeString {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl ClaudeMessageOrigin {
+    fn has_valid_metadata(&self) -> bool {
+        match self {
+            Self::Human {}
+            | Self::Coordinator {}
+            | Self::Unclassified {}
+            | Self::AutoContinuation {}
+            | Self::ObserverActivity {} => true,
+            Self::Channel { server } => !server.is_empty(),
+            Self::Peer {
+                from,
+                name,
+                from_session,
+                inbound_origin,
+                sender_task_id,
+                body,
+                verified_peer_pid,
+            } => {
+                !from.is_empty()
+                    && [name, from_session, inbound_origin, sender_task_id, body]
+                        .into_iter()
+                        .flatten()
+                        .all(|value| !value.is_empty())
+                    && verified_peer_pid.is_none_or(|value| value.is_finite() && value >= 0.0)
+            }
+            Self::TaskNotification { subkind } => {
+                let _documented_subkind = subkind;
+                true
+            }
+            Self::Observer {
+                from,
+                sender_task_id,
+            } => !from.is_empty() && !sender_task_id.is_empty(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ClaudeString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        if value.contains('\0') {
+            Err(serde::de::Error::custom(
+                "NUL is not allowed in Claude metadata strings",
+            ))
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+fn deserialize_non_null_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
 {
-    ClaudeFastModeState::deserialize(deserializer).map(Some)
+    T::deserialize(deserializer).map(Some)
+}
+
+fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
 }
 
 #[derive(Deserialize)]
@@ -878,7 +1123,7 @@ mod tests {
 
     fn claude_success(payload: &str) -> String {
         format!(
-            r#"{{"type":"result","subtype":"success","is_error":false,"duration_ms":20,"duration_api_ms":15,"num_turns":1,"result":"ignored prose","stop_reason":null,"session_id":"session-1","total_cost_usd":0.01,"usage":{{"input_tokens":4,"output_tokens":2}},"modelUsage":{{"claude-test":{{"inputTokens":4,"outputTokens":2}}}},"permission_denials":[],"structured_output":{payload},"uuid":"result-1","fast_mode_state":"off"}}"#
+            r#"{{"type":"result","subtype":"success","duration_ms":20,"duration_api_ms":15,"ttft_ms":8,"ttft_stream_ms":9,"time_to_request_ms":3,"user_message_uuid":"user-message-1","request_sent_wall_ms":1720000000000.5,"time_to_request_from_spawn_ms":2,"warm_spare_claimed":true,"time_origin_ms":1720000000000.25,"is_error":false,"api_error_status":null,"num_turns":1,"result":"ignored prose","stop_reason":null,"total_cost_usd":0.01,"usage":{{"input_tokens":4,"output_tokens":2}},"modelUsage":{{"claude-test":{{"inputTokens":4,"outputTokens":2}}}},"permission_denials":[],"structured_output":{payload},"terminal_reason":"completed","fast_mode_state":"off","fast_mode_disabled_reason":"preference","origin":{{"kind":"human"}},"uuid":"result-1","session_id":"session-1"}}"#
         )
     }
 
@@ -1520,11 +1765,13 @@ mod tests {
             ),
             valid.replacen("\"is_error\":false,", "", 1),
             valid.replacen("\"is_error\":false", "\"is_error\":true", 1),
+            valid.replacen("\"stop_reason\":null,", "", 1),
             valid.replacen(
                 "\"permission_denials\":[]",
-                "\"permission_denials\":[{\"tool_name\":\"Bash\"}]",
+                "\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"tool-1\",\"tool_input\":{\"command\":\"whoami\"}}]",
                 1,
             ),
+            valid.replacen("\"api_error_status\":null", "\"api_error_status\":500", 1),
             valid.replacen(
                 "\"structured_output\":",
                 "\"errors\":[\"provider failed\"],\"structured_output\":",
@@ -1535,6 +1782,11 @@ mod tests {
             valid.replacen(
                 "\"result\":\"ignored prose\"",
                 "\"result\":\"ignored\\u0000prose\"",
+                1,
+            ),
+            valid.replacen(
+                "\"user_message_uuid\":\"user-message-1\"",
+                "\"user_message_uuid\":\"user\\u0000-message-1\"",
                 1,
             ),
             valid.replacen(
@@ -1556,6 +1808,219 @@ mod tests {
             assert!(
                 parse_adapter_result(LocalAgentKind::Claude, wrapper.as_bytes(), None).is_err(),
                 "accepted invalid Claude wrapper: {wrapper}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_requires_the_pinned_normal_completion_reason() {
+        let valid = claude_success(VALID_PAYLOAD);
+        let legacy_without_terminal_reason = format!(
+            r#"{{"type":"result","subtype":"success","is_error":false,"duration_ms":20,"duration_api_ms":15,"num_turns":1,"result":"ignored prose","stop_reason":null,"session_id":"session-1","total_cost_usd":0.01,"usage":{{"input_tokens":4,"output_tokens":2}},"modelUsage":{{"claude-test":{{"inputTokens":4,"outputTokens":2}}}},"permission_denials":[],"structured_output":{VALID_PAYLOAD},"uuid":"result-1","fast_mode_state":"off"}}"#
+        );
+
+        for wrapper in [
+            valid.replacen("\"terminal_reason\":\"completed\",", "", 1),
+            valid.replacen(
+                "\"terminal_reason\":\"completed\"",
+                "\"terminal_reason\":\"max_turns\"",
+                1,
+            ),
+            legacy_without_terminal_reason,
+        ] {
+            assert!(
+                parse_adapter_result(LocalAgentKind::Claude, wrapper.as_bytes(), None).is_err(),
+                "accepted missing or unsuccessful Claude terminal reason: {wrapper}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_types_the_pinned_optional_success_metadata() {
+        let valid = claude_success(VALID_PAYLOAD);
+        for wrapper in [
+            valid.replacen(
+                "\"api_error_status\":null",
+                "\"api_error_status\":\"500\"",
+                1,
+            ),
+            valid.replacen("\"ttft_ms\":8", "\"ttft_ms\":null", 1),
+            valid.replacen("\"ttft_stream_ms\":9", "\"ttft_stream_ms\":false", 1),
+            valid.replacen("\"time_to_request_ms\":3", "\"time_to_request_ms\":{}", 1),
+            valid.replacen(
+                "\"user_message_uuid\":\"user-message-1\"",
+                "\"user_message_uuid\":null",
+                1,
+            ),
+            valid.replacen(
+                "\"request_sent_wall_ms\":1720000000000.5",
+                "\"request_sent_wall_ms\":[]",
+                1,
+            ),
+            valid.replacen(
+                "\"request_sent_wall_ms\":1720000000000.5",
+                "\"request_sent_wall_ms\":-1",
+                1,
+            ),
+            valid.replacen(
+                "\"time_to_request_from_spawn_ms\":2",
+                "\"time_to_request_from_spawn_ms\":\"2\"",
+                1,
+            ),
+            valid.replacen("\"warm_spare_claimed\":true", "\"warm_spare_claimed\":1", 1),
+            valid.replacen(
+                "\"time_origin_ms\":1720000000000.25",
+                "\"time_origin_ms\":null",
+                1,
+            ),
+            valid.replacen(
+                "\"fast_mode_disabled_reason\":\"preference\"",
+                "\"fast_mode_disabled_reason\":null",
+                1,
+            ),
+            valid.replacen(
+                "\"fast_mode_disabled_reason\":\"preference\"",
+                "\"fast_mode_disabled_reason\":\"future-reason\"",
+                1,
+            ),
+            valid.replacen("\"origin\":{\"kind\":\"human\"}", "\"origin\":false", 1),
+            valid.replacen(
+                "\"origin\":{\"kind\":\"human\"}",
+                "\"origin\":{\"kind\":\"channel\"}",
+                1,
+            ),
+            valid.replacen(
+                "\"origin\":{\"kind\":\"human\"}",
+                "\"origin\":{\"kind\":\"human\",\"extra\":true}",
+                1,
+            ),
+        ] {
+            assert!(
+                parse_adapter_result(LocalAgentKind::Claude, wrapper.as_bytes(), None).is_err(),
+                "accepted invalid Claude 2.1.226 metadata kind: {wrapper}"
+            );
+        }
+
+        let optional_metadata_absent = valid
+            .replace("\"ttft_ms\":8,", "")
+            .replace("\"ttft_stream_ms\":9,", "")
+            .replace("\"time_to_request_ms\":3,", "")
+            .replace("\"user_message_uuid\":\"user-message-1\",", "")
+            .replace("\"request_sent_wall_ms\":1720000000000.5,", "")
+            .replace("\"time_to_request_from_spawn_ms\":2,", "")
+            .replace("\"warm_spare_claimed\":true,", "")
+            .replace("\"time_origin_ms\":1720000000000.25,", "")
+            .replace("\"api_error_status\":null,", "")
+            .replace("\"fast_mode_state\":\"off\",", "")
+            .replace("\"fast_mode_disabled_reason\":\"preference\",", "")
+            .replace("\"origin\":{\"kind\":\"human\"},", "");
+        assert!(
+            parse_adapter_result(
+                LocalAgentKind::Claude,
+                optional_metadata_absent.as_bytes(),
+                None
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn claude_rejects_deferred_tool_evidence_in_a_success_envelope() {
+        let valid = claude_success(VALID_PAYLOAD);
+        let deferred_payload = valid.replacen(
+            "\"terminal_reason\":",
+            "\"deferred_tool_use\":{\"id\":\"tool-1\",\"name\":\"Bash\",\"input\":{\"command\":\"whoami\"}},\"terminal_reason\":",
+            1,
+        );
+
+        for wrapper in [
+            deferred_payload,
+            valid.replacen(
+                "\"stop_reason\":null",
+                "\"stop_reason\":\"tool_deferred\"",
+                1,
+            ),
+            valid.replacen(
+                "\"stop_reason\":null",
+                "\"stop_reason\":\"tool_deferred_unavailable\"",
+                1,
+            ),
+        ] {
+            assert!(
+                parse_adapter_result(LocalAgentKind::Claude, wrapper.as_bytes(), None).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn claude_rejects_duplicate_pinned_metadata_keys() {
+        let valid = claude_success(VALID_PAYLOAD);
+        for wrapper in [
+            valid.replacen("\"ttft_ms\":8", "\"ttft_ms\":8,\"ttft_ms\":8", 1),
+            valid.replacen(
+                "\"terminal_reason\":\"completed\"",
+                "\"terminal_reason\":\"completed\",\"terminal_reason\":\"completed\"",
+                1,
+            ),
+            valid.replacen(
+                "\"origin\":{\"kind\":\"human\"}",
+                "\"origin\":{\"kind\":\"human\",\"kind\":\"human\"}",
+                1,
+            ),
+        ] {
+            assert!(
+                parse_adapter_result(LocalAgentKind::Claude, wrapper.as_bytes(), None).is_err(),
+                "accepted duplicate Claude 2.1.226 metadata key: {wrapper}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_accepts_each_pinned_fast_reason_and_origin_shape() {
+        let valid = claude_success(VALID_PAYLOAD);
+        for reason in [
+            "free",
+            "preference",
+            "extra_usage_disabled",
+            "network_error",
+            "unknown",
+            "not_first_party",
+            "disabled_by_env",
+            "model_not_allowed",
+            "sdk_opt_in_required",
+            "pending",
+        ] {
+            let wrapper = valid.replacen(
+                "\"fast_mode_disabled_reason\":\"preference\"",
+                &format!("\"fast_mode_disabled_reason\":\"{reason}\""),
+                1,
+            );
+            assert!(
+                parse_adapter_result(LocalAgentKind::Claude, wrapper.as_bytes(), None).is_ok(),
+                "rejected documented Claude fast-mode reason: {reason}"
+            );
+        }
+
+        for origin in [
+            r#"{"kind":"human"}"#,
+            r#"{"kind":"channel","server":"slack"}"#,
+            r#"{"kind":"peer","from":"session-2","name":"Peer","fromSession":"local_1","inbound_origin":"uds","senderTaskId":"task-1","body":"message","verifiedPeerPid":42}"#,
+            r#"{"kind":"task-notification","subkind":"scheduled-trigger"}"#,
+            r#"{"kind":"task-notification","subkind":"peer-send-message"}"#,
+            r#"{"kind":"coordinator"}"#,
+            r#"{"kind":"unclassified"}"#,
+            r#"{"kind":"observer","from":"agent-1","senderTaskId":"task-1"}"#,
+            r#"{"kind":"auto-continuation"}"#,
+            r#"{"kind":"observer-activity"}"#,
+        ] {
+            let wrapper = valid.replacen(
+                "\"origin\":{\"kind\":\"human\"}",
+                &format!("\"origin\":{origin}"),
+                1,
+            );
+            assert!(
+                parse_adapter_result(LocalAgentKind::Claude, wrapper.as_bytes(), None).is_ok(),
+                "rejected documented Claude origin: {origin}"
             );
         }
     }
