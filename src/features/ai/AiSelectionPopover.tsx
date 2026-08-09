@@ -301,13 +301,15 @@ export function AiSelectionPopover({
                 <Sparkles />
                 Run on selection
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onLocalAgent?.(snapshot)}
-              >
-                Use local agent
-              </Button>
+              {onLocalAgent ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onLocalAgent(snapshot)}
+                >
+                  Use local agent
+                </Button>
+              ) : null}
             </>
           )}
           <span className="text-[11px] text-muted-foreground">

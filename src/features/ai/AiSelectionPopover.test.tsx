@@ -164,5 +164,6 @@ describe('AiSelectionPopover', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Custom instruction' }));
     expect(screen.getByLabelText('Prompt for selected text')).toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Use local agent' })).toBeNull();
   });
 });
