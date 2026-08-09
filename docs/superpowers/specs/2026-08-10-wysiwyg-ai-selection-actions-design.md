@@ -313,27 +313,45 @@ calls. The adapter extracts only the validated structured-output field.
 ### Codex
 
 The Codex adapter requires exec mode, stdin input, ephemeral sessions,
-read-only sandboxing, output schema, output-last-message, strict config, and
-stable feature switches for shell and unified execution. It overrides the
-effective embedded session to disable shell/unified execution, code mode,
-apps, plugins, hooks, multi-agent behavior, standalone web search, and MCP
-servers. The fixed invocation uses the installed equivalent of:
+read-only sandboxing, output schema, output-last-message, strict config, and a
+machine-readable feature inventory. It overrides the effective embedded
+session to disable every current tool- or customization-bearing feature,
+including shell/unified execution, code mode, browser/computer control,
+Chronicle, image generation/viewing, apps, plugins, hooks, memories, skills,
+multi-agent behavior, standalone web search, workspace dependency discovery,
+update/network helpers, and MCP servers. The fixed invocation uses the
+installed equivalent of:
 
 ```text
 codex exec --strict-config --sandbox read-only --ephemeral
   --skip-git-repo-check --output-schema <owned-schema-file>
   --output-last-message <owned-result-file>
-  --disable shell_tool --disable unified_exec --disable code_mode
-  --disable code_mode_host --disable apps --disable plugins --disable hooks
-  --disable multi_agent --disable standalone_web_search
+  --disable apps --disable auth_elicitation
+  --disable browser_use --disable browser_use_external
+  --disable browser_use_full_cdp_access --disable chronicle
+  --disable code_mode --disable code_mode_host --disable computer_use
+  --disable enable_mcp_apps --disable goals --disable guardian_approval
+  --disable hooks --disable image_generation --disable in_app_browser
+  --disable in_app_updates --disable memories --disable multi_agent
+  --disable multi_agent_v2 --disable plugins --disable plugin_sharing
+  --disable recommended_plugins --disable remote_plugin
+  --disable shell_snapshot --disable shell_tool
+  --disable skill_mcp_dependency_install --disable skill_search
+  --disable standalone_web_search --disable tool_call_mcp_elicitation
+  --disable tool_suggest --disable unified_exec --disable view_image
+  --disable workspace_dependencies
   -c mcp_servers={} -
 ```
 
-Before enabling Codex, the adapter runs its feature probe with the same
-overrides and confirms the execution features are false. Read-only sandboxing
-is defense in depth rather than the only tool boundary. If a current Codex
-build renames, removes, ignores, or rejects a required switch, the adapter is
-incompatible and Run remains disabled.
+Before enabling Codex, the adapter runs `features list` with the same feature
+overrides (`features list` does not accept `--strict-config`) and confirms every
+denied feature is false. It also refuses an enabled feature outside a small
+versioned allowlist of passive protocol/model behavior, so a newly introduced
+capability fails closed until reviewed. Read-only sandboxing is defense in
+depth rather than the only tool boundary. If a current Codex build renames,
+removes, ignores, or rejects a required switch, exposes an unknown enabled
+capability, or changes the probe format, the adapter is incompatible and Run
+remains disabled.
 
 ### OpenCode
 
