@@ -1,7 +1,9 @@
 use std::{ffi::OsString, fmt, path::PathBuf};
 
+use markdowner_core::ai_document::ByteRange;
 use serde::{Deserialize, Serialize};
 
+pub mod adapters;
 mod discovery;
 
 pub fn discover_all() -> Vec<LocalAgentStatus> {
@@ -22,6 +24,37 @@ pub enum LocalAgentKind {
     Claude,
     Codex,
     Opencode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalAgentTargetKind {
+    Insert,
+    Selection,
+    Document,
+}
+
+impl LocalAgentTargetKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Insert => "insert",
+            Self::Selection => "selection",
+            Self::Document => "document",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalAgentRunRequest {
+    pub request_id: String,
+    pub document_id: String,
+    pub agent: LocalAgentKind,
+    pub target: LocalAgentTargetKind,
+    pub source: String,
+    pub selection: Option<ByteRange>,
+    pub cursor: Option<usize>,
+    pub instruction: String,
 }
 
 impl LocalAgentKind {
@@ -91,6 +124,9 @@ pub enum LocalAgentError {
     MalformedProbeOutput,
     ProbeFailed,
     Incompatible(&'static str),
+    InvalidAdapterRequest,
+    AdapterSetupFailed,
+    InvalidAdapterResult,
 }
 
 impl LocalAgentError {
@@ -103,6 +139,9 @@ impl LocalAgentError {
             Self::MalformedProbeOutput => "Capability probe returned malformed output.",
             Self::ProbeFailed => "Capability probe failed.",
             Self::Incompatible(reason) => reason,
+            Self::InvalidAdapterRequest => "The local agent request is invalid.",
+            Self::AdapterSetupFailed => "The local agent could not be prepared.",
+            Self::InvalidAdapterResult => "The agent returned an invalid result.",
         }
     }
 }
