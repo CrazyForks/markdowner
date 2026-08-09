@@ -13,11 +13,11 @@ use std::{
 use serde_json::Value;
 
 use super::{LocalAgentError, LocalAgentKind, LocalAgentStatus, ResolvedAgent};
-use crate::login_shell_path_value;
 
 pub(super) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_STDOUT_LIMIT: usize = 256 * 1024;
 const PROBE_STDERR_LIMIT: usize = 64 * 1024;
+const LOGIN_SHELL_PATH_LIMIT: usize = 64 * 1024;
 
 pub(super) const CAPABILITY_PROBE_TIMEOUT_REASON: &str = "Capability probe timed out.";
 const CLAUDE_FLAGS_REASON: &str = "Required Claude Code safety flags are unavailable.";
@@ -116,9 +116,12 @@ const OPEN_CODE_REQUIRED_PERMISSIONS: &[&str] = &[
     "webfetch",
     "websearch",
     "external_directory",
+    "todowrite",
+    "doom_loop",
 ];
 
-const OPEN_CODE_CONFIG_CONTENT: &str = r#"{"share":"disabled","permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny"}}"#;
+const OPEN_CODE_OWNED_AGENT: &str = "markdowner";
+const OPEN_CODE_CONFIG_CONTENT: &str = r#"{"share":"disabled","default_agent":"markdowner","tools":{"*":false,"edit":false},"permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","todowrite":"deny","doom_loop":"deny"},"agent":{"markdowner":{"mode":"primary","tools":{"*":false,"edit":false},"permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","todowrite":"deny","doom_loop":"deny"}}}}"#;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct ProbeOutput {
@@ -163,6 +166,7 @@ impl ProbeRunner for BoundedProbeRunner {
         let mut child = command
             .spawn()
             .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+        let process_group = ProbeProcessGroup::from_child(&child);
         let stdout = child
             .stdout
             .take()
@@ -182,18 +186,30 @@ impl ProbeRunner for BoundedProbeRunner {
                     thread::sleep(Duration::from_millis(10));
                 }
                 Ok(None) => {
-                    terminate_probe(&mut child);
+                    terminate_probe(process_group, &mut child);
                     return Err(LocalAgentError::ProbeTimedOut);
                 }
                 Err(_) => {
-                    terminate_probe(&mut child);
+                    terminate_probe(process_group, &mut child);
                     return Err(LocalAgentError::ProbeFailed);
                 }
             }
         };
 
-        let stdout = receive_probe_output(stdout_receiver, deadline)?;
-        let stderr = receive_probe_output(stderr_receiver, deadline)?;
+        let stdout = match receive_probe_output(stdout_receiver, deadline) {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                terminate_probe(process_group, &mut child);
+                return Err(error);
+            }
+        };
+        let stderr = match receive_probe_output(stderr_receiver, deadline) {
+            Ok(stderr) => stderr,
+            Err(error) => {
+                terminate_probe(process_group, &mut child);
+                return Err(error);
+            }
+        };
         Ok(ProbeOutput {
             success: status.success(),
             stdout,
@@ -213,26 +229,54 @@ fn configure_probe_process_group(command: &mut Command) {
 fn configure_probe_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
-fn terminate_probe(child: &mut std::process::Child) {
-    const SIGKILL: i32 = 9;
+#[derive(Clone, Copy)]
+struct ProbeProcessGroup(Option<i32>);
 
-    unsafe extern "C" {
-        fn kill(pid: i32, signal: i32) -> i32;
+#[cfg(unix)]
+impl ProbeProcessGroup {
+    fn from_child(child: &std::process::Child) -> Self {
+        Self(i32::try_from(child.id()).ok().filter(|pid| *pid > 0))
     }
 
-    if let Ok(process_group) = i32::try_from(child.id()) {
-        // The child starts in its own process group, so a negative PID targets
-        // only that probe and any descendants it spawned.
-        unsafe {
-            let _ = kill(-process_group, SIGKILL);
+    fn terminate(self) {
+        const SIGKILL: i32 = 9;
+
+        unsafe extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+
+        if let Some(process_group) = self.0 {
+            // Negative PID targets the independently retained process-group ID,
+            // even after the direct child has already exited and been reaped.
+            unsafe {
+                let _ = kill(-process_group, SIGKILL);
+            }
         }
     }
+}
+
+#[cfg(not(unix))]
+#[derive(Clone, Copy)]
+struct ProbeProcessGroup;
+
+#[cfg(not(unix))]
+impl ProbeProcessGroup {
+    fn from_child(_child: &std::process::Child) -> Self {
+        Self
+    }
+
+    fn terminate(self) {}
+}
+
+#[cfg(unix)]
+fn terminate_probe(process_group: ProbeProcessGroup, child: &mut std::process::Child) {
+    process_group.terminate();
     let _ = child.kill();
     let _ = child.wait();
 }
 
 #[cfg(not(unix))]
-fn terminate_probe(child: &mut std::process::Child) {
+fn terminate_probe(_process_group: ProbeProcessGroup, child: &mut std::process::Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -317,7 +361,7 @@ pub fn resolve_compatible_agent(kind: LocalAgentKind) -> Result<ResolvedAgent, L
 }
 
 fn discover_all_with_runner(runner: &impl ProbeRunner) -> Vec<LocalAgentStatus> {
-    let paths = current_search_path_directories();
+    let paths = current_search_path_directories_with_runner(runner);
     LocalAgentKind::ALL
         .into_iter()
         .map(|kind| match resolve_from_paths(kind, &paths) {
@@ -331,16 +375,64 @@ fn resolve_compatible_agent_with_runner(
     kind: LocalAgentKind,
     runner: &impl ProbeRunner,
 ) -> Result<ResolvedAgent, LocalAgentError> {
-    let resolved = resolve_from_paths(kind, &current_search_path_directories())
+    let resolved = resolve_from_paths(kind, &current_search_path_directories_with_runner(runner))
         .ok_or(LocalAgentError::NotInstalled)?;
     probe_agent(&resolved, runner)?;
     Ok(resolved)
 }
 
-fn current_search_path_directories() -> Vec<PathBuf> {
+fn current_search_path_directories_with_runner(runner: &impl ProbeRunner) -> Vec<PathBuf> {
     let gui_path = env::var_os("PATH");
-    let login_path = login_shell_path_value();
-    search_path_directories(gui_path.as_deref(), login_path.as_deref())
+    let shell = env::var_os("SHELL").unwrap_or_else(|| OsString::from("/bin/sh"));
+    search_path_directories_with_runner(gui_path.as_deref(), Path::new(&shell), runner)
+}
+
+pub(super) fn login_shell_path_value() -> Option<OsString> {
+    let shell = env::var_os("SHELL").unwrap_or_else(|| OsString::from("/bin/sh"));
+    login_shell_path_value_with_runner(Path::new(&shell), &BoundedProbeRunner).ok()
+}
+
+fn login_shell_path_value_with_runner(
+    shell: &Path,
+    runner: &impl ProbeRunner,
+) -> Result<OsString, LocalAgentError> {
+    if !shell.is_absolute() {
+        return Err(LocalAgentError::ProbeSpawnFailed);
+    }
+    let output = runner.run(
+        shell,
+        &[
+            OsString::from("-l"),
+            OsString::from("-c"),
+            OsString::from("printf %s \"$PATH\""),
+        ],
+        &[],
+    )?;
+    if !output.success {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    if output.stdout.len() > LOGIN_SHELL_PATH_LIMIT || output.stderr.len() > PROBE_STDERR_LIMIT {
+        return Err(LocalAgentError::ProbeOutputTooLarge);
+    }
+    let path =
+        std::str::from_utf8(&output.stdout).map_err(|_| LocalAgentError::MalformedProbeOutput)?;
+    if path.is_empty()
+        || path
+            .bytes()
+            .any(|byte| matches!(byte, b'\0' | b'\n' | b'\r'))
+    {
+        return Err(LocalAgentError::MalformedProbeOutput);
+    }
+    Ok(OsString::from(path))
+}
+
+fn search_path_directories_with_runner(
+    gui_path: Option<&OsStr>,
+    shell: &Path,
+    runner: &impl ProbeRunner,
+) -> Vec<PathBuf> {
+    let login_path = login_shell_path_value_with_runner(shell, runner).ok();
+    search_path_directories(gui_path, login_path.as_deref())
 }
 
 fn search_path_directories(gui_path: Option<&OsStr>, login_path: Option<&OsStr>) -> Vec<PathBuf> {
@@ -673,15 +765,98 @@ fn opencode_probe_environment() -> Vec<(OsString, OsString)> {
 }
 
 fn opencode_permissions_are_denied(config: &Value) -> bool {
-    let Some(permissions) = config.get("permission").and_then(Value::as_object) else {
+    if config.get("share").and_then(Value::as_str) != Some("disabled")
+        || config.get("default_agent").and_then(Value::as_str) != Some(OPEN_CODE_OWNED_AGENT)
+        || !legacy_mode_is_empty(config.get("mode"))
+        || !permission_map_is_denied(config.get("permission"), true)
+        || !tools_map_is_disabled(config.get("tools"), true)
+    {
+        return false;
+    }
+
+    let Some(agents) = config.get("agent").and_then(Value::as_object) else {
         return false;
     };
-    OPEN_CODE_REQUIRED_PERMISSIONS
-        .iter()
-        .all(|permission| permissions.get(*permission) == Some(&Value::String("deny".into())))
-        && permissions
-            .values()
-            .all(|value| value == &Value::String("deny".into()))
+    let Some(owned_agent) = agents.get(OPEN_CODE_OWNED_AGENT).and_then(Value::as_object) else {
+        return false;
+    };
+    if owned_agent.get("mode").and_then(Value::as_str) != Some("primary")
+        || !permission_map_is_denied(owned_agent.get("permission"), true)
+        || !tools_map_is_disabled(owned_agent.get("tools"), true)
+    {
+        return false;
+    }
+
+    agents.values().all(agent_overrides_are_denied)
+}
+
+fn legacy_mode_is_empty(mode: Option<&Value>) -> bool {
+    match mode {
+        None | Some(Value::Null) => true,
+        Some(Value::Object(mode)) => mode.is_empty(),
+        _ => false,
+    }
+}
+
+fn agent_overrides_are_denied(agent: &Value) -> bool {
+    let Some(agent) = agent.as_object() else {
+        return false;
+    };
+    agent
+        .get("permission")
+        .is_none_or(|permission| permission_map_is_denied(Some(permission), false))
+        && agent
+            .get("tools")
+            .is_none_or(|tools| tools_map_is_disabled(Some(tools), false))
+}
+
+fn permission_map_is_denied(permission: Option<&Value>, require_all_known: bool) -> bool {
+    let Some(permission) = permission else {
+        return false;
+    };
+    let Some(permission) = permission.as_object() else {
+        return permission.as_str() == Some("deny") && !require_all_known;
+    };
+    if permission.is_empty()
+        || !permission.values().all(permission_rule_is_denied)
+        || (require_all_known
+            && OPEN_CODE_REQUIRED_PERMISSIONS
+                .iter()
+                .any(|name| !permission.get(*name).is_some_and(permission_rule_is_denied)))
+    {
+        return false;
+    }
+    true
+}
+
+fn permission_rule_is_denied(rule: &Value) -> bool {
+    match rule {
+        Value::String(action) => action == "deny",
+        Value::Object(patterns) => {
+            !patterns.is_empty() && patterns.values().all(permission_rule_is_denied)
+        }
+        _ => false,
+    }
+}
+
+fn tools_map_is_disabled(tools: Option<&Value>, require_wildcard: bool) -> bool {
+    let Some(tools) = tools else {
+        return false;
+    };
+    let Some(tools) = tools.as_object() else {
+        return false;
+    };
+    !tools.is_empty()
+        && (!require_wildcard || tools.get("*") == Some(&Value::Bool(false)))
+        && tools.values().all(tool_rule_is_disabled)
+}
+
+fn tool_rule_is_disabled(rule: &Value) -> bool {
+    match rule {
+        Value::Bool(false) => true,
+        Value::Object(rules) => !rules.is_empty() && rules.values().all(tool_rule_is_disabled),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -692,19 +867,21 @@ mod tests {
         fs,
         path::{Path, PathBuf},
         sync::Mutex,
-        time::Duration,
+        thread,
+        time::{Duration, Instant},
     };
 
     use serde_json::{Value, json};
     use tempfile::tempdir;
 
     use super::{
-        CAPABILITY_PROBE_TIMEOUT_REASON, CLAUDE_FLAGS_REASON, CODEX_FEATURES_REASON,
-        OPEN_CODE_PERMISSIONS_REASON, PROBE_TIMEOUT, ProbeOutput, ProbeRunner,
-        codex_feature_probe_args, evaluate_claude_help, evaluate_codex_features,
-        evaluate_codex_help, evaluate_opencode_help, opencode_permissions_are_denied,
+        BoundedProbeRunner, CAPABILITY_PROBE_TIMEOUT_REASON, CLAUDE_FLAGS_REASON,
+        CODEX_FEATURES_REASON, LOGIN_SHELL_PATH_LIMIT, OPEN_CODE_PERMISSIONS_REASON, PROBE_TIMEOUT,
+        ProbeOutput, ProbeRunner, codex_feature_probe_args, evaluate_claude_help,
+        evaluate_codex_features, evaluate_codex_help, evaluate_opencode_help,
+        login_shell_path_value_with_runner, opencode_permissions_are_denied,
         opencode_probe_environment, probe_resolved_agent, resolve_from_paths,
-        search_path_directories,
+        search_path_directories, search_path_directories_with_runner,
     };
     use crate::local_agents::{LocalAgentError, LocalAgentKind, ResolvedAgent};
 
@@ -796,31 +973,89 @@ Usage: opencode debug config
 
     #[cfg(unix)]
     fn create_executable(path: &Path) {
+        create_executable_script(path, "#!/bin/sh\nexit 0\n");
+    }
+
+    #[cfg(unix)]
+    fn create_executable_script(path: &Path, script: &str) {
         use std::os::unix::fs::PermissionsExt;
 
-        fs::write(path, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::write(path, script).unwrap();
         let mut permissions = fs::metadata(path).unwrap().permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(path, permissions).unwrap();
     }
 
-    fn denied_open_code_permissions() -> Value {
+    #[cfg(unix)]
+    fn process_exists(pid: i32) -> bool {
+        unsafe extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+
+        // Signal zero performs an existence/permission check only.
+        unsafe { kill(pid, 0) == 0 }
+    }
+
+    #[cfg(unix)]
+    fn kill_test_process(pid: i32) {
+        const SIGKILL: i32 = 9;
+
+        unsafe extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+
+        unsafe {
+            let _ = kill(pid, SIGKILL);
+        }
+    }
+
+    #[cfg(unix)]
+    fn process_disappears(pid: i32, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if !process_exists(pid) {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        !process_exists(pid)
+    }
+
+    fn denied_open_code_permission_map() -> Value {
         json!({
-            "permission": {
-                "*": "deny",
-                "read": "deny",
-                "edit": "deny",
-                "glob": "deny",
-                "grep": "deny",
-                "list": "deny",
-                "bash": "deny",
-                "task": "deny",
-                "skill": "deny",
-                "lsp": "deny",
-                "question": "deny",
-                "webfetch": "deny",
-                "websearch": "deny",
-                "external_directory": "deny"
+            "*": "deny",
+            "read": "deny",
+            "edit": "deny",
+            "glob": "deny",
+            "grep": "deny",
+            "list": "deny",
+            "bash": "deny",
+            "task": "deny",
+            "skill": "deny",
+            "lsp": "deny",
+            "question": "deny",
+            "webfetch": "deny",
+            "websearch": "deny",
+            "external_directory": "deny",
+            "todowrite": "deny",
+            "doom_loop": "deny"
+        })
+    }
+
+    fn fully_denied_open_code_config() -> Value {
+        let permission = denied_open_code_permission_map();
+        json!({
+            "share": "disabled",
+            "default_agent": "markdowner",
+            "mode": {},
+            "tools": {"*": false, "edit": false},
+            "permission": permission.clone(),
+            "agent": {
+                "markdowner": {
+                    "mode": "primary",
+                    "tools": {"*": false, "edit": false},
+                    "permission": permission
+                }
             }
         })
     }
@@ -1038,22 +1273,152 @@ Usage: opencode debug config
     #[test]
     fn open_code_effective_permissions_require_wildcard_and_every_named_deny() {
         assert!(opencode_permissions_are_denied(
-            &denied_open_code_permissions()
+            &fully_denied_open_code_config()
         ));
         assert!(!opencode_permissions_are_denied(&json!({
             "permission": {"*": "deny", "bash": "allow"}
         })));
 
-        let mut future_override = denied_open_code_permissions();
+        let mut future_override = fully_denied_open_code_config();
         future_override["permission"]["future_capability"] = json!("allow");
         assert!(!opencode_permissions_are_denied(&future_override));
 
-        let mut missing_required = denied_open_code_permissions();
+        let mut missing_required = fully_denied_open_code_config();
         missing_required["permission"]
             .as_object_mut()
             .unwrap()
             .remove("websearch");
         assert!(!opencode_permissions_are_denied(&missing_required));
+    }
+
+    #[test]
+    fn open_code_rejects_agent_permission_overrides_at_every_depth() {
+        let mut direct = fully_denied_open_code_config();
+        direct["agent"]["build"] = json!({"permission": {"bash": "allow"}});
+        assert!(!opencode_permissions_are_denied(&direct));
+
+        let mut nested = fully_denied_open_code_config();
+        nested["agent"]["build"] = json!({
+            "permission": {"bash": {"*": "allow"}}
+        });
+        assert!(!opencode_permissions_are_denied(&nested));
+
+        let mut mixed_pattern = fully_denied_open_code_config();
+        mixed_pattern["agent"]["build"] = json!({
+            "permission": {"bash": {"*": "deny", "git *": "allow"}}
+        });
+        assert!(!opencode_permissions_are_denied(&mixed_pattern));
+    }
+
+    #[test]
+    fn open_code_rejects_enabled_global_or_agent_legacy_tools() {
+        let mut global = fully_denied_open_code_config();
+        global["tools"]["edit"] = json!(true);
+        assert!(!opencode_permissions_are_denied(&global));
+
+        let mut agent = fully_denied_open_code_config();
+        agent["agent"]["markdowner"]["tools"]["edit"] = json!(true);
+        assert!(!opencode_permissions_are_denied(&agent));
+
+        let mut nested = fully_denied_open_code_config();
+        nested["agent"]["build"] = json!({"tools": {"group": {"edit": true}}});
+        assert!(!opencode_permissions_are_denied(&nested));
+    }
+
+    #[test]
+    fn open_code_rejects_builtin_custom_or_legacy_default_agent_overrides() {
+        let mut builtin = fully_denied_open_code_config();
+        builtin["default_agent"] = json!("build");
+        assert!(!opencode_permissions_are_denied(&builtin));
+
+        let mut custom = fully_denied_open_code_config();
+        custom["default_agent"] = json!("custom");
+        custom["agent"]["custom"] = json!({
+            "mode": "primary",
+            "permission": {"*": "deny"},
+            "tools": {"*": false}
+        });
+        assert!(!opencode_permissions_are_denied(&custom));
+
+        let mut legacy_mode = fully_denied_open_code_config();
+        legacy_mode["mode"] = json!({
+            "build": {"permission": {"bash": "allow"}}
+        });
+        assert!(!opencode_permissions_are_denied(&legacy_mode));
+    }
+
+    #[test]
+    fn open_code_accepts_only_fully_denied_pattern_and_agent_overrides() {
+        let mut config = fully_denied_open_code_config();
+        config["permission"]["bash"] = json!({"*": "deny", "git *": "deny"});
+        config["agent"]["markdowner"]["permission"]["bash"] = json!({"*": "deny", "git *": "deny"});
+        config["agent"]["review"] = json!({
+            "mode": "subagent",
+            "permission": {"bash": {"*": "deny"}},
+            "tools": {"edit": false}
+        });
+
+        assert!(opencode_permissions_are_denied(&config));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn bounded_runner_kills_pipe_holding_descendants_after_parent_exit() {
+        let temp = tempdir().unwrap();
+        let script = temp.path().join("probe");
+        let pid_file = temp.path().join("descendant.pid");
+        create_executable_script(
+            &script,
+            "#!/bin/sh\n(/bin/sleep 30) &\ndescendant=$!\nprintf '%s' \"$descendant\" > \"$1\"\nexit 0\n",
+        );
+
+        let started = Instant::now();
+        let error = match BoundedProbeRunner.run(&script, &[pid_file.as_os_str().to_owned()], &[]) {
+            Err(error) => error,
+            Ok(_) => panic!("pipe-holding probe unexpectedly succeeded"),
+        };
+        let pid: i32 = fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+        let disappeared = process_disappears(pid, Duration::from_millis(500));
+        if !disappeared {
+            kill_test_process(pid);
+        }
+
+        assert_eq!(error, LocalAgentError::ProbeTimedOut);
+        assert!(started.elapsed() < Duration::from_secs(7));
+        assert!(disappeared, "pipe-holding descendant survived timeout");
+        assert!(
+            !error
+                .reason()
+                .contains(temp.path().to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn bounded_runner_kills_descendants_when_probe_output_exceeds_the_cap() {
+        let temp = tempdir().unwrap();
+        let script = temp.path().join("probe");
+        let pid_file = temp.path().join("descendant.pid");
+        create_executable_script(
+            &script,
+            "#!/bin/sh\n(/bin/sleep 30) &\ndescendant=$!\nprintf '%s' \"$descendant\" > \"$1\"\n/usr/bin/yes x | /usr/bin/head -c 300000\nexit 0\n",
+        );
+
+        let error = match BoundedProbeRunner.run(&script, &[pid_file.as_os_str().to_owned()], &[]) {
+            Err(error) => error,
+            Ok(_) => panic!("oversized probe unexpectedly succeeded"),
+        };
+        let pid: i32 = fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+        let disappeared = process_disappears(pid, Duration::from_millis(500));
+        if !disappeared {
+            kill_test_process(pid);
+        }
+
+        assert_eq!(error, LocalAgentError::ProbeOutputTooLarge);
+        assert!(
+            disappeared,
+            "probe descendant survived output-limit failure"
+        );
     }
 
     struct TimeoutRunner;
@@ -1067,6 +1432,142 @@ Usage: opencode debug config
         ) -> Result<ProbeOutput, LocalAgentError> {
             Err(LocalAgentError::ProbeTimedOut)
         }
+    }
+
+    struct OversizedShellRunner;
+
+    impl ProbeRunner for OversizedShellRunner {
+        fn run(
+            &self,
+            _executable: &Path,
+            _args: &[OsString],
+            _env: &[(OsString, OsString)],
+        ) -> Result<ProbeOutput, LocalAgentError> {
+            Ok(ProbeOutput {
+                success: true,
+                stdout: vec![b'x'; LOGIN_SHELL_PATH_LIMIT + 1],
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    type ProbeCall = (PathBuf, Vec<OsString>, Vec<(OsString, OsString)>);
+
+    struct ShellOutputRunner {
+        success: bool,
+        stdout: Vec<u8>,
+        calls: Mutex<Vec<ProbeCall>>,
+    }
+
+    impl ProbeRunner for ShellOutputRunner {
+        fn run(
+            &self,
+            executable: &Path,
+            args: &[OsString],
+            environment: &[(OsString, OsString)],
+        ) -> Result<ProbeOutput, LocalAgentError> {
+            self.calls.lock().unwrap().push((
+                executable.to_path_buf(),
+                args.to_vec(),
+                environment.to_vec(),
+            ));
+            Ok(ProbeOutput {
+                success: self.success,
+                stdout: self.stdout.clone(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn login_shell_path_uses_fixed_arguments_after_gui_path_and_deduplicates() {
+        let temp = tempdir().unwrap();
+        let gui_bin = temp.path().join("gui-bin");
+        let login_bin = temp.path().join("login-bin");
+        fs::create_dir_all(&gui_bin).unwrap();
+        fs::create_dir_all(&login_bin).unwrap();
+        let gui_path = std::env::join_paths([&gui_bin]).unwrap();
+        let login_path = std::env::join_paths([&login_bin, &gui_bin]).unwrap();
+        let shell = Path::new("/private/fake-login-shell");
+        let runner = ShellOutputRunner {
+            success: true,
+            stdout: login_path.to_string_lossy().as_bytes().to_vec(),
+            calls: Mutex::new(Vec::new()),
+        };
+
+        let paths = search_path_directories_with_runner(Some(&gui_path), shell, &runner);
+
+        assert_eq!(paths, vec![gui_bin, login_bin]);
+        assert_eq!(
+            *runner.calls.lock().unwrap(),
+            vec![(
+                shell.to_path_buf(),
+                vec![
+                    OsString::from("-l"),
+                    OsString::from("-c"),
+                    OsString::from("printf %s \"$PATH\"")
+                ],
+                Vec::new()
+            )]
+        );
+    }
+
+    #[test]
+    fn login_shell_timeout_is_sanitized_and_falls_back_to_gui_path() {
+        let temp = tempdir().unwrap();
+        let gui_bin = temp.path().join("gui-bin");
+        fs::create_dir_all(&gui_bin).unwrap();
+        let gui_path = std::env::join_paths([&gui_bin]).unwrap();
+        let shell = Path::new("/private/secret-user/login-shell");
+
+        let error = login_shell_path_value_with_runner(shell, &TimeoutRunner).unwrap_err();
+        let paths = search_path_directories_with_runner(Some(&gui_path), shell, &TimeoutRunner);
+
+        assert_eq!(error, LocalAgentError::ProbeTimedOut);
+        assert!(!error.reason().contains("secret-user"));
+        assert_eq!(paths, vec![gui_bin]);
+    }
+
+    #[test]
+    fn oversized_login_shell_path_is_rejected_without_losing_gui_path() {
+        let temp = tempdir().unwrap();
+        let gui_bin = temp.path().join("gui-bin");
+        fs::create_dir_all(&gui_bin).unwrap();
+        let gui_path = std::env::join_paths([&gui_bin]).unwrap();
+        let shell = Path::new("/private/secret-user/login-shell");
+
+        let error = login_shell_path_value_with_runner(shell, &OversizedShellRunner).unwrap_err();
+        let paths =
+            search_path_directories_with_runner(Some(&gui_path), shell, &OversizedShellRunner);
+
+        assert_eq!(error, LocalAgentError::ProbeOutputTooLarge);
+        assert!(!error.reason().contains("secret-user"));
+        assert_eq!(paths, vec![gui_bin]);
+    }
+
+    #[test]
+    fn nonzero_login_shell_exit_is_sanitized_and_falls_back_to_gui_path() {
+        let temp = tempdir().unwrap();
+        let gui_bin = temp.path().join("gui-bin");
+        fs::create_dir_all(&gui_bin).unwrap();
+        let gui_path = std::env::join_paths([&gui_bin]).unwrap();
+        let shell = Path::new("/private/secret-user/login-shell");
+        let runner = ShellOutputRunner {
+            success: false,
+            stdout: temp.path().to_string_lossy().as_bytes().to_vec(),
+            calls: Mutex::new(Vec::new()),
+        };
+
+        let error = login_shell_path_value_with_runner(shell, &runner).unwrap_err();
+        let paths = search_path_directories_with_runner(Some(&gui_path), shell, &runner);
+
+        assert_eq!(error, LocalAgentError::ProbeFailed);
+        assert!(
+            !error
+                .reason()
+                .contains(temp.path().to_string_lossy().as_ref())
+        );
+        assert_eq!(paths, vec![gui_bin]);
     }
 
     struct IncompatibleClaudeRunner {

@@ -790,22 +790,10 @@ fn path_value_contains_dir(raw_path: &std::ffi::OsStr, dir: &Path) -> bool {
 /// checking only the process PATH made the Settings panel warn that
 /// /usr/local/bin is missing even on stock macOS, where every login shell
 /// gets it via /etc/paths + path_helper. `-l -c` runs the profile chain
-/// without going interactive, so it can't prompt or block on tty access.
+/// without going interactive; local-agent discovery enforces the same bounded,
+/// capped subprocess contract used by its capability probes.
 pub(crate) fn login_shell_path_value() -> Option<std::ffi::OsString> {
-    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let output = std::process::Command::new(shell)
-        .args(["-l", "-c", "printf %s \"$PATH\""])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if raw.is_empty() {
-        None
-    } else {
-        Some(raw.into())
-    }
+    local_agents::login_shell_path_value()
 }
 
 fn cli_binary_directory_is_in_path(install_path: &Path) -> bool {

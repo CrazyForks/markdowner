@@ -1,4 +1,4 @@
-use std::{fmt, path::PathBuf};
+use std::{ffi::OsString, fmt, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +10,10 @@ pub fn discover_all() -> Vec<LocalAgentStatus> {
 
 pub fn resolve_compatible_agent(kind: LocalAgentKind) -> Result<ResolvedAgent, LocalAgentError> {
     discovery::resolve_compatible_agent(kind)
+}
+
+pub(crate) fn login_shell_path_value() -> Option<OsString> {
+    discovery::login_shell_path_value()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
