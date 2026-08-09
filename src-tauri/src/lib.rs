@@ -30,6 +30,7 @@ mod diagnostics;
 mod export_file;
 mod image_export;
 mod link_actions;
+pub mod local_agents;
 mod pdf_export;
 mod shell_managed_block;
 mod skill_registry;
@@ -790,7 +791,7 @@ fn path_value_contains_dir(raw_path: &std::ffi::OsStr, dir: &Path) -> bool {
 /// /usr/local/bin is missing even on stock macOS, where every login shell
 /// gets it via /etc/paths + path_helper. `-l -c` runs the profile chain
 /// without going interactive, so it can't prompt or block on tty access.
-fn login_shell_path_value() -> Option<std::ffi::OsString> {
+pub(crate) fn login_shell_path_value() -> Option<std::ffi::OsString> {
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     let output = std::process::Command::new(shell)
         .args(["-l", "-c", "printf %s \"$PATH\""])
