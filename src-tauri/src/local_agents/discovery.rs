@@ -12,7 +12,10 @@ use std::{
 
 use serde_json::Value;
 
-use super::{LocalAgentError, LocalAgentKind, LocalAgentStatus, ResolvedAgent};
+use super::{
+    LocalAgentError, LocalAgentKind, LocalAgentStatus, OPEN_CODE_OWNED_AGENT, ResolvedAgent,
+    owned_opencode_environment,
+};
 
 pub(super) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_STDOUT_LIMIT: usize = 256 * 1024;
@@ -119,9 +122,6 @@ const OPEN_CODE_REQUIRED_PERMISSIONS: &[&str] = &[
     "todowrite",
     "doom_loop",
 ];
-
-const OPEN_CODE_OWNED_AGENT: &str = "markdowner";
-const OPEN_CODE_CONFIG_CONTENT: &str = r#"{"share":"disabled","default_agent":"markdowner","tools":{"*":false,"edit":false},"permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","todowrite":"deny","doom_loop":"deny"},"agent":{"markdowner":{"mode":"primary","tools":{"*":false,"edit":false},"permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","todowrite":"deny","doom_loop":"deny"}}}}"#;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct ProbeOutput {
@@ -594,7 +594,7 @@ fn probe_opencode(executable: &Path, runner: &impl ProbeRunner) -> Result<(), Lo
     )
     .into_result()?;
 
-    let environment = opencode_probe_environment();
+    let environment = owned_opencode_environment();
     let config = runner.run(
         executable,
         &[
@@ -751,19 +751,6 @@ fn is_feature_field(value: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
 }
 
-fn opencode_probe_environment() -> Vec<(OsString, OsString)> {
-    vec![
-        (
-            OsString::from("OPENCODE_CONFIG_CONTENT"),
-            OsString::from(OPEN_CODE_CONFIG_CONTENT),
-        ),
-        (
-            OsString::from("OPENCODE_DISABLE_AUTOUPDATE"),
-            OsString::from("true"),
-        ),
-    ]
-}
-
 fn opencode_permissions_are_denied(config: &Value) -> bool {
     if config.get("share").and_then(Value::as_str) != Some("disabled")
         || config.get("default_agent").and_then(Value::as_str) != Some(OPEN_CODE_OWNED_AGENT)
@@ -879,11 +866,12 @@ mod tests {
         CODEX_FEATURES_REASON, LOGIN_SHELL_PATH_LIMIT, OPEN_CODE_PERMISSIONS_REASON, PROBE_TIMEOUT,
         ProbeOutput, ProbeRunner, codex_feature_probe_args, evaluate_claude_help,
         evaluate_codex_features, evaluate_codex_help, evaluate_opencode_help,
-        login_shell_path_value_with_runner, opencode_permissions_are_denied,
-        opencode_probe_environment, probe_resolved_agent, resolve_from_paths,
-        search_path_directories, search_path_directories_with_runner,
+        login_shell_path_value_with_runner, opencode_permissions_are_denied, probe_resolved_agent,
+        resolve_from_paths, search_path_directories, search_path_directories_with_runner,
     };
-    use crate::local_agents::{LocalAgentError, LocalAgentKind, ResolvedAgent};
+    use crate::local_agents::{
+        LocalAgentError, LocalAgentKind, ResolvedAgent, owned_opencode_environment,
+    };
 
     const SAFE_CODEX_FEATURES: &str = "\
 apps stable false
@@ -1629,7 +1617,7 @@ Usage: opencode debug config
     #[test]
     fn open_code_probe_environment_contains_valid_fixed_denials_only() {
         let environment: BTreeMap<OsString, OsString> =
-            opencode_probe_environment().into_iter().collect();
+            owned_opencode_environment().into_iter().collect();
         let config: Value = serde_json::from_str(
             environment
                 .get(OsStr::new("OPENCODE_CONFIG_CONTENT"))

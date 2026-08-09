@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     ffi::OsString,
     fs::OpenOptions,
     io::Write,
@@ -9,12 +10,12 @@ use std::{
 use std::os::unix::fs::OpenOptionsExt;
 
 use markdowner_core::ai_document::AiDocumentEnvelope;
-use serde::Deserialize;
-use serde_json::{Value, json};
+use serde::{Deserialize, de::DeserializeOwned};
+use serde_json::json;
 
 use super::{
     LocalAgentError, LocalAgentKind, LocalAgentRunRequest, LocalAgentTargetKind, ResolvedAgent,
-    discovery::CODEX_DENIED_FEATURES,
+    discovery::CODEX_DENIED_FEATURES, owned_opencode_environment,
 };
 
 pub const MAX_ADAPTER_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
@@ -23,7 +24,6 @@ pub const LOCAL_AGENT_PAYLOAD_SCHEMA: &str = r#"{"type":"object","additionalProp
 const EMPTY_MCP_CONFIG: &str = r#"{"mcpServers":{}}"#;
 const CODEX_SCHEMA_FILE: &str = "local-agent-output-schema.json";
 const CODEX_RESULT_FILE: &str = "local-agent-result.json";
-const OPEN_CODE_CONFIG_CONTENT: &str = r#"{"share":"disabled","default_agent":"markdowner","tools":{"*":false,"edit":false},"permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","todowrite":"deny","doom_loop":"deny"},"agent":{"markdowner":{"mode":"primary","tools":{"*":false,"edit":false},"permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","todowrite":"deny","doom_loop":"deny"}}}}"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdapterInvocation {
@@ -75,7 +75,7 @@ pub fn build_invocation(
                 "--json-schema",
                 LOCAL_AGENT_PAYLOAD_SCHEMA,
             ]),
-            env: Vec::new(),
+            env: vec![(OsString::from("DISABLE_AUTOUPDATER"), OsString::from("1"))],
             cwd,
             stdin,
             result_file: None,
@@ -91,16 +91,7 @@ pub fn build_invocation(
                 OsString::from("--dir"),
                 cwd.as_os_str().to_owned(),
             ],
-            env: vec![
-                (
-                    OsString::from("OPENCODE_CONFIG_CONTENT"),
-                    OsString::from(OPEN_CODE_CONFIG_CONTENT),
-                ),
-                (
-                    OsString::from("OPENCODE_DISABLE_AUTOUPDATE"),
-                    OsString::from("true"),
-                ),
-            ],
+            env: owned_opencode_environment(),
             cwd,
             stdin,
             result_file: None,
@@ -134,7 +125,13 @@ fn build_codex_invocation(
         args.push(OsString::from("--disable"));
         args.push(OsString::from(feature));
     }
-    args.extend(strings_to_args(&["-c", "mcp_servers={}", "-"]));
+    args.extend(strings_to_args(&[
+        "-c",
+        "mcp_servers={}",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-",
+    ]));
 
     Ok(AdapterInvocation {
         executable,
@@ -276,46 +273,152 @@ pub fn parse_adapter_result(
 
 fn parse_claude_result(bytes: &[u8]) -> Result<LocalAgentPayload, LocalAgentError> {
     let text = checked_text(bytes)?;
-    let output: Value =
-        serde_json::from_str(text).map_err(|_| LocalAgentError::InvalidAdapterResult)?;
-    let object = output
-        .as_object()
-        .ok_or(LocalAgentError::InvalidAdapterResult)?;
-    if object.get("type").is_some_and(|kind| kind != "result")
-        || object.get("is_error").is_some_and(|error| error != false)
-        || object.contains_key("error")
-        || object.contains_key("tool_use")
-        || object.contains_key("tool_calls")
+    let output: ClaudeResultEnvelope = deserialize_exact(text)?;
+    if output.result_type != "result"
+        || output.subtype != "success"
+        || output.is_error
+        || output.num_turns == 0
+        || output.session_id.is_empty()
+        || output.uuid.is_empty()
+        || output.result.contains('\0')
+        || output.session_id.contains('\0')
+        || output.uuid.contains('\0')
+        || output
+            .stop_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains('\0'))
+        || !output.total_cost_usd.is_finite()
+        || output.total_cost_usd < 0.0
+        || !output.permission_denials.is_empty()
+        || !output.errors.is_empty()
     {
         return Err(LocalAgentError::InvalidAdapterResult);
     }
-    let structured = object
-        .get("structured_output")
-        .ok_or(LocalAgentError::InvalidAdapterResult)?;
-    parse_payload_value(structured.clone())
+    let _documented_metadata = (
+        output.duration_ms,
+        output.duration_api_ms,
+        output.result,
+        output.stop_reason,
+        output.usage,
+        output.model_usage,
+        output.fast_mode_state,
+    );
+    validate_payload(output.structured_output)
 }
 
 fn parse_open_code_result(bytes: &[u8]) -> Result<LocalAgentPayload, LocalAgentError> {
     let text = checked_text(bytes)?;
     let mut extracted = String::new();
-    let mut event_count = 0_usize;
+    let mut session_id: Option<String> = None;
+    let mut message_id: Option<String> = None;
+    let mut snapshot: Option<String> = None;
+    let mut part_ids = HashSet::new();
+    let mut last_timestamp = None;
+    let mut last_text_end = None;
+    let mut started = false;
+    let mut finished = false;
+    let mut text_count = 0_usize;
+
     for line in text.lines() {
         if line.is_empty() {
             return Err(LocalAgentError::InvalidAdapterResult);
         }
-        let event: OpenCodeTextEvent =
-            serde_json::from_str(line).map_err(|_| LocalAgentError::InvalidAdapterResult)?;
-        if event.event_type != "text" || event.part.part_type != "text" {
+        let event: OpenCodeRunEvent = deserialize_exact(line)?;
+        let timestamp = event.timestamp();
+        if last_timestamp.is_some_and(|previous| timestamp < previous) {
             return Err(LocalAgentError::InvalidAdapterResult);
         }
-        let _completion_time = event.part.time.end;
-        extracted.push_str(&event.part.text);
-        if extracted.len() > MAX_ADAPTER_OUTPUT_BYTES {
-            return Err(LocalAgentError::InvalidAdapterResult);
+        last_timestamp = Some(timestamp);
+
+        match event {
+            OpenCodeRunEvent::StepStart {
+                session_id: event_session,
+                part,
+                ..
+            } => {
+                if started
+                    || finished
+                    || part.part_type != "step-start"
+                    || !valid_open_code_identity(
+                        &event_session,
+                        &part.session_id,
+                        &part.message_id,
+                        &part.id,
+                    )
+                    || !part_ids.insert(part.id)
+                {
+                    return Err(LocalAgentError::InvalidAdapterResult);
+                }
+                session_id = Some(event_session);
+                message_id = Some(part.message_id);
+                snapshot = part.snapshot;
+                started = true;
+            }
+            OpenCodeRunEvent::Text {
+                session_id: event_session,
+                part,
+                ..
+            } => {
+                if !started
+                    || finished
+                    || part.part_type != "text"
+                    || part.synthetic == Some(true)
+                    || part.ignored == Some(true)
+                    || !identity_matches(
+                        &event_session,
+                        &part.session_id,
+                        &part.message_id,
+                        &part.id,
+                        session_id.as_deref(),
+                        message_id.as_deref(),
+                    )
+                    || !part_ids.insert(part.id)
+                    || part.time.start > part.time.end
+                    || part.time.end > timestamp
+                    || last_text_end.is_some_and(|previous| part.time.start < previous)
+                {
+                    return Err(LocalAgentError::InvalidAdapterResult);
+                }
+                if extracted
+                    .len()
+                    .checked_add(part.text.len())
+                    .is_none_or(|length| length > MAX_ADAPTER_OUTPUT_BYTES)
+                {
+                    return Err(LocalAgentError::InvalidAdapterResult);
+                }
+                extracted.push_str(&part.text);
+                last_text_end = Some(part.time.end);
+                text_count += 1;
+            }
+            OpenCodeRunEvent::StepFinish {
+                session_id: event_session,
+                part,
+                ..
+            } => {
+                if !started
+                    || finished
+                    || text_count == 0
+                    || part.part_type != "step-finish"
+                    || part.reason != "stop"
+                    || !identity_matches(
+                        &event_session,
+                        &part.session_id,
+                        &part.message_id,
+                        &part.id,
+                        session_id.as_deref(),
+                        message_id.as_deref(),
+                    )
+                    || !part_ids.insert(part.id)
+                    || !snapshot_matches(snapshot.as_deref(), part.snapshot.as_deref())
+                    || !valid_open_code_usage(part.cost, &part.tokens)
+                {
+                    return Err(LocalAgentError::InvalidAdapterResult);
+                }
+                finished = true;
+            }
         }
-        event_count += 1;
     }
-    if event_count == 0 {
+    if !finished {
         return Err(LocalAgentError::InvalidAdapterResult);
     }
     parse_payload_bytes(extracted.as_bytes())
@@ -323,22 +426,73 @@ fn parse_open_code_result(bytes: &[u8]) -> Result<LocalAgentPayload, LocalAgentE
 
 fn parse_payload_bytes(bytes: &[u8]) -> Result<LocalAgentPayload, LocalAgentError> {
     let text = checked_text(bytes)?;
-    let value: Value =
-        serde_json::from_str(text).map_err(|_| LocalAgentError::InvalidAdapterResult)?;
-    parse_payload_value(value)
+    let payload: LocalAgentPayload = deserialize_exact(text)?;
+    validate_payload(payload)
 }
 
-fn parse_payload_value(value: Value) -> Result<LocalAgentPayload, LocalAgentError> {
-    if serde_json::to_vec(&value)
-        .map_err(|_| LocalAgentError::InvalidAdapterResult)?
-        .len()
-        > MAX_ADAPTER_OUTPUT_BYTES
+fn deserialize_exact<T: DeserializeOwned>(text: &str) -> Result<T, LocalAgentError> {
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    let value =
+        T::deserialize(&mut deserializer).map_err(|_| LocalAgentError::InvalidAdapterResult)?;
+    deserializer
+        .end()
+        .map_err(|_| LocalAgentError::InvalidAdapterResult)?;
+    Ok(value)
+}
+
+fn valid_open_code_identity(
+    event_session: &str,
+    part_session: &str,
+    message_id: &str,
+    part_id: &str,
+) -> bool {
+    !event_session.is_empty()
+        && event_session == part_session
+        && !message_id.is_empty()
+        && !part_id.is_empty()
+        && !event_session.contains('\0')
+        && !message_id.contains('\0')
+        && !part_id.contains('\0')
+}
+
+fn identity_matches(
+    event_session: &str,
+    part_session: &str,
+    message_id: &str,
+    part_id: &str,
+    expected_session: Option<&str>,
+    expected_message: Option<&str>,
+) -> bool {
+    valid_open_code_identity(event_session, part_session, message_id, part_id)
+        && Some(event_session) == expected_session
+        && Some(message_id) == expected_message
+}
+
+fn snapshot_matches(start: Option<&str>, finish: Option<&str>) -> bool {
+    if start.is_some_and(|value| value.contains('\0'))
+        || finish.is_some_and(|value| value.contains('\0'))
     {
-        return Err(LocalAgentError::InvalidAdapterResult);
+        return false;
     }
-    let payload: LocalAgentPayload =
-        serde_json::from_value(value).map_err(|_| LocalAgentError::InvalidAdapterResult)?;
-    validate_payload(payload)
+    match (start, finish) {
+        (Some(start), Some(finish)) => start == finish,
+        _ => true,
+    }
+}
+
+fn valid_open_code_usage(cost: f64, tokens: &OpenCodeTokens) -> bool {
+    [
+        Some(cost),
+        tokens.total,
+        Some(tokens.input),
+        Some(tokens.output),
+        Some(tokens.reasoning),
+        Some(tokens.cache.read),
+        Some(tokens.cache.write),
+    ]
+    .into_iter()
+    .flatten()
+    .all(|value| value.is_finite() && value >= 0.0)
 }
 
 fn checked_text(bytes: &[u8]) -> Result<&str, LocalAgentError> {
@@ -366,25 +520,233 @@ fn validate_payload(payload: LocalAgentPayload) -> Result<LocalAgentPayload, Loc
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OpenCodeTextEvent {
+struct ClaudeResultEnvelope {
     #[serde(rename = "type")]
-    event_type: String,
-    part: OpenCodeTextPart,
+    result_type: String,
+    subtype: String,
+    is_error: bool,
+    duration_ms: u64,
+    duration_api_ms: u64,
+    num_turns: u64,
+    result: String,
+    #[serde(default)]
+    stop_reason: Option<String>,
+    session_id: String,
+    total_cost_usd: f64,
+    usage: DuplicateSafeIgnored,
+    #[serde(rename = "modelUsage")]
+    model_usage: DuplicateSafeIgnored,
+    permission_denials: Vec<DuplicateSafeIgnored>,
+    structured_output: LocalAgentPayload,
+    uuid: String,
+    #[serde(default)]
+    errors: Vec<String>,
+    #[serde(default)]
+    fast_mode_state: Option<DuplicateSafeIgnored>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", deny_unknown_fields)]
+enum OpenCodeRunEvent {
+    #[serde(rename = "step_start")]
+    StepStart {
+        timestamp: u64,
+        #[serde(rename = "sessionID")]
+        session_id: String,
+        part: OpenCodeStepStartPart,
+    },
+    #[serde(rename = "text")]
+    Text {
+        timestamp: u64,
+        #[serde(rename = "sessionID")]
+        session_id: String,
+        part: OpenCodeTextPart,
+    },
+    #[serde(rename = "step_finish")]
+    StepFinish {
+        timestamp: u64,
+        #[serde(rename = "sessionID")]
+        session_id: String,
+        part: OpenCodeStepFinishPart,
+    },
+}
+
+impl OpenCodeRunEvent {
+    const fn timestamp(&self) -> u64 {
+        match self {
+            Self::StepStart { timestamp, .. }
+            | Self::Text { timestamp, .. }
+            | Self::StepFinish { timestamp, .. } => *timestamp,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenCodeStepStartPart {
+    id: String,
+    #[serde(rename = "sessionID")]
+    session_id: String,
+    #[serde(rename = "messageID")]
+    message_id: String,
+    #[serde(rename = "type")]
+    part_type: String,
+    #[serde(default)]
+    snapshot: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenCodeTextPart {
+    id: String,
+    #[serde(rename = "sessionID")]
+    session_id: String,
+    #[serde(rename = "messageID")]
+    message_id: String,
     #[serde(rename = "type")]
     part_type: String,
     text: String,
+    #[serde(default)]
+    synthetic: Option<bool>,
+    #[serde(default)]
+    ignored: Option<bool>,
     time: OpenCodeCompletionTime,
+    #[serde(default, rename = "metadata")]
+    _metadata: Option<DuplicateSafeIgnored>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenCodeCompletionTime {
+    start: u64,
     end: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenCodeStepFinishPart {
+    id: String,
+    #[serde(rename = "sessionID")]
+    session_id: String,
+    #[serde(rename = "messageID")]
+    message_id: String,
+    #[serde(rename = "type")]
+    part_type: String,
+    reason: String,
+    #[serde(default)]
+    snapshot: Option<String>,
+    cost: f64,
+    tokens: OpenCodeTokens,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenCodeTokens {
+    #[serde(default)]
+    total: Option<f64>,
+    input: f64,
+    output: f64,
+    reasoning: f64,
+    cache: OpenCodeCacheTokens,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenCodeCacheTokens {
+    read: f64,
+    write: f64,
+}
+
+struct DuplicateSafeIgnored;
+
+impl<'de> Deserialize<'de> for DuplicateSafeIgnored {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(DuplicateSafeIgnoredVisitor)
+    }
+}
+
+struct DuplicateSafeIgnoredVisitor;
+
+impl<'de> serde::de::Visitor<'de> for DuplicateSafeIgnoredVisitor {
+    type Value = DuplicateSafeIgnored;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("an unambiguous JSON value")
+    }
+
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(DuplicateSafeIgnored)
+    }
+
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(DuplicateSafeIgnored)
+    }
+
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(DuplicateSafeIgnored)
+    }
+
+    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
+        Ok(DuplicateSafeIgnored)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if value.contains('\0') {
+            Err(E::custom("NUL is not allowed in JSON strings"))
+        } else {
+            Ok(DuplicateSafeIgnored)
+        }
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_str(&value)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(DuplicateSafeIgnored)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        DuplicateSafeIgnored::deserialize(deserializer)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(DuplicateSafeIgnored)
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        while sequence.next_element::<DuplicateSafeIgnored>()?.is_some() {}
+        Ok(DuplicateSafeIgnored)
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut keys = HashSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if !keys.insert(key) {
+                return Err(serde::de::Error::custom("duplicate JSON object key"));
+            }
+            map.next_value::<DuplicateSafeIgnored>()?;
+        }
+        Ok(DuplicateSafeIgnored)
+    }
 }
 
 #[cfg(test)]
@@ -392,7 +754,7 @@ mod tests {
     use std::{ffi::OsString, fs, path::Path};
 
     use markdowner_core::ai_document::ByteRange;
-    use serde_json::{Value, json};
+    use serde_json::json;
     use tempfile::tempdir;
 
     use super::{
@@ -454,6 +816,79 @@ mod tests {
         assert!(payload.warnings.is_empty());
     }
 
+    fn claude_success(payload: &str) -> String {
+        format!(
+            r#"{{"type":"result","subtype":"success","is_error":false,"duration_ms":20,"duration_api_ms":15,"num_turns":1,"result":"ignored prose","stop_reason":null,"session_id":"session-1","total_cost_usd":0.01,"usage":{{"input_tokens":4,"output_tokens":2}},"modelUsage":{{"claude-test":{{"inputTokens":4,"outputTokens":2}}}},"permission_denials":[],"structured_output":{payload},"uuid":"result-1"}}"#
+        )
+    }
+
+    fn opencode_success(chunks: &[&str]) -> String {
+        let mut events = vec![
+            json!({
+                "type": "step_start",
+                "timestamp": 100,
+                "sessionID": "session-1",
+                "part": {
+                    "id": "part-start",
+                    "sessionID": "session-1",
+                    "messageID": "message-1",
+                    "type": "step-start",
+                    "snapshot": "snapshot-1"
+                }
+            })
+            .to_string(),
+        ];
+        for (index, chunk) in chunks.iter().enumerate() {
+            let start = 101 + (index as u64 * 20);
+            let end = start + 10;
+            events.push(
+                json!({
+                    "type": "text",
+                    "timestamp": end + 1,
+                    "sessionID": "session-1",
+                    "part": {
+                        "id": format!("part-text-{index}"),
+                        "sessionID": "session-1",
+                        "messageID": "message-1",
+                        "type": "text",
+                        "text": chunk,
+                        "synthetic": false,
+                        "ignored": false,
+                        "time": {"start": start, "end": end},
+                        "metadata": {"provider": {"requestID": "request-1"}}
+                    }
+                })
+                .to_string(),
+            );
+        }
+        let finish_time = 102 + (chunks.len() as u64 * 20);
+        events.push(
+            json!({
+                "type": "step_finish",
+                "timestamp": finish_time,
+                "sessionID": "session-1",
+                "part": {
+                    "id": "part-finish",
+                    "sessionID": "session-1",
+                    "messageID": "message-1",
+                    "type": "step-finish",
+                    "reason": "stop",
+                    "snapshot": "snapshot-1",
+                    "cost": 0.01,
+                    "tokens": {
+                        "total": 6,
+                        "input": 4,
+                        "output": 2,
+                        "reasoning": 0,
+                        "cache": {"read": 0, "write": 0}
+                    }
+                }
+            })
+            .to_string(),
+        );
+        events.join("\n")
+    }
+
     #[test]
     fn claude_invocation_is_an_exact_data_only_snapshot() {
         let temp = tempdir().unwrap();
@@ -490,7 +925,10 @@ mod tests {
                 LOCAL_AGENT_PAYLOAD_SCHEMA,
             ])
         );
-        assert!(invocation.env.is_empty());
+        assert_eq!(
+            invocation.env,
+            vec![(OsString::from("DISABLE_AUTOUPDATER"), OsString::from("1"),)]
+        );
         assert_eq!(invocation.cwd, temp.path());
         assert_eq!(invocation.result_file, None);
         assert_eq!(
@@ -594,6 +1032,8 @@ mod tests {
             "workspace_dependencies",
             "-c",
             "mcp_servers={}",
+            "-c",
+            "check_for_update_on_startup=false",
             "-",
         ]));
 
@@ -775,23 +1215,12 @@ mod tests {
 
     #[test]
     fn each_parser_accepts_only_its_owned_structured_source() {
-        let claude = format!(
-            r#"{{"type":"result","is_error":false,"result":"ignored prose","structured_output":{VALID_PAYLOAD}}}"#
-        );
+        let claude = claude_success(VALID_PAYLOAD);
         let codex_stdout = br##"{"schemaVersion":1,"markdown":"# Wrong\n","summary":"Wrong source","warnings":[]}"##;
-        let open_code = [
-            json!({
-                "type": "text",
-                "part": {"type": "text", "text": "{\"schemaVersion\":1,\"markdown\":\"# Res", "time": {"end": 1}}
-            })
-            .to_string(),
-            json!({
-                "type": "text",
-                "part": {"type": "text", "text": "ult\\n\",\"summary\":\"Rewrote heading\",\"warnings\":[]}", "time": {"end": 2}}
-            })
-            .to_string(),
-        ]
-        .join("\n");
+        let open_code = opencode_success(&[
+            "{\"schemaVersion\":1,\"markdown\":\"# Res",
+            "ult\\n\",\"summary\":\"Rewrote heading\",\"warnings\":[]}",
+        ]);
 
         assert_payload(
             &parse_adapter_result(LocalAgentKind::Claude, claude.as_bytes(), None).unwrap(),
@@ -836,6 +1265,46 @@ mod tests {
                 parse_adapter_result(LocalAgentKind::Codex, b"ignored", Some(invalid.as_bytes()))
                     .is_err(),
                 "accepted invalid payload: {invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_parser_rejects_duplicate_payload_keys_before_validation() {
+        let duplicate_payloads = [
+            r##"{"schemaVersion":1,"schemaVersion":1,"markdown":"# Result\n","summary":"Rewrote heading","warnings":[]}"##,
+            r##"{"schemaVersion":1,"markdown":"# Wrong\n","markdown":"# Result\n","summary":"Rewrote heading","warnings":[]}"##,
+            r##"{"schemaVersion":1,"markdown":"# Result\n","summary":"Wrong","summary":"Rewrote heading","warnings":[]}"##,
+            r##"{"schemaVersion":1,"markdown":"# Result\n","summary":"Rewrote heading","warnings":[],"warnings":[]}"##,
+        ];
+
+        for duplicate in duplicate_payloads {
+            assert!(
+                parse_adapter_result(
+                    LocalAgentKind::Claude,
+                    claude_success(duplicate).as_bytes(),
+                    None
+                )
+                .is_err(),
+                "Claude accepted duplicate payload keys: {duplicate}"
+            );
+            assert!(
+                parse_adapter_result(
+                    LocalAgentKind::Codex,
+                    b"ignored",
+                    Some(duplicate.as_bytes())
+                )
+                .is_err(),
+                "Codex accepted duplicate payload keys: {duplicate}"
+            );
+            assert!(
+                parse_adapter_result(
+                    LocalAgentKind::Opencode,
+                    opencode_success(&[duplicate]).as_bytes(),
+                    None
+                )
+                .is_err(),
+                "OpenCode accepted duplicate payload keys: {duplicate}"
             );
         }
     }
@@ -895,35 +1364,121 @@ mod tests {
     }
 
     #[test]
-    fn opencode_rejects_tool_error_unknown_incomplete_and_extra_events() {
-        let invalid_events = [
-            json!({"type": "tool_use", "part": {"type": "tool", "name": "bash"}}),
-            json!({"type": "error", "error": {"message": "nope"}}),
-            json!({"type": "future", "part": {"type": "text", "text": VALID_PAYLOAD, "time": {"end": 1}}}),
-            json!({"type": "text", "part": {"type": "text", "text": VALID_PAYLOAD, "time": {}}}),
-            json!({"type": "text", "part": {"type": "text", "text": VALID_PAYLOAD, "time": {"end": 1}, "extra": true}}),
+    fn opencode_rejects_disallowed_malformed_and_out_of_order_streams() {
+        let valid = opencode_success(&[VALID_PAYLOAD]);
+        let lines: Vec<&str> = valid.lines().collect();
+        let invalid_streams = [
+            json!({"type": "tool_use", "timestamp": 101, "sessionID": "session-1", "part": {"type": "tool", "name": "bash"}}).to_string(),
+            json!({"type": "error", "timestamp": 101, "sessionID": "session-1", "error": {"message": "nope"}}).to_string(),
+            json!({"type": "reasoning", "timestamp": 101, "sessionID": "session-1", "part": {"type": "reasoning", "text": "secret"}}).to_string(),
+            json!({"type": "future", "timestamp": 101, "sessionID": "session-1", "part": {"type": "future"}}).to_string(),
+            lines[1].to_string(),
+            [lines[0], lines[2], lines[1]].join("\n"),
+            [lines[0], lines[1]].join("\n"),
+            valid.replacen("\"sessionID\":\"session-1\"", "\"sessionID\":\"other-session\"", 1),
+            valid.replacen("\"messageID\":\"message-1\"", "\"messageID\":\"other-message\"", 1),
+            valid.replacen("\"end\":111,", "", 1),
+            valid.replacen("\"end\":111", "\"end\":100", 1),
+            valid.replacen("\"timestamp\":122", "\"timestamp\":90", 1),
+            valid.replacen("\"snapshot\":\"snapshot-1\"", "\"snapshot\":\"other-snapshot\"", 1),
+            valid.replacen("\"reason\":\"stop\"", "\"reason\":\"error\"", 1),
+            format!("{valid}\n{0}", lines[1]),
+            valid.replacen("\"text\":", "\"extra\":true,\"text\":", 1),
         ];
 
-        for event in invalid_events {
+        for stream in invalid_streams {
             assert!(
-                parse_adapter_result(LocalAgentKind::Opencode, event.to_string().as_bytes(), None)
-                    .is_err(),
-                "accepted invalid event: {event}"
+                parse_adapter_result(LocalAgentKind::Opencode, stream.as_bytes(), None).is_err(),
+                "accepted invalid OpenCode stream: {stream}"
             );
         }
     }
 
     #[test]
-    fn claude_rejects_error_and_tool_marked_results_even_with_structured_output() {
+    fn claude_requires_one_exact_success_envelope_without_denial_or_error_evidence() {
+        let valid = claude_success(VALID_PAYLOAD);
         for wrapper in [
-            json!({"type": "result", "is_error": true, "structured_output": serde_json::from_str::<Value>(VALID_PAYLOAD).unwrap()}),
-            json!({"type": "error", "structured_output": serde_json::from_str::<Value>(VALID_PAYLOAD).unwrap()}),
-            json!({"type": "result", "tool_use": {"name": "bash"}, "structured_output": serde_json::from_str::<Value>(VALID_PAYLOAD).unwrap()}),
+            valid.replacen("\"type\":\"result\",", "", 1),
+            valid.replacen("\"subtype\":\"success\",", "", 1),
+            valid.replacen(
+                "\"subtype\":\"success\"",
+                "\"subtype\":\"error_during_execution\"",
+                1,
+            ),
+            valid.replacen("\"is_error\":false,", "", 1),
+            valid.replacen("\"is_error\":false", "\"is_error\":true", 1),
+            valid.replacen(
+                "\"permission_denials\":[]",
+                "\"permission_denials\":[{\"tool_name\":\"Bash\"}]",
+                1,
+            ),
+            valid.replacen(
+                "\"structured_output\":",
+                "\"errors\":[\"provider failed\"],\"structured_output\":",
+                1,
+            ),
+            valid.replacen("\"uuid\":", "\"tool_use\":{\"name\":\"bash\"},\"uuid\":", 1),
+            valid.replacen("\"uuid\":", "\"unknown\":true,\"uuid\":", 1),
+            valid.replacen(
+                "\"result\":\"ignored prose\"",
+                "\"result\":\"ignored\\u0000prose\"",
+                1,
+            ),
+            valid.replacen(
+                "\"input_tokens\":4",
+                "\"input_tokens\":4,\"label\":\"bad\\u0000metadata\"",
+                1,
+            ),
+            valid.replacen(
+                "\"type\":\"result\",",
+                "\"type\":\"result\",\"type\":\"result\",",
+                1,
+            ),
+            valid.replacen(
+                "\"structured_output\":",
+                &format!("\"structured_output\":{VALID_PAYLOAD},\"structured_output\":"),
+                1,
+            ),
         ] {
             assert!(
-                parse_adapter_result(LocalAgentKind::Claude, wrapper.to_string().as_bytes(), None)
-                    .is_err(),
+                parse_adapter_result(LocalAgentKind::Claude, wrapper.as_bytes(), None).is_err(),
                 "accepted invalid Claude wrapper: {wrapper}"
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_rejects_duplicate_event_and_part_wrapper_keys() {
+        let valid = opencode_success(&[VALID_PAYLOAD]);
+        for stream in [
+            valid.replacen(
+                "\"sessionID\":\"session-1\"",
+                "\"sessionID\":\"session-1\",\"sessionID\":\"session-1\"",
+                1,
+            ),
+            valid.replacen(
+                "\"messageID\":\"message-1\"",
+                "\"messageID\":\"message-1\",\"messageID\":\"message-1\"",
+                1,
+            ),
+        ] {
+            assert!(
+                parse_adapter_result(LocalAgentKind::Opencode, stream.as_bytes(), None).is_err(),
+                "accepted duplicate OpenCode wrapper key: {stream}"
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_rejects_escaped_nul_in_identifiers_and_metadata() {
+        let valid = opencode_success(&[VALID_PAYLOAD]);
+        for stream in [
+            valid.replace("message-1", "message\\u0000-1"),
+            valid.replacen("request-1", "request\\u0000-1", 1),
+        ] {
+            assert!(
+                parse_adapter_result(LocalAgentKind::Opencode, stream.as_bytes(), None).is_err(),
+                "accepted escaped NUL in OpenCode stream: {stream}"
             );
         }
     }

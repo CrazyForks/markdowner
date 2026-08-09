@@ -18,6 +18,23 @@ pub(crate) fn login_shell_path_value() -> Option<OsString> {
     discovery::login_shell_path_value()
 }
 
+pub(super) const OPEN_CODE_OWNED_AGENT: &str = "markdowner";
+
+const OPEN_CODE_CONFIG_CONTENT: &str = r#"{"share":"disabled","default_agent":"markdowner","tools":{"*":false,"edit":false},"permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","todowrite":"deny","doom_loop":"deny"},"agent":{"markdowner":{"mode":"primary","tools":{"*":false,"edit":false},"permission":{"*":"deny","read":"deny","edit":"deny","glob":"deny","grep":"deny","list":"deny","bash":"deny","task":"deny","skill":"deny","lsp":"deny","question":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","todowrite":"deny","doom_loop":"deny"}}}}"#;
+
+pub(super) fn owned_opencode_environment() -> Vec<(OsString, OsString)> {
+    vec![
+        (
+            OsString::from("OPENCODE_CONFIG_CONTENT"),
+            OsString::from(OPEN_CODE_CONFIG_CONTENT),
+        ),
+        (
+            OsString::from("OPENCODE_DISABLE_AUTOUPDATE"),
+            OsString::from("true"),
+        ),
+    ]
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalAgentKind {
