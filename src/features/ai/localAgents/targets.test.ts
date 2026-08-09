@@ -6,6 +6,7 @@ import {
   asDocumentLocalAgentTarget,
   captureSourceLocalAgentTarget,
   captureWysiwygLocalAgentTarget,
+  isValidLocalAgentTargetSnapshot,
   localAgentTargetFromAiSelectionSnapshot,
 } from './targets';
 import type { LocalAgentRunRequest, LocalAgentRunResult } from './types';
@@ -116,6 +117,73 @@ describe('local-agent targets', () => {
     ).toMatchObject({ kind: 'selection', selectedText: 'beta' });
   });
 
+  it('requires WYSIWYG markdown and ProseMirror ranges to have the same collapse state', () => {
+    expect(
+      captureWysiwygLocalAgentTarget({
+        source: 'alpha',
+        markdownAnchor: 2,
+        markdownHead: 2,
+        proseMirrorFrom: 7,
+        proseMirrorTo: 8,
+        proseMirrorDocumentSize: 10,
+        documentId: 'doc-1',
+      }),
+    ).toBeNull();
+    expect(
+      captureWysiwygLocalAgentTarget({
+        source: 'alpha',
+        markdownAnchor: 2,
+        markdownHead: 2,
+        proseMirrorFrom: 7,
+        proseMirrorTo: 7,
+        proseMirrorDocumentSize: 10,
+        documentId: 'doc-1',
+      }),
+    ).toMatchObject({
+      kind: 'insert',
+      proseMirrorRange: { start: 7, end: 7 },
+    });
+    expect(
+      captureWysiwygLocalAgentTarget({
+        source: 'alpha',
+        markdownAnchor: 1,
+        markdownHead: 3,
+        proseMirrorFrom: 7,
+        proseMirrorTo: 7,
+        proseMirrorDocumentSize: 6,
+        documentId: 'doc-1',
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects forged Unicode snapshot metadata before any application', () => {
+    const korean = captureSourceLocalAgentTarget({
+      source: '가나다',
+      anchor: 1,
+      head: 3,
+      documentId: 'doc-1',
+    });
+    if (!korean) throw new Error('target required');
+    const emojiSplit = {
+      ...korean,
+      source: 'a😀b',
+      characterRange: { start: 1, end: 2 },
+      byteRange: { start: 1, end: 5 },
+      selectedText: '\ud83d',
+    };
+
+    expect(isValidLocalAgentTargetSnapshot({ ...korean, selectedText: '다' })).toBe(
+      false,
+    );
+    expect(
+      isValidLocalAgentTargetSnapshot({
+        ...korean,
+        byteRange: { start: 3, end: 8 },
+      }),
+    ).toBe(false);
+    expect(isValidLocalAgentTargetSnapshot(emojiSplit)).toBe(false);
+  });
+
   it('applies source results in one transaction only for the exact captured request', () => {
     const snapshot = captureSourceLocalAgentTarget({
       source: 'alpha beta',
@@ -204,7 +272,10 @@ describe('local-agent targets', () => {
     const run = vi.fn(() => true);
     const insertContentAt = vi.fn(() => ({ run }));
     const focus = vi.fn(() => ({ insertContentAt }));
-    const editor = { chain: vi.fn(() => ({ focus })) };
+    const editor = {
+      chain: vi.fn(() => ({ focus })),
+      state: { doc: { content: { size: 12 } } },
+    };
 
     expect(
       applyWysiwygLocalAgentResult({
@@ -222,6 +293,37 @@ describe('local-agent targets', () => {
       'BETA',
       { contentType: 'markdown' },
     );
+  });
+
+  it('revalidates the ProseMirror target before inserting', () => {
+    const snapshot = captureWysiwygLocalAgentTarget({
+      source: 'alpha',
+      markdownAnchor: 2,
+      markdownHead: 2,
+      proseMirrorFrom: 7,
+      proseMirrorTo: 7,
+      documentId: 'doc-1',
+    });
+    if (!snapshot) throw new Error('target required');
+    const request = requestFor(snapshot);
+    const run = vi.fn(() => true);
+    const insertContentAt = vi.fn(() => ({ run }));
+    const focus = vi.fn(() => ({ insertContentAt }));
+
+    expect(
+      applyWysiwygLocalAgentResult({
+        editor: {
+          chain: vi.fn(() => ({ focus })),
+          state: { doc: { content: { size: 6 } } },
+        },
+        snapshot,
+        currentDocumentId: 'doc-1',
+        currentSource: 'alpha',
+        request,
+        result: resultFor(request),
+      }),
+    ).toBe(false);
+    expect(insertContentAt).not.toHaveBeenCalled();
   });
 
   it('converts any captured target into a range-free document target', () => {

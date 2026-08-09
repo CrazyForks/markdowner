@@ -5,7 +5,10 @@ import type {
   LocalAgentRunResult,
   LocalAgentTargetKind,
 } from './localAgents/types';
-import type { LocalAgentTargetSnapshot } from './localAgents/targets';
+import {
+  isValidLocalAgentTargetSnapshot,
+  type LocalAgentTargetSnapshot,
+} from './localAgents/targets';
 
 export type AiReviewOrigin =
   | { kind: 'openrouter' }
@@ -183,6 +186,7 @@ function localAgentMetadataMatches(
   result: LocalAgentRunResult,
 ): boolean {
   if (
+    !isValidLocalAgentTargetSnapshot(snapshot) ||
     result.schemaVersion !== 1 ||
     request.documentId !== snapshot.documentId ||
     result.documentId !== request.documentId ||

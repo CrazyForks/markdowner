@@ -18,6 +18,48 @@ export interface LocalAgentTargetSnapshot {
   proseMirrorRange: AiByteRange | null;
 }
 
+export function isValidLocalAgentTargetSnapshot(
+  snapshot: LocalAgentTargetSnapshot,
+): boolean {
+  if (!snapshot.documentId.trim()) return false;
+  if (snapshot.kind === 'document') {
+    return (
+      snapshot.characterRange === null &&
+      snapshot.byteRange === null &&
+      snapshot.selectedText === '' &&
+      snapshot.proseMirrorRange === null
+    );
+  }
+
+  const characterRange = snapshot.characterRange;
+  const byteRange = snapshot.byteRange;
+  if (
+    !characterRange ||
+    !byteRange ||
+    !isRangeWithin(characterRange, snapshot.source.length) ||
+    splitsSurrogatePair(snapshot.source, characterRange.start) ||
+    splitsSurrogatePair(snapshot.source, characterRange.end) ||
+    !sameRange(byteRange, {
+      start: utf8Length(snapshot.source.slice(0, characterRange.start)),
+      end: utf8Length(snapshot.source.slice(0, characterRange.end)),
+    }) ||
+    snapshot.selectedText !==
+      snapshot.source.slice(characterRange.start, characterRange.end)
+  ) {
+    return false;
+  }
+
+  const collapsed = characterRange.start === characterRange.end;
+  if (snapshot.kind === 'insert' ? !collapsed : collapsed) return false;
+  if (snapshot.surface === 'source') return snapshot.proseMirrorRange === null;
+  return (
+    snapshot.proseMirrorRange !== null &&
+    isProseMirrorRangeValid(snapshot.proseMirrorRange) &&
+    (snapshot.proseMirrorRange.start === snapshot.proseMirrorRange.end) ===
+      collapsed
+  );
+}
+
 export function captureSourceLocalAgentTarget(input: {
   source: string;
   anchor: number;
@@ -42,11 +84,22 @@ export function captureWysiwygLocalAgentTarget(input: {
   markdownEnd?: number;
   proseMirrorFrom: number;
   proseMirrorTo: number;
+  proseMirrorDocumentSize?: number;
   documentId: string;
 }): LocalAgentTargetSnapshot | null {
   const anchor = input.markdownAnchor ?? input.markdownStart;
   const head = input.markdownHead ?? input.markdownEnd;
   if (anchor === undefined || head === undefined) return null;
+
+  const proseMirrorRange = {
+    start: input.proseMirrorFrom,
+    end: input.proseMirrorTo,
+  };
+  if (
+    !isProseMirrorRangeValid(proseMirrorRange, input.proseMirrorDocumentSize)
+  ) {
+    return null;
+  }
 
   return captureLocalAgentTarget({
     source: input.source,
@@ -54,10 +107,7 @@ export function captureWysiwygLocalAgentTarget(input: {
     end: Math.max(anchor, head),
     documentId: input.documentId,
     surface: 'wysiwyg',
-    proseMirrorRange: {
-      start: clampNonNegativeOffset(Math.min(input.proseMirrorFrom, input.proseMirrorTo)),
-      end: clampNonNegativeOffset(Math.max(input.proseMirrorFrom, input.proseMirrorTo)),
-    },
+    proseMirrorRange,
   });
 }
 
@@ -131,6 +181,7 @@ export function applyWysiwygLocalAgentResult(input: {
         ) => { run: () => boolean };
       };
     };
+    state?: { doc: { content: { size: number } } };
   };
   snapshot: LocalAgentTargetSnapshot;
   currentDocumentId: string;
@@ -141,6 +192,14 @@ export function applyWysiwygLocalAgentResult(input: {
   const range = validApplicationRange(input);
   const proseMirrorRange = input.snapshot.proseMirrorRange;
   if (input.snapshot.surface !== 'wysiwyg' || !range || !proseMirrorRange) {
+    return false;
+  }
+  if (
+    !isProseMirrorRangeValid(
+      proseMirrorRange,
+      input.editor.state?.doc.content.size,
+    )
+  ) {
     return false;
   }
 
@@ -176,7 +235,7 @@ function captureLocalAgentTarget(input: {
   }
 
   const selectedText = input.source.slice(start, end);
-  return {
+  const snapshot: LocalAgentTargetSnapshot = {
     documentId: input.documentId,
     source: input.source,
     surface: input.surface,
@@ -189,6 +248,7 @@ function captureLocalAgentTarget(input: {
     selectedText,
     proseMirrorRange: input.proseMirrorRange,
   };
+  return isValidLocalAgentTargetSnapshot(snapshot) ? snapshot : null;
 }
 
 function validApplicationRange(input: {
@@ -202,6 +262,7 @@ function validApplicationRange(input: {
   const characterRange = snapshot.characterRange;
   const byteRange = snapshot.byteRange;
   if (
+    !isValidLocalAgentTargetSnapshot(snapshot) ||
     snapshot.kind === 'document' ||
     !characterRange ||
     !byteRange ||
@@ -236,14 +297,29 @@ function sameRange(left: AiByteRange | null, right: AiByteRange): boolean {
   return left?.start === right.start && left.end === right.end;
 }
 
+function isRangeWithin(range: AiByteRange, maximum: number): boolean {
+  return (
+    Number.isInteger(range.start) &&
+    Number.isInteger(range.end) &&
+    range.start >= 0 &&
+    range.end >= range.start &&
+    range.end <= maximum
+  );
+}
+
+function isProseMirrorRangeValid(
+  range: AiByteRange,
+  documentSize?: number,
+): boolean {
+  if (!isRangeWithin(range, documentSize ?? Number.MAX_SAFE_INTEGER)) {
+    return false;
+  }
+  return documentSize === undefined || Number.isInteger(documentSize);
+}
+
 function clampCharacterOffset(source: string, value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(source.length, Math.round(value)));
-}
-
-function clampNonNegativeOffset(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.round(value));
 }
 
 function splitsSurrogatePair(source: string, offset: number): boolean {

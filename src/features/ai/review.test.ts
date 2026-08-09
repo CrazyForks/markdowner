@@ -211,6 +211,13 @@ describe('AI review origins', () => {
         result,
       ),
     ).toThrow(/local-agent metadata/i);
+    expect(() =>
+      createLocalAgentReview(
+        { ...snapshot, byteRange: { start: 2, end: 3 } },
+        request,
+        result,
+      ),
+    ).toThrow(/local-agent metadata/i);
   });
 
   it('normalizes a document result into one whole-document replacement proposal', () => {
