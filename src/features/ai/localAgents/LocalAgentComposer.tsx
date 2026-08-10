@@ -302,10 +302,15 @@ export function LocalAgentComposer({
       }
     } finally {
       if (isCurrentRun(requestId, generation)) {
+        const cancelled = isCancelledRun(requestId, generation);
         runningRequestIdRef.current = null;
         activeCancelRef.current = null;
         setCancellingRequestId(null);
         setRunningRequestId(null);
+        if (cancelled) {
+          setError("");
+          setLifecycleStatus("Local agent request cancelled.");
+        }
       }
     }
   };
@@ -349,12 +354,8 @@ export function LocalAgentComposer({
       }
       attempt.inFlight = false;
       attempt.cancelled = true;
-      runningRequestIdRef.current = null;
-      activeCancelRef.current = null;
-      setCancellingRequestId(null);
-      setRunningRequestId(null);
       setError("");
-      setLifecycleStatus("Local agent request cancelled.");
+      setLifecycleStatus("Cancelling local agent…");
     } catch {
       if (
         isCurrentRun(requestId, generation) &&
