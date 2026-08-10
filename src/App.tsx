@@ -595,6 +595,8 @@ export default function App() {
   const [localAgentSnapshot, setLocalAgentSnapshot] =
     useState<LocalAgentTargetSnapshot | null>(null);
   const [localAgentComposerOpen, setLocalAgentComposerOpen] = useState(false);
+  const [localAgentComposerSessionId, setLocalAgentComposerSessionId] =
+    useState(0);
   const [localAgentPreferredAgent, setLocalAgentPreferredAgent] =
     useState<LocalAgentKind | null>(null);
   const openLocalAgentComposerRef = useRef<
@@ -3706,6 +3708,7 @@ export default function App() {
       setAiSelectionAnchor(null);
       setLocalAgentSnapshot(captured);
       setLocalAgentPreferredAgent(preferredAgent);
+      setLocalAgentComposerSessionId((sessionId) => sessionId + 1);
       setLocalAgentComposerOpen(true);
     },
   );
@@ -7233,6 +7236,7 @@ export default function App() {
       ) : null}
       {localAgentSnapshot && localAgentComposerOpen ? (
         <LocalAgentComposer
+          key={localAgentComposerSessionId}
           snapshot={localAgentSnapshot}
           disclosureAccepted={settings.localAgentDisclosureAccepted}
           preferredAgent={localAgentPreferredAgent}

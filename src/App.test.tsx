@@ -1715,6 +1715,63 @@ describe('App recent documents', () => {
     );
   });
 
+  it('resets local agent session state when another entry point captures a new target', async () => {
+    const source = 'alpha beta';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'session.md',
+        activeDocumentPath: '/tmp/project/session.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    await screen.findByTestId('mock-tiptap-editor');
+    editor.commands.setTextSelection({ from: 6, to: 10 });
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+    fireEvent.click(
+      await within(palette).findByRole('option', { name: /run local agent/i }),
+    );
+    await screen.findByRole('dialog', { name: /run a local agent/i });
+
+    const codexOption = await screen.findByRole('option', {
+      name: /@codex.*Codex/i,
+    });
+    await waitFor(() => expect(codexOption).toBeEnabled());
+    fireEvent.click(codexOption);
+    fireEvent.change(screen.getByLabelText('Instruction'), {
+      target: { value: 'Keep this stale instruction' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Apply result to' }), {
+      target: { value: 'document' },
+    });
+    expect(screen.getByText('@codex')).toBeVisible();
+
+    setEligibleLocalAgentMentionSelection(editor, 6);
+    const event = new KeyboardEvent('keydown', {
+      key: '@',
+      shiftKey: true,
+      cancelable: true,
+    });
+    expect(
+      tiptapMockState.lastOptions.editorProps.handleKeyDown(editor.view, event),
+    ).toBe(true);
+
+    expect(await screen.findByLabelText('Local agent')).toHaveValue('@');
+    expect(screen.getByRole('listbox', { name: 'Local agent suggestions' })).toBeVisible();
+    expect(screen.getByLabelText('Instruction')).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+      'insert',
+    );
+    expect(screen.queryByRole('button', { name: 'Remove @codex' })).toBeNull();
+  });
+
   it('captures a Source selection from the Command Palette for a local agent', async () => {
     const source = 'alpha beta';
     bootstrapMock.mockResolvedValue(
