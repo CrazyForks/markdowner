@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { Schema } from "@tiptap/pm/model";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 
 import {
   filterLocalAgentMentions,
@@ -91,6 +93,38 @@ describe("local agent mentions", () => {
       from: 7,
       to: 7,
     });
+  });
+
+  it("rejects a collapsed paragraph selection inside a real table cell", () => {
+    const schema = new Schema({
+      nodes: {
+        doc: { content: "block+" },
+        text: { group: "inline" },
+        paragraph: { group: "block", content: "inline*" },
+        table: { group: "block", content: "tableRow+" },
+        tableRow: { content: "tableCell+" },
+        tableCell: { content: "paragraph+" },
+      },
+    });
+    const document = schema.node("doc", null, [
+      schema.node("table", null, [
+        schema.node("tableRow", null, [
+          schema.node("tableCell", null, [
+            schema.node("paragraph", null, [schema.text(" ")]),
+          ]),
+        ]),
+      ]),
+    ]);
+    let textPosition = 0;
+    document.descendants((node, position) => {
+      if (node.isText) textPosition = position;
+    });
+    const state = EditorState.create({
+      doc: document,
+      selection: TextSelection.create(document, textPosition + 1),
+    });
+
+    expect(isEligibleLocalAgentMentionKey({ state }, key())).toBeNull();
   });
 
   it.each([

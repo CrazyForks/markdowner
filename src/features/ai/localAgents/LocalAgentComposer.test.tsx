@@ -53,6 +53,22 @@ const statuses: LocalAgentStatus[] = [
   },
 ];
 
+const mixedStatuses: LocalAgentStatus[] = [
+  statuses[0],
+  {
+    ...statuses[1],
+    compatible: false,
+    reason: "This version is not supported.",
+  },
+  { ...statuses[2], compatible: true, reason: null },
+];
+
+const disabledStatuses: LocalAgentStatus[] = statuses.map((status) => ({
+  ...status,
+  compatible: false,
+  reason: "Unavailable.",
+}));
+
 const selectionSnapshot: LocalAgentTargetSnapshot = {
   documentId: "doc-1",
   source: "안녕 world",
@@ -149,12 +165,81 @@ describe("LocalAgentComposer", () => {
     fireEvent.keyDown(input, { key: "ArrowUp" });
     fireEvent.keyDown(input, { key: "Tab" });
     expect(screen.getByText("@claude")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Change local agent" }),
+    ).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Remove @claude" }));
     expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(screen.getByLabelText("Local agent")).toHaveFocus();
     await chooseAgent("@codex");
     fireEvent.click(screen.getByRole("button", { name: "Change local agent" }));
     fireEvent.keyDown(screen.getByLabelText("Local agent"), { key: "Escape" });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("navigates only compatible mention options and prevents Tab from escaping when none are selectable", async () => {
+    renderComposer({
+      preferredAgent: null,
+      services: {
+        listStatuses: vi.fn().mockResolvedValue(mixedStatuses),
+        run: vi.fn(),
+        cancel: vi.fn(),
+      },
+    });
+    const input = screen.getByLabelText("Local agent");
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: /@claude/i })).toBeEnabled(),
+    );
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute(
+      "aria-activedescendant",
+      "local-agent-option-opencode",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("@opencode")).toBeInTheDocument();
+
+    cleanup();
+    renderComposer({
+      preferredAgent: null,
+      services: {
+        listStatuses: vi.fn().mockResolvedValue(disabledStatuses),
+        run: vi.fn(),
+        cancel: vi.fn(),
+      },
+    });
+    const disabledInput = screen.getByLabelText("Local agent");
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: /@claude/i })).toBeDisabled(),
+    );
+    fireEvent.keyDown(disabledInput, { key: "ArrowDown" });
+    expect(disabledInput).not.toHaveAttribute("aria-activedescendant");
+    const tab = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Tab",
+    });
+    disabledInput.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(disabledInput).toHaveFocus();
+    fireEvent.keyDown(disabledInput, { key: "Enter" });
+    expect(
+      screen.queryByRole("button", { name: "Change local agent" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("returns focus to Change when the replacement picker closes with Escape", async () => {
+    renderComposer();
+    await waitForStatuses();
+    const change = screen.getByRole("button", { name: "Change local agent" });
+    change.focus();
+    fireEvent.click(change);
+    expect(screen.getByLabelText("Local agent")).toHaveFocus();
+    fireEvent.keyDown(screen.getByLabelText("Local agent"), { key: "Escape" });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Change local agent" }),
+      ).toHaveFocus(),
+    );
   });
 
   it("preserves the instruction and target while replacing a selected agent", async () => {
@@ -335,6 +420,64 @@ describe("LocalAgentComposer", () => {
       /sk-secret|private\/tmp/i,
     );
     expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("best-effort cancels an active request exactly once when the composer unmounts", async () => {
+    const pending = deferred<LocalAgentRunResult>();
+    const cancel = vi
+      .fn()
+      .mockRejectedValue(new Error("secret cancellation path"));
+    const run = vi.fn().mockReturnValue(pending.promise);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { unmount } = renderComposer({
+      services: {
+        listStatuses: vi.fn().mockResolvedValue(statuses),
+        run,
+        cancel,
+      },
+    });
+    await waitForStatuses();
+    fireEvent.change(screen.getByLabelText("Instruction"), {
+      target: { value: "Use it" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run @codex" }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    const requestId = run.mock.calls[0][0].requestId;
+
+    unmount();
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith(requestId));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await act(async () => Promise.resolve());
+    expect(consoleError).not.toHaveBeenCalled();
+    await act(async () => pending.resolve(resultFor(run.mock.calls[0][0])));
+    consoleError.mockRestore();
+  });
+
+  it("does not cancel an active request a second time after the user already cancelled it", async () => {
+    const pending = deferred<LocalAgentRunResult>();
+    const cancel = vi.fn().mockResolvedValue(true);
+    const run = vi.fn().mockReturnValue(pending.promise);
+    const { unmount } = renderComposer({
+      services: {
+        listStatuses: vi.fn().mockResolvedValue(statuses),
+        run,
+        cancel,
+      },
+    });
+    await waitForStatuses();
+    fireEvent.change(screen.getByLabelText("Instruction"), {
+      target: { value: "Use it" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run @codex" }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel local agent" }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve(resultFor(run.mock.calls[0][0])));
   });
 
   it("ignores stale status responses after unmount and forwards only content-free lifecycle status", async () => {

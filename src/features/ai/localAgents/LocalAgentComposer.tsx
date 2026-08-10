@@ -81,10 +81,29 @@ export function LocalAgentComposer({
   const statusGenerationRef = useRef(0);
   const runGenerationRef = useRef(0);
   const runningRequestIdRef = useRef<string | null>(null);
+  const cancelRequestedIdRef = useRef<string | null>(null);
+  const activeCancelRef = useRef<
+    ((requestId: string) => Promise<boolean>) | null
+  >(null);
   const mentionInputRef = useRef<HTMLInputElement | null>(null);
+  const changeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restoreChangeFocusRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
+    return () => {
+      const activeRequestId = runningRequestIdRef.current;
+      statusGenerationRef.current += 1;
+      mountedRef.current = false;
+      runGenerationRef.current += 1;
+      if (activeRequestId && cancelRequestedIdRef.current !== activeRequestId) {
+        cancelRequestedIdRef.current = activeRequestId;
+        void activeCancelRef.current?.(activeRequestId).catch(() => undefined);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const generation = statusGenerationRef.current + 1;
     statusGenerationRef.current = generation;
     setStatusLoading(true);
@@ -106,17 +125,16 @@ export function LocalAgentComposer({
           setStatusLoading(false);
         }
       });
-    return () => {
-      statusGenerationRef.current += 1;
-      mountedRef.current = false;
-      runGenerationRef.current += 1;
-    };
   }, [services]);
 
   useEffect(() => {
-    if (!mentionOpen) return;
-    mentionInputRef.current?.focus();
-  }, [mentionOpen]);
+    if (mentionOpen) {
+      mentionInputRef.current?.focus();
+    } else if (restoreChangeFocusRef.current) {
+      restoreChangeFocusRef.current = false;
+      changeButtonRef.current?.focus();
+    }
+  }, [mentionOpen, selectedAgent]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -133,6 +151,16 @@ export function LocalAgentComposer({
     () => filterLocalAgentMentions(mentionQuery),
     [mentionQuery],
   );
+  const compatibleMentionOptions = useMemo(
+    () =>
+      mentionOptions.filter((agent) =>
+        statuses.some(
+          (status) => status.kind === agent.kind && status.compatible,
+        ),
+      ),
+    [mentionOptions, statuses],
+  );
+  const activeMention = compatibleMentionOptions[activeMentionIndex] ?? null;
   const selectedStatus = selectedAgent
     ? (statuses.find((status) => status.kind === selectedAgent) ?? null)
     : null;
@@ -155,6 +183,7 @@ export function LocalAgentComposer({
     setSelectedAgent(agent);
     setMentionQuery("@");
     setActiveMentionIndex(0);
+    restoreChangeFocusRef.current = true;
     setMentionOpen(false);
     setError("");
   };
@@ -164,28 +193,28 @@ export function LocalAgentComposer({
   ) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      restoreChangeFocusRef.current = selectedAgent !== null;
       setMentionOpen(false);
       return;
     }
-    if (!mentionOptions.length) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
+      if (!compatibleMentionOptions.length) {
+        setActiveMentionIndex(-1);
+        return;
+      }
       setActiveMentionIndex((current) => {
         const change = event.key === "ArrowDown" ? 1 : -1;
         return (
-          (current + change + mentionOptions.length) % mentionOptions.length
+          (current + change + compatibleMentionOptions.length) %
+          compatibleMentionOptions.length
         );
       });
       return;
     }
     if (event.key === "Enter" || event.key === "Tab") {
-      const active =
-        mentionOptions[Math.min(activeMentionIndex, mentionOptions.length - 1)];
-      const status =
-        active && statuses.find((candidate) => candidate.kind === active.kind);
-      if (!active || !status?.compatible) return;
       event.preventDefault();
-      selectAgent(active.kind);
+      if (activeMention) selectAgent(activeMention.kind);
     }
   };
 
@@ -204,6 +233,8 @@ export function LocalAgentComposer({
     const generation = runGenerationRef.current + 1;
     runGenerationRef.current = generation;
     runningRequestIdRef.current = requestId;
+    cancelRequestedIdRef.current = null;
+    activeCancelRef.current = services.cancel;
     setRunningRequestId(requestId);
     setLifecycleStatus("Starting local agent…");
     setError("");
@@ -231,6 +262,7 @@ export function LocalAgentComposer({
     } finally {
       if (mountedRef.current && runGenerationRef.current === generation) {
         runningRequestIdRef.current = null;
+        activeCancelRef.current = null;
         setRunningRequestId(null);
       }
     }
@@ -238,10 +270,11 @@ export function LocalAgentComposer({
 
   const handleCancel = async () => {
     const requestId = runningRequestIdRef.current;
-    if (!requestId) return;
+    if (!requestId || cancelRequestedIdRef.current === requestId) return;
+    cancelRequestedIdRef.current = requestId;
     setLifecycleStatus("Cancelling local agent…");
     try {
-      await services.cancel(requestId);
+      await (activeCancelRef.current ?? services.cancel)(requestId);
     } catch {
       if (mountedRef.current && runningRequestIdRef.current === requestId) {
         setError("Could not cancel local agent.");
@@ -294,6 +327,7 @@ export function LocalAgentComposer({
                   variant="ghost"
                   disabled={Boolean(runningRequestId)}
                   aria-label="Change local agent"
+                  ref={changeButtonRef}
                   onClick={() => setMentionOpen(true)}
                 >
                   Change
@@ -322,8 +356,8 @@ export function LocalAgentComposer({
                 aria-controls="local-agent-mention-list"
                 aria-expanded={mentionOpen}
                 aria-activedescendant={
-                  mentionOptions[activeMentionIndex]
-                    ? `local-agent-option-${mentionOptions[activeMentionIndex].kind}`
+                  activeMention
+                    ? `local-agent-option-${activeMention.kind}`
                     : undefined
                 }
                 value={mentionQuery}
@@ -343,7 +377,7 @@ export function LocalAgentComposer({
                   aria-label="Local agent suggestions"
                   className="mt-1 grid overflow-hidden rounded-md border border-border"
                 >
-                  {mentionOptions.map((agent, index) => {
+                  {mentionOptions.map((agent) => {
                     const status = statuses.find(
                       (candidate) => candidate.kind === agent.kind,
                     );
@@ -354,7 +388,7 @@ export function LocalAgentComposer({
                         id={`local-agent-option-${agent.kind}`}
                         type="button"
                         role="option"
-                        aria-selected={index === activeMentionIndex}
+                        aria-selected={agent.kind === activeMention?.kind}
                         disabled={unavailable || Boolean(runningRequestId)}
                         onClick={() => selectAgent(agent.kind)}
                         className="flex items-center justify-between gap-3 border-b border-border px-2 py-2 text-left text-sm last:border-b-0 disabled:cursor-not-allowed disabled:opacity-50"

@@ -26,6 +26,10 @@ const UNSAFE_NODE_NAMES = new Set([
   "frontMatter",
   "front_matter",
   "yaml",
+  "table",
+  "tableRow",
+  "tableCell",
+  "tableHeader",
 ]);
 
 /**
