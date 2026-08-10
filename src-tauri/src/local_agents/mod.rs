@@ -660,7 +660,10 @@ impl LocalAgentState {
             active
                 .values_mut()
                 .filter_map(|run| {
-                    if run.phase == ActiveRunPhase::Running {
+                    if matches!(
+                        run.phase,
+                        ActiveRunPhase::Running | ActiveRunPhase::PostProcessing
+                    ) {
                         run.phase = ActiveRunPhase::Cancelling;
                         Some(run.cancellation.clone())
                     } else {
@@ -1800,7 +1803,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shutdown_leaves_owned_post_processing_to_finish_before_idle() {
+    async fn shutdown_cancels_owned_post_processing_before_idle() {
         let state = LocalAgentState::default();
         let run = state.begin("main", "validating").unwrap();
         assert!(state.begin_post_processing("main", "validating", run.generation()));
@@ -1819,12 +1822,31 @@ mod tests {
             .unwrap();
 
         state.begin_shutdown_with(|| {});
-        assert!(!run.cancellation_token().is_cancelled());
+        assert!(run.cancellation_token().is_cancelled());
+        assert_eq!(
+            state.active.lock().unwrap().get("main").unwrap().phase,
+            super::ActiveRunPhase::Cancelling
+        );
         assert!(!state.wait_for_idle(Duration::ZERO).await);
         let terminal_claim = state
             .enter_terminal("main", "validating", run.generation())
             .unwrap();
-        assert!(terminal_claim.outcome_won());
+        assert!(!terminal_claim.outcome_won());
+        let terminal_event = if terminal_claim.outcome_won() {
+            LocalAgentStreamEvent::Completed {
+                request_id: "validating".to_string(),
+            }
+        } else {
+            LocalAgentStreamEvent::Cancelled {
+                request_id: "validating".to_string(),
+            }
+        };
+        assert_eq!(
+            terminal_event,
+            LocalAgentStreamEvent::Cancelled {
+                request_id: "validating".to_string()
+            }
+        );
         assert!(terminal_claim.mark_delivered());
         drop(terminal_claim);
         assert!(!state.wait_for_idle(Duration::ZERO).await);
