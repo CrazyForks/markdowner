@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU8, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -90,8 +90,47 @@ const CLI_BINARY_INSTALL_PATH: &str = "/usr/local/bin/mdner";
 const CLI_BINARY_SCRIPT_TAG: &str = "# markdowner-cli-wrapper";
 const NEW_WINDOW_LABEL_PREFIX: &str = "markdownerWindow";
 const NEW_WINDOW_URL: &str = "index.html?markdownerNewWindow=1";
+// Cover the process layer's initial five-second group-confirmation bound plus
+// its tracked five-second deferred cleanup fallback and scheduling margin.
+const LOCAL_AGENT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(11);
 
 static NEXT_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExitRequestDisposition {
+    StartShutdown,
+    WaitForShutdown,
+    AllowExit,
+}
+
+#[derive(Default)]
+struct ExitCoordinator {
+    phase: AtomicU8,
+}
+
+impl ExitCoordinator {
+    fn request(&self) -> ExitRequestDisposition {
+        loop {
+            match self.phase.load(Ordering::Acquire) {
+                0 => {
+                    if self
+                        .phase
+                        .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                    {
+                        return ExitRequestDisposition::StartShutdown;
+                    }
+                }
+                1 => return ExitRequestDisposition::WaitForShutdown,
+                _ => return ExitRequestDisposition::AllowExit,
+            }
+        }
+    }
+
+    fn allow_exit(&self) {
+        self.phase.store(2, Ordering::Release);
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct MenuCommandDescriptor {
@@ -2006,9 +2045,32 @@ fn unique_asset_destination(asset_dir: &Path, file_name: &str) -> PathBuf {
     }
 }
 
+async fn complete_local_agent_shutdown(app_handle: AppHandle, exit_code: i32) {
+    let local_agent_state = app_handle
+        .state::<local_agents::LocalAgentState>()
+        .inner()
+        .clone();
+    let _ = local_agent_state
+        .wait_for_shutdown_idle(LOCAL_AGENT_SHUTDOWN_TIMEOUT)
+        .await;
+    app_handle.state::<ExitCoordinator>().allow_exit();
+    app_handle.exit(exit_code);
+}
+
 #[tauri::command]
-fn quit_app(app_handle: AppHandle) {
-    app_handle.exit(0);
+async fn quit_app(app_handle: AppHandle) {
+    match app_handle.state::<ExitCoordinator>().request() {
+        ExitRequestDisposition::StartShutdown => {
+            let local_agent_state = app_handle
+                .state::<local_agents::LocalAgentState>()
+                .inner()
+                .clone();
+            local_agent_state.begin_shutdown();
+            complete_local_agent_shutdown(app_handle, 0).await;
+        }
+        ExitRequestDisposition::WaitForShutdown => {}
+        ExitRequestDisposition::AllowExit => app_handle.exit(0),
+    }
 }
 
 /// Hide the app the way ⌘H does. With no tabs open, ⌘W should hide the whole
@@ -2136,6 +2198,8 @@ pub fn run() {
             app.manage(state);
             app.manage(PendingCliWaits(Mutex::new(HashMap::new())));
             app.manage(terminal::TerminalState::new());
+            app.manage(local_agents::LocalAgentState::default());
+            app.manage(ExitCoordinator::default());
             let ai_state = ai::AiState::new(app.path().app_data_dir()?)
                 .map_err(|error| std::io::Error::other(error.message))?;
             app.manage(ai_state);
@@ -2220,12 +2284,53 @@ pub fn run() {
             ai::ai_interview_resume,
             ai::ai_render_selected_operations,
             ai::ai_discard_result,
+            local_agents::local_agent_statuses,
+            local_agents::local_agent_run,
+            local_agents::local_agent_cancel,
             updater::check_for_update,
             updater::download_and_install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while running Markdowner desktop shell")
         .run(|app_handle, event| {
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } = &event
+            {
+                app_handle
+                    .state::<local_agents::LocalAgentState>()
+                    .cancel_window(label);
+            }
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
+                let local_agent_state = app_handle.state::<local_agents::LocalAgentState>();
+                if *code == Some(tauri::RESTART_EXIT_CODE) {
+                    // Tauri ignores prevent_exit for restart requests, so the
+                    // only reliable lifecycle seam here is the synchronous
+                    // shutdown latch and process-group termination fallback.
+                    local_agent_state.begin_shutdown();
+                } else {
+                    match app_handle.state::<ExitCoordinator>().request() {
+                        ExitRequestDisposition::StartShutdown => {
+                            api.prevent_exit();
+                            local_agent_state.begin_shutdown();
+                            let exit_code = (*code).unwrap_or_default();
+                            let shutdown_app = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                complete_local_agent_shutdown(shutdown_app, exit_code).await;
+                            });
+                        }
+                        ExitRequestDisposition::WaitForShutdown => api.prevent_exit(),
+                        ExitRequestDisposition::AllowExit => {}
+                    }
+                }
+            }
+            if let tauri::RunEvent::Exit = &event {
+                app_handle
+                    .state::<local_agents::LocalAgentState>()
+                    .begin_shutdown();
+            }
             // A fresh `mdner …` launch execs the bundle binary directly rather
             // than going through LaunchServices, so the OS hands focus back to
             // the terminal once startup settles. Activating in `setup` lands
@@ -2277,6 +2382,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, fs, path::Path};
+    use std::sync::{Arc, Barrier};
 
     use base64::Engine as _;
     use markdowner_core::{ThemeKind, storage::DraftBackupEntry};
@@ -2284,7 +2390,8 @@ mod tests {
 
     use super::{
         CLI_BINARY_SCRIPT_TAG, CTRL_G_LAUNCHER_BEGIN_MARKER, CTRL_G_LAUNCHER_END_MARKER,
-        CTRL_G_LAUNCHER_SNIPPET, DesktopBackend, FILE_MENU_COMMANDS, MENU_COMMAND_CLOSE_WINDOW,
+        CTRL_G_LAUNCHER_SNIPPET, DesktopBackend, ExitCoordinator, ExitRequestDisposition,
+        FILE_MENU_COMMANDS, LOCAL_AGENT_SHUTDOWN_TIMEOUT, MENU_COMMAND_CLOSE_WINDOW,
         MENU_COMMAND_NEW_DOCUMENT, MENU_COMMAND_NEW_WINDOW, MENU_COMMAND_OPEN_DOCUMENT,
         MENU_COMMAND_OPEN_WORKSPACE, MENU_COMMAND_QUIT_APP, MENU_COMMAND_SAVE_ACTIVE_DOCUMENT,
         MENU_COMMAND_SAVE_ACTIVE_DOCUMENT_AS, MENU_COMMAND_SET_MODE_SPLITVIEW, MENU_EDIT_TITLE,
@@ -2298,6 +2405,63 @@ mod tests {
         shell_config_path_for_shell, top_level_menu_sections, uninstall_cli_binary_at,
         uninstall_ctrl_g_launcher_block,
     };
+
+    #[test]
+    fn exit_coordinator_prevents_until_one_shutdown_finishes_then_allows_once() {
+        let coordinator = ExitCoordinator::default();
+
+        assert_eq!(coordinator.request(), ExitRequestDisposition::StartShutdown);
+        assert_eq!(
+            coordinator.request(),
+            ExitRequestDisposition::WaitForShutdown
+        );
+
+        coordinator.allow_exit();
+
+        assert_eq!(coordinator.request(), ExitRequestDisposition::AllowExit);
+        assert_eq!(coordinator.request(), ExitRequestDisposition::AllowExit);
+    }
+
+    #[test]
+    fn exit_coordinator_allows_exactly_one_concurrent_shutdown_owner() {
+        const CALLERS: usize = 8;
+        let coordinator = Arc::new(ExitCoordinator::default());
+        let barrier = Arc::new(Barrier::new(CALLERS));
+        let callers = (0..CALLERS)
+            .map(|_| {
+                let coordinator = coordinator.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    coordinator.request()
+                })
+            })
+            .collect::<Vec<_>>();
+        let dispositions = callers
+            .into_iter()
+            .map(|caller| caller.join().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            dispositions
+                .iter()
+                .filter(|&&result| result == ExitRequestDisposition::StartShutdown)
+                .count(),
+            1
+        );
+        assert_eq!(
+            dispositions
+                .iter()
+                .filter(|&&result| result == ExitRequestDisposition::WaitForShutdown)
+                .count(),
+            CALLERS - 1
+        );
+    }
+
+    #[test]
+    fn local_agent_exit_barrier_outlasts_both_process_group_cleanup_phases() {
+        assert!(LOCAL_AGENT_SHUTDOWN_TIMEOUT > std::time::Duration::from_secs(10));
+    }
 
     #[test]
     fn import_image_asset_copies_into_the_asset_folder_and_returns_a_relative_path() {

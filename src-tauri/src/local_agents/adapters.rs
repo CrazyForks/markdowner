@@ -111,6 +111,8 @@ fn build_codex_invocation(
 
     let mut args = strings_to_args(&[
         "exec",
+        "--ignore-user-config",
+        "--ignore-rules",
         "--strict-config",
         "--sandbox",
         "read-only",
@@ -1268,6 +1270,8 @@ mod tests {
         let result_path = temp.path().join("local-agent-result.json");
         let mut expected = os_strings(&[
             "exec",
+            "--ignore-user-config",
+            "--ignore-rules",
             "--strict-config",
             "--sandbox",
             "read-only",

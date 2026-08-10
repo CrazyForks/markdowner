@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     env,
     ffi::{OsStr, OsString},
+    fs::{self, File, OpenOptions},
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -11,16 +12,28 @@ use std::{
 };
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use tempfile::TempDir;
+use tokio_util::sync::CancellationToken;
+
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use super::{
     LocalAgentError, LocalAgentKind, LocalAgentStatus, OPEN_CODE_OWNED_AGENT, ResolvedAgent,
     owned_opencode_environment,
+    process::{
+        RegisteredProcessGroup, RejectedProcessGroup, controlled_environment, create_owned_temp_dir,
+    },
 };
 
 pub(super) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_STDOUT_LIMIT: usize = 256 * 1024;
 const PROBE_STDERR_LIMIT: usize = 64 * 1024;
+const PROBE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 const LOGIN_SHELL_PATH_LIMIT: usize = 64 * 1024;
+const MAX_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_SHEBANG_BYTES: usize = 512;
 
 pub(super) const CAPABILITY_PROBE_TIMEOUT_REASON: &str = "Capability probe timed out.";
 const CLAUDE_FLAGS_REASON: &str = "Required Claude Code safety flags are unavailable.";
@@ -95,6 +108,8 @@ const CLAUDE_REQUIRED_FLAGS: &[&str] = &[
 
 const CODEX_REQUIRED_FLAGS: &[&str] = &[
     "--strict-config",
+    "--ignore-user-config",
+    "--ignore-rules",
     "--sandbox",
     "--ephemeral",
     "--skip-git-repo-check",
@@ -139,7 +154,555 @@ pub(super) trait ProbeRunner {
     ) -> Result<ProbeOutput, LocalAgentError>;
 }
 
+pub(super) struct ExecutableProof {
+    executable: ExecutableFileProof,
+    interpreters: Vec<InterpreterProof>,
+    environment_path: OsString,
+}
+
+impl ExecutableProof {
+    #[cfg(test)]
+    pub(super) fn capture(path: &Path) -> Result<Self, LocalAgentError> {
+        let environment_path = sanitized_path_value(env::var_os("PATH").as_deref())?;
+        Self::capture_with_constraints(path, environment_path, None, None)
+    }
+
+    fn capture_with_constraints(
+        path: &Path,
+        environment_path: OsString,
+        cancellation: Option<&CancellationToken>,
+        deadline: Option<Instant>,
+    ) -> Result<Self, LocalAgentError> {
+        ensure_probe_active(cancellation, deadline)?;
+        let environment_path = normalized_environment_path(&environment_path)?;
+        let executable = ExecutableFileProof::capture(path, cancellation, deadline)?;
+        let interpreters =
+            capture_interpreter_proofs(&executable, &environment_path, cancellation, deadline)?;
+        executable.verify(path, cancellation, deadline)?;
+        ensure_probe_active(cancellation, deadline)?;
+        Ok(Self {
+            executable,
+            interpreters,
+            environment_path,
+        })
+    }
+
+    pub(super) fn verify_path(&self, path: &Path) -> Result<(), LocalAgentError> {
+        self.verify_path_with_constraints(path, None, None)
+    }
+
+    pub(super) fn verify_path_with_constraints(
+        &self,
+        path: &Path,
+        cancellation: Option<&CancellationToken>,
+        deadline: Option<Instant>,
+    ) -> Result<(), LocalAgentError> {
+        ensure_probe_active(cancellation, deadline)?;
+        self.executable.verify(path, cancellation, deadline)?;
+        for interpreter in &self.interpreters {
+            interpreter.verify(&self.environment_path, cancellation, deadline)?;
+        }
+        self.executable.verify(path, cancellation, deadline)?;
+        ensure_probe_active(cancellation, deadline)
+    }
+
+    pub(super) fn environment_path(&self) -> &OsStr {
+        &self.environment_path
+    }
+}
+
+struct ExecutableFileProof {
+    metadata: ExecutableMetadataIdentity,
+    content_sha256: [u8; 32],
+    content_prefix: Vec<u8>,
+    original_handle: File,
+}
+
+impl ExecutableFileProof {
+    fn capture(
+        path: &Path,
+        cancellation: Option<&CancellationToken>,
+        deadline: Option<Instant>,
+    ) -> Result<Self, LocalAgentError> {
+        ensure_probe_active(cancellation, deadline)?;
+        verify_safe_executable_ancestry(path)?;
+        ensure_probe_active(cancellation, deadline)?;
+        let mut original_handle = open_executable_no_follow(path)?;
+        let metadata = ExecutableMetadataIdentity::capture(path, &original_handle)?;
+        let (content_sha256, content_prefix) = executable_sha256_exact(
+            &mut original_handle,
+            metadata.length,
+            MAX_SHEBANG_BYTES + 1,
+            cancellation,
+            deadline,
+        )?;
+        metadata.verify_handle_and_path(&original_handle, path)?;
+        Ok(Self {
+            metadata,
+            content_sha256,
+            content_prefix,
+            original_handle,
+        })
+    }
+
+    fn verify(
+        &self,
+        path: &Path,
+        cancellation: Option<&CancellationToken>,
+        deadline: Option<Instant>,
+    ) -> Result<(), LocalAgentError> {
+        ensure_probe_active(cancellation, deadline)?;
+        verify_safe_executable_ancestry(path)?;
+        self.metadata
+            .verify_handle_and_path(&self.original_handle, path)?;
+        let mut current_handle = open_executable_no_follow(path)?;
+        self.metadata
+            .verify_handle_and_path(&current_handle, path)?;
+        let current_digest = executable_sha256_exact(
+            &mut current_handle,
+            self.metadata.length,
+            0,
+            cancellation,
+            deadline,
+        )?
+        .0;
+        if current_digest != self.content_sha256 {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        self.metadata
+            .verify_handle_and_path(&self.original_handle, path)?;
+        self.metadata
+            .verify_handle_and_path(&current_handle, path)?;
+        verify_safe_executable_ancestry(path)?;
+        ensure_probe_active(cancellation, deadline)
+    }
+}
+
+struct InterpreterProof {
+    requested_path: PathBuf,
+    canonical_path: PathBuf,
+    path_lookup: Option<&'static str>,
+    executable: ExecutableFileProof,
+}
+
+impl InterpreterProof {
+    fn capture(
+        requested_path: PathBuf,
+        path_lookup: Option<&'static str>,
+        cancellation: Option<&CancellationToken>,
+        deadline: Option<Instant>,
+    ) -> Result<Self, LocalAgentError> {
+        if !requested_path.is_absolute() {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        let canonical_path = requested_path
+            .canonicalize()
+            .map_err(|_| LocalAgentError::ProbeFailed)?;
+        if !canonical_path.is_absolute() || !is_executable_file(&canonical_path) {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        let executable = ExecutableFileProof::capture(&canonical_path, cancellation, deadline)?;
+        Ok(Self {
+            requested_path,
+            canonical_path,
+            path_lookup,
+            executable,
+        })
+    }
+
+    fn verify(
+        &self,
+        environment_path: &OsStr,
+        cancellation: Option<&CancellationToken>,
+        deadline: Option<Instant>,
+    ) -> Result<(), LocalAgentError> {
+        if let Some(command) = self.path_lookup
+            && resolve_interpreter_from_path(command, environment_path, cancellation, deadline)?
+                != self.requested_path
+        {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        if self.requested_path.canonicalize().ok().as_ref() != Some(&self.canonical_path) {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        self.executable
+            .verify(&self.canonical_path, cancellation, deadline)
+    }
+}
+
+const MAX_INTERPRETER_DEPTH: usize = 4;
+
+struct ParsedShebang {
+    interpreter: PathBuf,
+    arguments: Vec<String>,
+}
+
+fn capture_interpreter_proofs(
+    executable: &ExecutableFileProof,
+    environment_path: &OsStr,
+    cancellation: Option<&CancellationToken>,
+    deadline: Option<Instant>,
+) -> Result<Vec<InterpreterProof>, LocalAgentError> {
+    let mut visited = HashSet::from([executable.metadata.canonical_path.clone()]);
+    capture_interpreter_chain(
+        executable,
+        environment_path,
+        cancellation,
+        deadline,
+        0,
+        &mut visited,
+    )
+}
+
+fn capture_interpreter_chain(
+    executable: &ExecutableFileProof,
+    environment_path: &OsStr,
+    cancellation: Option<&CancellationToken>,
+    deadline: Option<Instant>,
+    depth: usize,
+    visited: &mut HashSet<PathBuf>,
+) -> Result<Vec<InterpreterProof>, LocalAgentError> {
+    ensure_probe_active(cancellation, deadline)?;
+    let Some(shebang) = parse_shebang_interpreter(&executable.content_prefix)? else {
+        return Ok(Vec::new());
+    };
+    if depth >= MAX_INTERPRETER_DEPTH {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+
+    let interpreter =
+        InterpreterProof::capture(shebang.interpreter.clone(), None, cancellation, deadline)?;
+    if !visited.insert(interpreter.canonical_path.clone()) {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    let system_environment_path = Path::new("/usr/bin/env")
+        .canonicalize()
+        .map_err(|_| LocalAgentError::ProbeFailed)?;
+    if interpreter.canonical_path != system_environment_path {
+        if parse_shebang_interpreter(&interpreter.executable.content_prefix)?.is_some() {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        return Ok(vec![interpreter]);
+    }
+
+    if shebang.interpreter != Path::new("/usr/bin/env") {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    let command = match shebang.arguments.as_slice() {
+        [command] if command == "node" => "node",
+        [command] if command == "bun" => "bun",
+        _ => return Err(LocalAgentError::ProbeFailed),
+    };
+    if parse_shebang_interpreter(&interpreter.executable.content_prefix)?.is_some() {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+
+    let target_path =
+        resolve_interpreter_from_path(command, environment_path, cancellation, deadline)?;
+    let target = InterpreterProof::capture(target_path, Some(command), cancellation, deadline)?;
+    if !visited.insert(target.canonical_path.clone()) {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    let mut nested = capture_interpreter_chain(
+        &target.executable,
+        environment_path,
+        cancellation,
+        deadline,
+        depth + 1,
+        visited,
+    )?;
+    let mut proofs = vec![interpreter, target];
+    proofs.append(&mut nested);
+    Ok(proofs)
+}
+
+fn parse_shebang_interpreter(
+    content_prefix: &[u8],
+) -> Result<Option<ParsedShebang>, LocalAgentError> {
+    if !content_prefix.starts_with(b"#!") {
+        return Ok(None);
+    }
+    let shebang_window = &content_prefix[..content_prefix.len().min(MAX_SHEBANG_BYTES)];
+    let line_end = shebang_window[2..]
+        .iter()
+        .position(|byte| matches!(*byte, b'#' | b'\n'))
+        .map(|offset| offset + 2)
+        .ok_or(LocalAgentError::ProbeFailed)?;
+    let shebang = &shebang_window[2..line_end];
+    if shebang.iter().any(|byte| {
+        matches!(*byte, b'\0' | b'\r' | 0x7f) || (*byte < b' ' && !matches!(*byte, b' ' | b'\t'))
+    }) {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    let fields: Vec<&[u8]> = shebang
+        .split(|byte| matches!(*byte, b' ' | b'\t'))
+        .filter(|field| !field.is_empty())
+        .collect();
+    let Some(interpreter) = fields.first() else {
+        return Err(LocalAgentError::ProbeFailed);
+    };
+    let interpreter =
+        PathBuf::from(std::str::from_utf8(interpreter).map_err(|_| LocalAgentError::ProbeFailed)?);
+    if !interpreter.is_absolute() {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    let arguments = fields[1..]
+        .iter()
+        .map(|argument| {
+            std::str::from_utf8(argument)
+                .map(str::to_owned)
+                .map_err(|_| LocalAgentError::ProbeFailed)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(ParsedShebang {
+        interpreter,
+        arguments,
+    }))
+}
+
+fn resolve_interpreter_from_path(
+    command: &'static str,
+    environment_path: &OsStr,
+    cancellation: Option<&CancellationToken>,
+    deadline: Option<Instant>,
+) -> Result<PathBuf, LocalAgentError> {
+    if !matches!(command, "node" | "bun") {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    for directory in env::split_paths(environment_path) {
+        ensure_probe_active(cancellation, deadline)?;
+        if !directory.is_absolute() {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        let candidate = directory.join(command);
+        if is_executable_file(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(LocalAgentError::ProbeFailed)
+}
+
+struct ExecutableMetadataIdentity {
+    canonical_path: PathBuf,
+    length: u64,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(unix)]
+    owner: u32,
+    #[cfg(unix)]
+    mode: u32,
+    #[cfg(unix)]
+    links: u64,
+    #[cfg(unix)]
+    modified_seconds: i64,
+    #[cfg(unix)]
+    modified_nanoseconds: i64,
+    #[cfg(unix)]
+    changed_seconds: i64,
+    #[cfg(unix)]
+    changed_nanoseconds: i64,
+}
+
+#[cfg(unix)]
+fn executable_leaf_is_trusted(owner: u32, mode: u32, effective_uid: u32) -> bool {
+    (owner == 0 || owner == effective_uid) && mode & 0o111 != 0 && mode & 0o022 == 0
+}
+
+impl ExecutableMetadataIdentity {
+    fn capture(path: &Path, handle: &File) -> Result<Self, LocalAgentError> {
+        let path_metadata = fs::symlink_metadata(path).map_err(|_| LocalAgentError::ProbeFailed)?;
+        if !path.is_absolute()
+            || path_metadata.file_type().is_symlink()
+            || !path_metadata.is_file()
+            || path_metadata.len() > MAX_EXECUTABLE_BYTES
+            || path.canonicalize().ok().as_deref() != Some(path)
+        {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        #[cfg(unix)]
+        if !executable_leaf_is_trusted(path_metadata.uid(), path_metadata.mode(), unsafe {
+            libc::geteuid()
+        }) {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        let identity = Self {
+            canonical_path: path.to_path_buf(),
+            length: path_metadata.len(),
+            #[cfg(unix)]
+            device: path_metadata.dev(),
+            #[cfg(unix)]
+            inode: path_metadata.ino(),
+            #[cfg(unix)]
+            owner: path_metadata.uid(),
+            #[cfg(unix)]
+            mode: path_metadata.mode(),
+            #[cfg(unix)]
+            links: path_metadata.nlink(),
+            #[cfg(unix)]
+            modified_seconds: path_metadata.mtime(),
+            #[cfg(unix)]
+            modified_nanoseconds: path_metadata.mtime_nsec(),
+            #[cfg(unix)]
+            changed_seconds: path_metadata.ctime(),
+            #[cfg(unix)]
+            changed_nanoseconds: path_metadata.ctime_nsec(),
+        };
+        identity.verify_handle_and_path(handle, path)?;
+        Ok(identity)
+    }
+
+    fn verify_handle_and_path(&self, handle: &File, path: &Path) -> Result<(), LocalAgentError> {
+        let path_metadata = fs::symlink_metadata(path).map_err(|_| LocalAgentError::ProbeFailed)?;
+        let handle_metadata = handle
+            .metadata()
+            .map_err(|_| LocalAgentError::ProbeFailed)?;
+        if path != self.canonical_path
+            || path.canonicalize().ok().as_ref() != Some(&self.canonical_path)
+            || !self.matches_metadata(&path_metadata)
+            || !self.matches_metadata(&handle_metadata)
+        {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        Ok(())
+    }
+
+    fn matches_metadata(&self, metadata: &fs::Metadata) -> bool {
+        if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() != self.length
+        {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            self.device == metadata.dev()
+                && self.inode == metadata.ino()
+                && self.owner == metadata.uid()
+                && self.mode == metadata.mode()
+                && self.links == metadata.nlink()
+                && self.modified_seconds == metadata.mtime()
+                && self.modified_nanoseconds == metadata.mtime_nsec()
+                && self.changed_seconds == metadata.ctime()
+                && self.changed_nanoseconds == metadata.ctime_nsec()
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    }
+}
+
+fn open_executable_no_follow(path: &Path) -> Result<File, LocalAgentError> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    options.open(path).map_err(|_| LocalAgentError::ProbeFailed)
+}
+
+fn verify_safe_executable_ancestry(path: &Path) -> Result<(), LocalAgentError> {
+    let parent = path.parent().ok_or(LocalAgentError::ProbeFailed)?;
+    let normalized = normalized_environment_path(parent.as_os_str())?;
+    let mut directories = env::split_paths(&normalized);
+    if directories.next().as_deref() != Some(parent) || directories.next().is_some() {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn executable_sha256<R: Read>(
+    reader: &mut R,
+    cancellation: Option<&CancellationToken>,
+    deadline: Option<Instant>,
+) -> Result<[u8; 32], LocalAgentError> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        ensure_probe_active(cancellation, deadline)?;
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|_| LocalAgentError::ProbeFailed)?;
+        ensure_probe_active(cancellation, deadline)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().into())
+}
+
+fn executable_sha256_exact<R: Read>(
+    reader: &mut R,
+    expected_length: u64,
+    prefix_limit: usize,
+    cancellation: Option<&CancellationToken>,
+    deadline: Option<Instant>,
+) -> Result<([u8; 32], Vec<u8>), LocalAgentError> {
+    let mut hasher = Sha256::new();
+    let mut prefix = Vec::with_capacity(prefix_limit);
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut remaining = expected_length;
+    while remaining > 0 {
+        ensure_probe_active(cancellation, deadline)?;
+        let chunk_length = usize::try_from(remaining.min(buffer.len() as u64))
+            .map_err(|_| LocalAgentError::ProbeFailed)?;
+        let read = reader
+            .read(&mut buffer[..chunk_length])
+            .map_err(|_| LocalAgentError::ProbeFailed)?;
+        ensure_probe_active(cancellation, deadline)?;
+        if read == 0 {
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        remaining -= read as u64;
+        let prefix_remaining = prefix_limit.saturating_sub(prefix.len());
+        prefix.extend_from_slice(&buffer[..read.min(prefix_remaining)]);
+        hasher.update(&buffer[..read]);
+    }
+    ensure_probe_active(cancellation, deadline)?;
+    if reader
+        .read(&mut buffer[..1])
+        .map_err(|_| LocalAgentError::ProbeFailed)?
+        != 0
+    {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    ensure_probe_active(cancellation, deadline)?;
+    Ok((hasher.finalize().into(), prefix))
+}
+
+struct PinnedProbeRunner<'a, R> {
+    inner: &'a R,
+    proof: &'a ExecutableProof,
+    cancellation: Option<&'a CancellationToken>,
+    deadline: Option<Instant>,
+}
+
+impl<R: ProbeRunner> ProbeRunner for PinnedProbeRunner<'_, R> {
+    fn run(
+        &self,
+        executable: &Path,
+        args: &[OsString],
+        environment: &[(OsString, OsString)],
+    ) -> Result<ProbeOutput, LocalAgentError> {
+        self.proof
+            .verify_path_with_constraints(executable, self.cancellation, self.deadline)?;
+        let mut environment = environment.to_vec();
+        environment.retain(|(name, _)| name != OsStr::new("PATH"));
+        environment.push((OsString::from("PATH"), self.proof.environment_path.clone()));
+        let result = self.inner.run(executable, args, &environment);
+        self.proof
+            .verify_path_with_constraints(executable, self.cancellation, self.deadline)?;
+        result
+    }
+}
+
 struct BoundedProbeRunner;
+
+struct CancellableProbeRunner<'a> {
+    cancellation: &'a CancellationToken,
+    deadline: Instant,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReaderError {
@@ -154,68 +717,136 @@ impl ProbeRunner for BoundedProbeRunner {
         args: &[OsString],
         environment: &[(OsString, OsString)],
     ) -> Result<ProbeOutput, LocalAgentError> {
-        let mut command = Command::new(executable);
-        command
-            .args(args)
-            .envs(environment.iter().cloned())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        configure_probe_process_group(&mut command);
-
-        let mut child = command
-            .spawn()
-            .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
-        let process_group = ProbeProcessGroup::from_child(&child);
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or(LocalAgentError::ProbeSpawnFailed)?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or(LocalAgentError::ProbeSpawnFailed)?;
-        let stdout_receiver = spawn_capped_reader(stdout, PROBE_STDOUT_LIMIT);
-        let stderr_receiver = spawn_capped_reader(stderr, PROBE_STDERR_LIMIT);
-        let deadline = Instant::now() + PROBE_TIMEOUT;
-
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Ok(None) => {
-                    terminate_probe(process_group, &mut child);
-                    return Err(LocalAgentError::ProbeTimedOut);
-                }
-                Err(_) => {
-                    terminate_probe(process_group, &mut child);
-                    return Err(LocalAgentError::ProbeFailed);
-                }
-            }
-        };
-
-        let stdout = match receive_probe_output(stdout_receiver, deadline) {
-            Ok(stdout) => stdout,
-            Err(error) => {
-                terminate_probe(process_group, &mut child);
-                return Err(error);
-            }
-        };
-        let stderr = match receive_probe_output(stderr_receiver, deadline) {
-            Ok(stderr) => stderr,
-            Err(error) => {
-                terminate_probe(process_group, &mut child);
-                return Err(error);
-            }
-        };
-        Ok(ProbeOutput {
-            success: status.success(),
-            stdout,
-            stderr,
-        })
+        run_bounded_probe(executable, args, environment, None, None)
     }
+}
+
+impl ProbeRunner for CancellableProbeRunner<'_> {
+    fn run(
+        &self,
+        executable: &Path,
+        args: &[OsString],
+        environment: &[(OsString, OsString)],
+    ) -> Result<ProbeOutput, LocalAgentError> {
+        run_bounded_probe(
+            executable,
+            args,
+            environment,
+            Some(self.cancellation),
+            Some(self.deadline),
+        )
+    }
+}
+
+fn run_bounded_probe(
+    executable: &Path,
+    args: &[OsString],
+    environment: &[(OsString, OsString)],
+    cancellation: Option<&CancellationToken>,
+    command_deadline: Option<Instant>,
+) -> Result<ProbeOutput, LocalAgentError> {
+    ensure_probe_active(cancellation, command_deadline)?;
+    let probe_directory = create_owned_temp_dir().map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+    let cwd = probe_directory.path().to_path_buf();
+    let environment = controlled_environment(env::vars_os().collect(), environment, &cwd)
+        .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+    ensure_probe_active(cancellation, command_deadline)?;
+    let mut command = Command::new(executable);
+    command
+        .args(args)
+        .current_dir(cwd)
+        .env_clear()
+        .envs(environment)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_probe_process_group(&mut command);
+
+    let mut child = command
+        .spawn()
+        .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+    let mut process_group = match ProbeProcessGroup::register_child(&child) {
+        ProbeProcessGroupRegistration::Registered(process_group) => process_group,
+        ProbeProcessGroupRegistration::Rejected(mut rejected) => {
+            rejected.terminate();
+            let _ = child.kill();
+            let _ = child.wait();
+            drop(child);
+            drop(probe_directory);
+            let _ = rejected.terminate_and_confirm(PROBE_CLEANUP_TIMEOUT);
+            drop(rejected);
+            return Err(LocalAgentError::ProbeFailed);
+        }
+        ProbeProcessGroupRegistration::Invalid => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(LocalAgentError::ProbeFailed);
+        }
+    };
+    if let Err(error) = ensure_probe_active(cancellation, command_deadline) {
+        terminate_probe(&mut process_group, &mut child);
+        return Err(error);
+    }
+    let Some(stdout) = child.stdout.take() else {
+        terminate_probe(&mut process_group, &mut child);
+        return Err(LocalAgentError::ProbeSpawnFailed);
+    };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_probe(&mut process_group, &mut child);
+        return Err(LocalAgentError::ProbeSpawnFailed);
+    };
+    let stdout_receiver = spawn_capped_reader(stdout, PROBE_STDOUT_LIMIT);
+    let stderr_receiver = spawn_capped_reader(stderr, PROBE_STDERR_LIMIT);
+    let probe_deadline = Instant::now() + PROBE_TIMEOUT;
+    let deadline = command_deadline.map_or(probe_deadline, |deadline| deadline.min(probe_deadline));
+
+    let status = loop {
+        if let Err(error) = ensure_probe_active(cancellation, Some(deadline)) {
+            terminate_probe(&mut process_group, &mut child);
+            return Err(error);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) => {
+                terminate_probe(&mut process_group, &mut child);
+                return Err(LocalAgentError::ProbeTimedOut);
+            }
+            Err(_) => {
+                terminate_probe(&mut process_group, &mut child);
+                return Err(LocalAgentError::ProbeFailed);
+            }
+        }
+    };
+
+    let stdout = match receive_probe_output(stdout_receiver, deadline, cancellation) {
+        Ok(stdout) => stdout,
+        Err(error) => {
+            terminate_probe(&mut process_group, &mut child);
+            return Err(error);
+        }
+    };
+    let stderr = match receive_probe_output(stderr_receiver, deadline, cancellation) {
+        Ok(stderr) => stderr,
+        Err(error) => {
+            terminate_probe(&mut process_group, &mut child);
+            return Err(error);
+        }
+    };
+    if let Err(error) = ensure_probe_active(cancellation, Some(deadline)) {
+        terminate_probe(&mut process_group, &mut child);
+        return Err(error);
+    }
+    if !process_group.terminate_and_confirm(PROBE_CLEANUP_TIMEOUT) {
+        return Err(LocalAgentError::ProbeFailed);
+    }
+    Ok(ProbeOutput {
+        success: status.success(),
+        stdout,
+        stderr,
+    })
 }
 
 #[cfg(unix)]
@@ -228,57 +859,41 @@ fn configure_probe_process_group(command: &mut Command) {
 #[cfg(not(unix))]
 fn configure_probe_process_group(_command: &mut Command) {}
 
-#[cfg(unix)]
-#[derive(Clone, Copy)]
-struct ProbeProcessGroup(Option<i32>);
+struct ProbeProcessGroup(RegisteredProcessGroup);
 
-#[cfg(unix)]
+enum ProbeProcessGroupRegistration {
+    Registered(ProbeProcessGroup),
+    Rejected(RejectedProcessGroup),
+    Invalid,
+}
+
 impl ProbeProcessGroup {
-    fn from_child(child: &std::process::Child) -> Self {
-        Self(i32::try_from(child.id()).ok().filter(|pid| *pid > 0))
-    }
-
-    fn terminate(self) {
-        const SIGKILL: i32 = 9;
-
-        unsafe extern "C" {
-            fn kill(pid: i32, signal: i32) -> i32;
-        }
-
-        if let Some(process_group) = self.0 {
-            // Negative PID targets the independently retained process-group ID,
-            // even after the direct child has already exited and been reaped.
-            unsafe {
-                let _ = kill(-process_group, SIGKILL);
+    fn register_child(child: &std::process::Child) -> ProbeProcessGroupRegistration {
+        let Some(process_group) = i32::try_from(child.id()).ok().filter(|pid| *pid > 0) else {
+            return ProbeProcessGroupRegistration::Invalid;
+        };
+        match RegisteredProcessGroup::register(process_group) {
+            Ok(registered) => {
+                ProbeProcessGroupRegistration::Registered(ProbeProcessGroup(registered))
             }
+            Err(rejected) => ProbeProcessGroupRegistration::Rejected(rejected),
         }
     }
-}
 
-#[cfg(not(unix))]
-#[derive(Clone, Copy)]
-struct ProbeProcessGroup;
-
-#[cfg(not(unix))]
-impl ProbeProcessGroup {
-    fn from_child(_child: &std::process::Child) -> Self {
-        Self
+    fn terminate(&self) {
+        self.0.terminate();
     }
 
-    fn terminate(self) {}
+    fn terminate_and_confirm(&mut self, timeout: Duration) -> bool {
+        self.0.terminate_and_confirm(timeout)
+    }
 }
 
-#[cfg(unix)]
-fn terminate_probe(process_group: ProbeProcessGroup, child: &mut std::process::Child) {
+fn terminate_probe(process_group: &mut ProbeProcessGroup, child: &mut std::process::Child) -> bool {
     process_group.terminate();
     let _ = child.kill();
     let _ = child.wait();
-}
-
-#[cfg(not(unix))]
-fn terminate_probe(_process_group: ProbeProcessGroup, child: &mut std::process::Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+    process_group.terminate_and_confirm(PROBE_CLEANUP_TIMEOUT)
 }
 
 fn spawn_capped_reader<R>(
@@ -308,15 +923,48 @@ where
 fn receive_probe_output(
     receiver: mpsc::Receiver<Result<Vec<u8>, ReaderError>>,
     deadline: Instant,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<Vec<u8>, LocalAgentError> {
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    match receiver.recv_timeout(remaining) {
-        Ok(Ok(bytes)) => Ok(bytes),
-        Ok(Err(ReaderError::TooLarge)) => Err(LocalAgentError::ProbeOutputTooLarge),
-        Ok(Err(ReaderError::Io)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-            Err(LocalAgentError::ProbeFailed)
+    loop {
+        ensure_probe_active(cancellation, Some(deadline))?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(LocalAgentError::ProbeTimedOut);
         }
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(LocalAgentError::ProbeTimedOut),
+        let wait = if cancellation.is_some() {
+            remaining.min(Duration::from_millis(10))
+        } else {
+            remaining
+        };
+        match receiver.recv_timeout(wait) {
+            Ok(Ok(bytes)) => return Ok(bytes),
+            Ok(Err(ReaderError::TooLarge)) => {
+                return Err(LocalAgentError::ProbeOutputTooLarge);
+            }
+            Ok(Err(ReaderError::Io)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(LocalAgentError::ProbeFailed);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() >= deadline => {
+                return Err(LocalAgentError::ProbeTimedOut);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+fn ensure_probe_active(
+    cancellation: Option<&CancellationToken>,
+    deadline: Option<Instant>,
+) -> Result<(), LocalAgentError> {
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        Err(LocalAgentError::run(
+            "local_agent_cancelled",
+            "The local agent request was cancelled.",
+        ))
+    } else if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        Err(LocalAgentError::ProbeTimedOut)
+    } else {
+        Ok(())
     }
 }
 
@@ -360,12 +1008,35 @@ pub fn resolve_compatible_agent(kind: LocalAgentKind) -> Result<ResolvedAgent, L
     resolve_compatible_agent_with_runner(kind, &BoundedProbeRunner)
 }
 
+pub(super) fn resolve_compatible_agent_cancellable(
+    kind: LocalAgentKind,
+    cancellation: &CancellationToken,
+    deadline: Instant,
+) -> Result<(ResolvedAgent, ExecutableProof), LocalAgentError> {
+    ensure_probe_active(Some(cancellation), Some(deadline))?;
+    let runner = CancellableProbeRunner {
+        cancellation,
+        deadline,
+    };
+    let result = resolve_compatible_agent_with_runner_and_proof(
+        kind,
+        &runner,
+        Some(cancellation),
+        Some(deadline),
+    );
+    ensure_probe_active(Some(cancellation), Some(deadline))?;
+    result
+}
+
 fn discover_all_with_runner(runner: &impl ProbeRunner) -> Vec<LocalAgentStatus> {
     let paths = current_search_path_directories_with_runner(runner);
+    let environment_path = env::join_paths(&paths).unwrap_or_default();
     LocalAgentKind::ALL
         .into_iter()
         .map(|kind| match resolve_from_paths(kind, &paths) {
-            Some(resolved) => probe_resolved_agent(resolved, runner),
+            Some(resolved) => {
+                probe_resolved_agent_with_environment_path(resolved, &environment_path, runner)
+            }
             None => unavailable_status(kind),
         })
         .collect()
@@ -375,16 +1046,37 @@ fn resolve_compatible_agent_with_runner(
     kind: LocalAgentKind,
     runner: &impl ProbeRunner,
 ) -> Result<ResolvedAgent, LocalAgentError> {
-    let resolved = resolve_from_paths(kind, &current_search_path_directories_with_runner(runner))
-        .ok_or(LocalAgentError::NotInstalled)?;
-    probe_agent(&resolved, runner)?;
+    let (resolved, _proof) =
+        resolve_compatible_agent_with_runner_and_proof(kind, runner, None, None)?;
     Ok(resolved)
+}
+
+fn resolve_compatible_agent_with_runner_and_proof(
+    kind: LocalAgentKind,
+    runner: &impl ProbeRunner,
+    cancellation: Option<&CancellationToken>,
+    deadline: Option<Instant>,
+) -> Result<(ResolvedAgent, ExecutableProof), LocalAgentError> {
+    ensure_probe_active(cancellation, deadline)?;
+    let paths = current_search_path_directories_with_runner(runner);
+    let environment_path = env::join_paths(&paths).map_err(|_| LocalAgentError::ProbeFailed)?;
+    let resolved = resolve_from_paths(kind, &paths).ok_or(LocalAgentError::NotInstalled)?;
+    let proof = ExecutableProof::capture_with_constraints(
+        &resolved.path,
+        environment_path,
+        cancellation,
+        deadline,
+    )?;
+    probe_agent_with_proof(&resolved, &proof, runner, cancellation, deadline)?;
+    proof.verify_path_with_constraints(&resolved.path, cancellation, deadline)?;
+    Ok((resolved, proof))
 }
 
 fn current_search_path_directories_with_runner(runner: &impl ProbeRunner) -> Vec<PathBuf> {
     let gui_path = env::var_os("PATH");
     let shell = env::var_os("SHELL").unwrap_or_else(|| OsString::from("/bin/sh"));
-    search_path_directories_with_runner(gui_path.as_deref(), Path::new(&shell), runner)
+    let paths = search_path_directories_with_runner(gui_path.as_deref(), Path::new(&shell), runner);
+    normalized_search_path_directories(paths).unwrap_or_default()
 }
 
 pub(super) fn login_shell_path_value() -> Option<OsString> {
@@ -449,6 +1141,32 @@ fn search_path_directories(gui_path: Option<&OsStr>, login_path: Option<&OsStr>)
         .collect()
 }
 
+#[cfg(test)]
+fn sanitized_path_value(path: Option<&OsStr>) -> Result<OsString, LocalAgentError> {
+    let path = env::join_paths(search_path_directories(path, None))
+        .map_err(|_| LocalAgentError::ProbeFailed)?;
+    normalized_environment_path(&path)
+}
+
+fn normalized_search_path_directories(
+    paths: Vec<PathBuf>,
+) -> Result<Vec<PathBuf>, LocalAgentError> {
+    let path = env::join_paths(paths).map_err(|_| LocalAgentError::ProbeFailed)?;
+    Ok(env::split_paths(&normalized_environment_path(&path)?).collect())
+}
+
+fn normalized_environment_path(path: &OsStr) -> Result<OsString, LocalAgentError> {
+    let environment = controlled_environment(
+        BTreeMap::new(),
+        &[(OsString::from("PATH"), path.to_owned())],
+        Path::new("/"),
+    )?;
+    environment
+        .get(OsStr::new("PATH"))
+        .cloned()
+        .ok_or(LocalAgentError::ProbeFailed)
+}
+
 fn resolve_from_paths(kind: LocalAgentKind, paths: &[PathBuf]) -> Option<ResolvedAgent> {
     let basename = kind.executable_basename();
     paths.iter().find_map(|directory| {
@@ -498,7 +1216,17 @@ fn unavailable_status(kind: LocalAgentKind) -> LocalAgentStatus {
     }
 }
 
+#[cfg(test)]
 fn probe_resolved_agent(resolved: ResolvedAgent, runner: &impl ProbeRunner) -> LocalAgentStatus {
+    let environment_path = sanitized_path_value(env::var_os("PATH").as_deref()).unwrap_or_default();
+    probe_resolved_agent_with_environment_path(resolved, &environment_path, runner)
+}
+
+fn probe_resolved_agent_with_environment_path(
+    resolved: ResolvedAgent,
+    environment_path: &OsStr,
+    runner: &impl ProbeRunner,
+) -> LocalAgentStatus {
     let kind = resolved.kind;
     let mut status = LocalAgentStatus {
         kind,
@@ -511,36 +1239,135 @@ fn probe_resolved_agent(resolved: ResolvedAgent, runner: &impl ProbeRunner) -> L
         reason: None,
     };
 
-    let version = match probe_version(&resolved, runner) {
+    let proof = match ExecutableProof::capture_with_constraints(
+        &resolved.path,
+        environment_path.to_owned(),
+        None,
+        None,
+    ) {
+        Ok(proof) => proof,
+        Err(error) => {
+            status.reason = Some(error.reason().to_string());
+            return status;
+        }
+    };
+    let runner = PinnedProbeRunner {
+        inner: runner,
+        proof: &proof,
+        cancellation: None,
+        deadline: None,
+    };
+
+    let version = match probe_version(&resolved, &runner) {
         Ok(version) => version,
         Err(error) => {
+            let error = proof.verify_path(&resolved.path).err().unwrap_or(error);
             status.reason = Some(error.reason().to_string());
             return status;
         }
     };
     status.version = Some(version);
 
-    match probe_capabilities(&resolved, runner) {
+    let capability = probe_capabilities(&resolved, &runner);
+    match proof.verify_path(&resolved.path).and(capability) {
         Ok(()) => status.compatible = true,
         Err(error) => status.reason = Some(error.reason().to_string()),
     }
     status
 }
 
+#[cfg(test)]
 fn probe_agent(
     resolved: &ResolvedAgent,
     runner: &impl ProbeRunner,
 ) -> Result<String, LocalAgentError> {
-    let version = probe_version(resolved, runner)?;
-    probe_capabilities(resolved, runner)?;
-    Ok(version)
+    let proof = ExecutableProof::capture(&resolved.path)?;
+    probe_agent_with_proof(resolved, &proof, runner, None, None)
+}
+
+fn probe_agent_with_proof(
+    resolved: &ResolvedAgent,
+    proof: &ExecutableProof,
+    runner: &impl ProbeRunner,
+    cancellation: Option<&CancellationToken>,
+    deadline: Option<Instant>,
+) -> Result<String, LocalAgentError> {
+    let runner = PinnedProbeRunner {
+        inner: runner,
+        proof,
+        cancellation,
+        deadline,
+    };
+    let result = (|| {
+        let version = probe_version(resolved, &runner)?;
+        probe_capabilities(resolved, &runner)?;
+        Ok(version)
+    })();
+    proof.verify_path_with_constraints(&resolved.path, cancellation, deadline)?;
+    result
+}
+
+struct OpenCodeProbeEnvironment {
+    _directory: TempDir,
+    values: Vec<(OsString, OsString)>,
+}
+
+impl OpenCodeProbeEnvironment {
+    fn create() -> Result<Self, LocalAgentError> {
+        let directory = create_owned_temp_dir().map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+        let mut values: BTreeMap<OsString, OsString> =
+            owned_opencode_environment().into_iter().collect();
+        for (name, directory_name) in [
+            ("XDG_CONFIG_HOME", "config"),
+            ("XDG_CACHE_HOME", "cache"),
+            ("XDG_DATA_HOME", "data"),
+            ("XDG_STATE_HOME", "state"),
+        ] {
+            let path = directory.path().join(directory_name);
+            create_private_probe_directory(&path)?;
+            values.insert(OsString::from(name), path.into_os_string());
+        }
+        values.insert(
+            OsString::from("OPENCODE_DISABLE_CLAUDE_CODE"),
+            OsString::from("1"),
+        );
+        values.insert(
+            OsString::from("OPENCODE_DISABLE_DEFAULT_PLUGINS"),
+            OsString::from("true"),
+        );
+        Ok(Self {
+            _directory: directory,
+            values: values.into_iter().collect(),
+        })
+    }
+}
+
+fn create_private_probe_directory(path: &Path) -> Result<(), LocalAgentError> {
+    fs::create_dir(path).map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+    Ok(())
+}
+
+fn run_open_code_probe(
+    executable: &Path,
+    args: &[OsString],
+    runner: &impl ProbeRunner,
+) -> Result<ProbeOutput, LocalAgentError> {
+    let environment = OpenCodeProbeEnvironment::create()?;
+    runner.run(executable, args, &environment.values)
 }
 
 fn probe_version(
     resolved: &ResolvedAgent,
     runner: &impl ProbeRunner,
 ) -> Result<String, LocalAgentError> {
-    let version_output = runner.run(&resolved.path, &[OsString::from("--version")], &[])?;
+    let args = [OsString::from("--version")];
+    let version_output = match resolved.kind {
+        LocalAgentKind::Opencode => run_open_code_probe(&resolved.path, &args, runner)?,
+        LocalAgentKind::Claude | LocalAgentKind::Codex => runner.run(&resolved.path, &args, &[])?,
+    };
     parse_version(&successful_probe_text(&version_output)?)
 }
 
@@ -574,19 +1401,19 @@ fn probe_codex(executable: &Path, runner: &impl ProbeRunner) -> Result<(), Local
 }
 
 fn probe_opencode(executable: &Path, runner: &impl ProbeRunner) -> Result<(), LocalAgentError> {
-    let run_help = runner.run(
+    let run_help = run_open_code_probe(
         executable,
         &[OsString::from("run"), OsString::from("--help")],
-        &[],
+        runner,
     )?;
-    let debug_help = runner.run(
+    let debug_help = run_open_code_probe(
         executable,
         &[
             OsString::from("debug"),
             OsString::from("config"),
             OsString::from("--help"),
         ],
-        &[],
+        runner,
     )?;
     evaluate_opencode_help(
         &successful_probe_text(&run_help)?,
@@ -594,15 +1421,14 @@ fn probe_opencode(executable: &Path, runner: &impl ProbeRunner) -> Result<(), Lo
     )
     .into_result()?;
 
-    let environment = owned_opencode_environment();
-    let config = runner.run(
+    let config = run_open_code_probe(
         executable,
         &[
             OsString::from("debug"),
             OsString::from("config"),
             OsString::from("--pure"),
         ],
-        &environment,
+        runner,
     )?;
     if !config.success {
         return Err(LocalAgentError::ProbeFailed);
@@ -752,11 +1578,29 @@ fn is_feature_field(value: &str) -> bool {
 }
 
 fn opencode_permissions_are_denied(config: &Value) -> bool {
+    const FORBIDDEN_CONFIG_SURFACES: &[&str] = &[
+        "mcp",
+        "instruction",
+        "instructions",
+        "prompt",
+        "prompts",
+        "rule",
+        "rules",
+        "plugin",
+        "plugins",
+        "hook",
+        "hooks",
+        "command",
+        "commands",
+    ];
     if config.get("share").and_then(Value::as_str) != Some("disabled")
         || config.get("default_agent").and_then(Value::as_str) != Some(OPEN_CODE_OWNED_AGENT)
         || !legacy_mode_is_empty(config.get("mode"))
         || !permission_map_is_denied(config.get("permission"), true)
-        || !tools_map_is_disabled(config.get("tools"), true)
+        || !tools_map_is_exactly_owned(config.get("tools"))
+        || FORBIDDEN_CONFIG_SURFACES
+            .iter()
+            .any(|field| !config_value_is_empty(config.get(*field)))
     {
         return false;
     }
@@ -764,17 +1608,39 @@ fn opencode_permissions_are_denied(config: &Value) -> bool {
     let Some(agents) = config.get("agent").and_then(Value::as_object) else {
         return false;
     };
+    if agents.len() != 1 {
+        return false;
+    }
     let Some(owned_agent) = agents.get(OPEN_CODE_OWNED_AGENT).and_then(Value::as_object) else {
         return false;
     };
-    if owned_agent.get("mode").and_then(Value::as_str) != Some("primary")
-        || !permission_map_is_denied(owned_agent.get("permission"), true)
-        || !tools_map_is_disabled(owned_agent.get("tools"), true)
-    {
-        return false;
-    }
+    (owned_agent.len() == 3 || owned_agent.len() == 4)
+        && owned_agent
+            .keys()
+            .all(|key| matches!(key.as_str(), "mode" | "permission" | "tools" | "options"))
+        && config_value_is_empty(owned_agent.get("options"))
+        && owned_agent.get("mode").and_then(Value::as_str) == Some("primary")
+        && permission_map_is_denied(owned_agent.get("permission"), true)
+        && tools_map_is_exactly_owned(owned_agent.get("tools"))
+}
 
-    agents.values().all(agent_overrides_are_denied)
+fn config_value_is_empty(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => true,
+        Some(Value::String(value)) => value.is_empty(),
+        Some(Value::Array(value)) => value.is_empty(),
+        Some(Value::Object(value)) => value.is_empty(),
+        Some(Value::Bool(true) | Value::Number(_)) => false,
+    }
+}
+
+fn tools_map_is_exactly_owned(tools: Option<&Value>) -> bool {
+    let Some(tools) = tools.and_then(Value::as_object) else {
+        return false;
+    };
+    tools.len() == 2
+        && tools.get("*") == Some(&Value::Bool(false))
+        && tools.get("edit") == Some(&Value::Bool(false))
 }
 
 fn legacy_mode_is_empty(mode: Option<&Value>) -> bool {
@@ -783,18 +1649,6 @@ fn legacy_mode_is_empty(mode: Option<&Value>) -> bool {
         Some(Value::Object(mode)) => mode.is_empty(),
         _ => false,
     }
-}
-
-fn agent_overrides_are_denied(agent: &Value) -> bool {
-    let Some(agent) = agent.as_object() else {
-        return false;
-    };
-    agent
-        .get("permission")
-        .is_none_or(|permission| permission_map_is_denied(Some(permission), false))
-        && agent
-            .get("tools")
-            .is_none_or(|tools| tools_map_is_disabled(Some(tools), false))
 }
 
 fn permission_map_is_denied(permission: Option<&Value>, require_all_known: bool) -> bool {
@@ -826,32 +1680,13 @@ fn permission_rule_is_denied(rule: &Value) -> bool {
     }
 }
 
-fn tools_map_is_disabled(tools: Option<&Value>, require_wildcard: bool) -> bool {
-    let Some(tools) = tools else {
-        return false;
-    };
-    let Some(tools) = tools.as_object() else {
-        return false;
-    };
-    !tools.is_empty()
-        && (!require_wildcard || tools.get("*") == Some(&Value::Bool(false)))
-        && tools.values().all(tool_rule_is_disabled)
-}
-
-fn tool_rule_is_disabled(rule: &Value) -> bool {
-    match rule {
-        Value::Bool(false) => true,
-        Value::Object(rules) => !rules.is_empty() && rules.values().all(tool_rule_is_disabled),
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
         collections::BTreeMap,
         ffi::{OsStr, OsString},
         fs,
+        io::{self, Read},
         path::{Path, PathBuf},
         sync::Mutex,
         thread,
@@ -860,13 +1695,16 @@ mod tests {
 
     use serde_json::{Value, json};
     use tempfile::tempdir;
+    use tokio_util::sync::CancellationToken;
 
     use super::{
         BoundedProbeRunner, CAPABILITY_PROBE_TIMEOUT_REASON, CLAUDE_FLAGS_REASON,
-        CODEX_FEATURES_REASON, LOGIN_SHELL_PATH_LIMIT, OPEN_CODE_PERMISSIONS_REASON, PROBE_TIMEOUT,
-        ProbeOutput, ProbeRunner, codex_feature_probe_args, evaluate_claude_help,
-        evaluate_codex_features, evaluate_codex_help, evaluate_opencode_help,
-        login_shell_path_value_with_runner, opencode_permissions_are_denied, probe_resolved_agent,
+        CODEX_FEATURES_REASON, CancellableProbeRunner, ExecutableProof, LOGIN_SHELL_PATH_LIMIT,
+        MAX_EXECUTABLE_BYTES, OPEN_CODE_PERMISSIONS_REASON, PROBE_TIMEOUT, ProbeOutput,
+        ProbeRunner, codex_feature_probe_args, evaluate_claude_help, evaluate_codex_features,
+        evaluate_codex_help, evaluate_opencode_help, executable_sha256, executable_sha256_exact,
+        login_shell_path_value_with_runner, opencode_permissions_are_denied,
+        parse_shebang_interpreter, probe_agent, probe_agent_with_proof, probe_resolved_agent,
         resolve_from_paths, search_path_directories, search_path_directories_with_runner,
     };
     use crate::local_agents::{
@@ -925,6 +1763,8 @@ tui_app_server stable true
     const CODEX_EXEC_HELP: &str = "\
 Usage: codex exec [OPTIONS] [PROMPT]
   --strict-config
+  --ignore-user-config
+  --ignore-rules
   --sandbox <SANDBOX>
   --ephemeral
   --skip-git-repo-check
@@ -966,9 +1806,14 @@ Usage: opencode debug config
 
     #[cfg(unix)]
     fn create_executable_script(path: &Path, script: &str) {
+        create_executable_bytes(path, script.as_bytes());
+    }
+
+    #[cfg(unix)]
+    fn create_executable_bytes(path: &Path, bytes: &[u8]) {
         use std::os::unix::fs::PermissionsExt;
 
-        fs::write(path, script).unwrap();
+        fs::write(path, bytes).unwrap();
         let mut permissions = fs::metadata(path).unwrap().permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(path, permissions).unwrap();
@@ -976,12 +1821,29 @@ Usage: opencode debug config
 
     #[cfg(unix)]
     fn process_exists(pid: i32) -> bool {
-        unsafe extern "C" {
-            fn kill(pid: i32, signal: i32) -> i32;
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return false;
         }
-
-        // Signal zero performs an existence/permission check only.
-        unsafe { kill(pid, 0) == 0 }
+        #[cfg(target_os = "macos")]
+        {
+            let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+            let info_size = std::mem::size_of::<libc::proc_bsdinfo>();
+            let read = unsafe {
+                libc::proc_pidinfo(
+                    pid,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    info.as_mut_ptr().cast(),
+                    i32::try_from(info_size).unwrap(),
+                )
+            };
+            read == i32::try_from(info_size).unwrap()
+                && unsafe { info.assume_init() }.pbi_status != libc::SZOMB
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            true
+        }
     }
 
     #[cfg(unix)]
@@ -1164,6 +2026,13 @@ Usage: opencode debug config
 
         let missing_strict_config = CODEX_EXEC_HELP.replace("--strict-config", "--strict");
         assert!(!evaluate_codex_help(&missing_strict_config).compatible);
+        for flag in ["--ignore-user-config", "--ignore-rules"] {
+            let missing = CODEX_EXEC_HELP.replace(flag, "--unsupported");
+            assert!(
+                !evaluate_codex_help(&missing).compatible,
+                "missing required Codex flag {flag} was accepted"
+            );
+        }
     }
 
     #[test]
@@ -1340,13 +2209,51 @@ Usage: opencode debug config
         let mut config = fully_denied_open_code_config();
         config["permission"]["bash"] = json!({"*": "deny", "git *": "deny"});
         config["agent"]["markdowner"]["permission"]["bash"] = json!({"*": "deny", "git *": "deny"});
-        config["agent"]["review"] = json!({
-            "mode": "subagent",
-            "permission": {"bash": {"*": "deny"}},
-            "tools": {"edit": false}
-        });
+        config["agent"]["markdowner"]["options"] = json!({});
 
         assert!(opencode_permissions_are_denied(&config));
+    }
+
+    #[test]
+    fn open_code_rejects_external_config_execution_surfaces_and_custom_agents() {
+        for (field, value) in [
+            ("mcp", json!({"external": {"type": "local"}})),
+            ("instructions", json!(["unsafe.md"])),
+            ("prompt", json!("override")),
+            ("rules", json!(["rules.md"])),
+            ("plugin", json!(["unsafe-plugin"])),
+            ("plugins", json!(["unsafe-plugin"])),
+            ("hooks", json!({"event": ["command"]})),
+            ("command", json!({"unsafe": {"template": "do it"}})),
+            ("commands", json!({"unsafe": {"template": "do it"}})),
+        ] {
+            let mut config = fully_denied_open_code_config();
+            config[field] = value;
+            assert!(
+                !opencode_permissions_are_denied(&config),
+                "active OpenCode config surface {field} was accepted"
+            );
+        }
+
+        let mut custom_agent = fully_denied_open_code_config();
+        custom_agent["agent"]["review"] = json!({
+            "mode": "subagent",
+            "permission": {"*": "deny"},
+            "tools": {"*": false}
+        });
+        assert!(!opencode_permissions_are_denied(&custom_agent));
+
+        let mut agent_prompt = fully_denied_open_code_config();
+        agent_prompt["agent"]["markdowner"]["prompt"] = json!("override");
+        assert!(!opencode_permissions_are_denied(&agent_prompt));
+
+        let mut agent_options = fully_denied_open_code_config();
+        agent_options["agent"]["markdowner"]["options"] = json!({"unsafe": true});
+        assert!(!opencode_permissions_are_denied(&agent_options));
+
+        let mut extra_tool_override = fully_denied_open_code_config();
+        extra_tool_override["tools"]["future"] = json!(false);
+        assert!(!opencode_permissions_are_denied(&extra_tool_override));
     }
 
     #[test]
@@ -1372,6 +2279,7 @@ Usage: opencode debug config
         }
 
         assert_eq!(error, LocalAgentError::ProbeTimedOut);
+        assert!(!process_exists(pid), "probe returned before group exit");
         assert!(started.elapsed() < Duration::from_secs(7));
         assert!(disappeared, "pipe-holding descendant survived timeout");
         assert!(
@@ -1379,6 +2287,27 @@ Usage: opencode debug config
                 .reason()
                 .contains(temp.path().to_string_lossy().as_ref())
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn successful_probe_confirms_closed_pipe_descendants_are_gone_before_returning() {
+        let temp = tempdir().unwrap();
+        let script = temp.path().join("probe");
+        let pid_file = temp.path().join("descendant.pid");
+        create_executable_script(
+            &script,
+            "#!/bin/sh\n(/bin/sleep 30 </dev/null >/dev/null 2>&1) &\ndescendant=$!\nprintf '%s' \"$descendant\" > \"$1\"\nprintf ok\n",
+        );
+
+        let output = BoundedProbeRunner
+            .run(&script, &[pid_file.as_os_str().to_owned()], &[])
+            .unwrap();
+        let pid: i32 = fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+
+        assert!(output.success);
+        assert_eq!(output.stdout, b"ok");
+        assert!(!process_exists(pid), "probe returned before group exit");
     }
 
     #[test]
@@ -1403,10 +2332,721 @@ Usage: opencode debug config
         }
 
         assert_eq!(error, LocalAgentError::ProbeOutputTooLarge);
+        assert!(!process_exists(pid), "probe returned before group exit");
         assert!(
             disappeared,
             "probe descendant survived output-limit failure"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn pre_cancelled_probe_does_not_spawn_the_fake_executable() {
+        let temp = tempdir().unwrap();
+        let script = temp.path().join("probe");
+        let marker = temp.path().join("spawned");
+        create_executable_script(&script, "#!/bin/sh\n/usr/bin/touch \"$1\"\n");
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let runner = CancellableProbeRunner {
+            cancellation: &cancellation,
+            deadline: Instant::now() + PROBE_TIMEOUT,
+        };
+
+        let error = match runner.run(&script, &[marker.as_os_str().to_owned()], &[]) {
+            Err(error) => error,
+            Ok(_) => panic!("pre-cancelled probe unexpectedly spawned"),
+        };
+
+        assert_eq!(
+            error,
+            LocalAgentError::run(
+                "local_agent_cancelled",
+                "The local agent request was cancelled."
+            )
+        );
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn cancellation_kills_a_pipe_holding_probe_group_without_waiting_for_timeout() {
+        let temp = tempdir().unwrap();
+        let script = temp.path().join("probe");
+        let pid_file = temp.path().join("descendant.pid");
+        create_executable_script(
+            &script,
+            "#!/bin/sh\n(/bin/sleep 30) &\ndescendant=$!\nprintf '%s' \"$descendant\" > \"$1\"\nexit 0\n",
+        );
+        let cancellation = CancellationToken::new();
+        let runner_cancellation = cancellation.clone();
+        let runner_script = script.clone();
+        let runner_pid_file = pid_file.clone();
+        let started = Instant::now();
+        let probe = thread::spawn(move || {
+            CancellableProbeRunner {
+                cancellation: &runner_cancellation,
+                deadline: Instant::now() + PROBE_TIMEOUT,
+            }
+            .run(
+                &runner_script,
+                &[runner_pid_file.as_os_str().to_owned()],
+                &[],
+            )
+        });
+        let marker_deadline = Instant::now() + Duration::from_secs(1);
+        while !pid_file.exists() && Instant::now() < marker_deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            pid_file.exists(),
+            "fake probe did not publish its descendant PID"
+        );
+
+        cancellation.cancel();
+        let error = match probe.join().unwrap() {
+            Err(error) => error,
+            Ok(_) => panic!("cancelled probe unexpectedly succeeded"),
+        };
+        let pid: i32 = fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+        let disappeared = process_disappears(pid, Duration::from_millis(500));
+        if !disappeared {
+            kill_test_process(pid);
+        }
+
+        assert_eq!(
+            error,
+            LocalAgentError::run(
+                "local_agent_cancelled",
+                "The local agent request was cancelled."
+            )
+        );
+        assert!(!process_exists(pid), "probe returned before group exit");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(disappeared, "cancelled probe descendant survived");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn command_deadline_caps_a_probe_below_the_default_probe_timeout() {
+        let temp = tempdir().unwrap();
+        let script = temp.path().join("probe");
+        create_executable_script(&script, "#!/bin/sh\n/bin/sleep 30\n");
+        let cancellation = CancellationToken::new();
+        let runner = CancellableProbeRunner {
+            cancellation: &cancellation,
+            deadline: Instant::now() + Duration::from_millis(50),
+        };
+        let started = Instant::now();
+
+        let error = match runner.run(&script, &[], &[]) {
+            Err(error) => error,
+            Ok(_) => panic!("deadline-bounded probe unexpectedly succeeded"),
+        };
+
+        assert_eq!(error, LocalAgentError::ProbeTimedOut);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn executable_proof_rejects_files_above_the_identity_hash_limit() {
+        let temp = tempdir().unwrap();
+        let executable = temp.path().join("claude");
+        create_executable(&executable);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&executable)
+            .unwrap()
+            .set_len(MAX_EXECUTABLE_BYTES + 1)
+            .unwrap();
+        let executable = executable.canonicalize().unwrap();
+
+        let error = match ExecutableProof::capture(&executable) {
+            Err(error) => error,
+            Ok(_) => panic!("oversized executable unexpectedly received a proof"),
+        };
+
+        assert_eq!(error, LocalAgentError::ProbeFailed);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn executable_proof_rejects_group_or_world_writable_leaf_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        for (name, mode) in [("group-writable", 0o775), ("world-writable", 0o777)] {
+            let executable = temp.path().join(name);
+            create_executable_bytes(&executable, b"native-fake");
+            fs::set_permissions(&executable, fs::Permissions::from_mode(mode)).unwrap();
+            let executable = executable.canonicalize().unwrap();
+
+            let error = match ExecutableProof::capture(&executable) {
+                Err(error) => error,
+                Ok(_) => panic!("mode {mode:o} executable unexpectedly received a proof"),
+            };
+
+            assert_eq!(error, LocalAgentError::ProbeFailed);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn executable_proof_accepts_private_and_read_only_shared_leaf_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        for (name, mode) in [("private", 0o700), ("shared-read-only", 0o755)] {
+            let executable = temp.path().join(name);
+            create_executable_bytes(&executable, b"native-fake");
+            fs::set_permissions(&executable, fs::Permissions::from_mode(mode)).unwrap();
+            let executable = executable.canonicalize().unwrap();
+
+            ExecutableProof::capture(&executable)
+                .unwrap_or_else(|_| panic!("mode {mode:o} executable was rejected"));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn executable_leaf_policy_rejects_owners_other_than_root_or_the_effective_user() {
+        let effective_uid = unsafe { libc::geteuid() };
+        let unrelated_owner = [1, 2, u32::MAX]
+            .into_iter()
+            .find(|owner| *owner != 0 && *owner != effective_uid)
+            .unwrap();
+
+        assert!(super::executable_leaf_is_trusted(0, 0o755, effective_uid));
+        assert!(super::executable_leaf_is_trusted(
+            effective_uid,
+            0o700,
+            effective_uid
+        ));
+        assert!(!super::executable_leaf_is_trusted(
+            unrelated_owner,
+            0o755,
+            effective_uid
+        ));
+    }
+
+    struct CancellingHashReader {
+        cancellation: CancellationToken,
+        returned_chunk: bool,
+    }
+
+    impl Read for CancellingHashReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.returned_chunk {
+                return Ok(0);
+            }
+            let read = buffer.len().min(64);
+            buffer[..read].fill(b'x');
+            self.returned_chunk = true;
+            self.cancellation.cancel();
+            Ok(read)
+        }
+    }
+
+    #[test]
+    fn executable_hashing_observes_cancellation_between_chunks() {
+        let cancellation = CancellationToken::new();
+        let mut reader = CancellingHashReader {
+            cancellation: cancellation.clone(),
+            returned_chunk: false,
+        };
+
+        let error = executable_sha256(
+            &mut reader,
+            Some(&cancellation),
+            Some(Instant::now() + Duration::from_secs(1)),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            LocalAgentError::run(
+                "local_agent_cancelled",
+                "The local agent request was cancelled."
+            )
+        );
+    }
+
+    #[test]
+    fn executable_hashing_rejects_growth_beyond_the_captured_length() {
+        let mut bytes = &b"abcd"[..];
+
+        let error = executable_sha256_exact(&mut bytes, 3, 0, None, None).unwrap_err();
+
+        assert_eq!(error, LocalAgentError::ProbeFailed);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn bounded_runner_drops_unsafe_ambient_environment_and_applies_fixed_overrides() {
+        let allowed = [
+            "HOME", "PATH", "LANG", "LC_ALL", "TMPDIR", "PWD", "SHLVL", "_",
+        ];
+        let unsafe_name = std::env::vars()
+            .map(|(name, _)| name)
+            .find(|name| !allowed.contains(&name.as_str()))
+            .expect("the test process should have an ambient variable outside the allowlist");
+        let temp = tempdir().unwrap();
+        let script = temp.path().join("probe");
+        create_executable_script(&script, "#!/bin/sh\n/usr/bin/env\n");
+
+        let output = BoundedProbeRunner
+            .run(
+                &script,
+                &[],
+                &[(
+                    OsString::from("MARKDOWNER_PROBE_TEST_FIXED"),
+                    OsString::from("fixed"),
+                )],
+            )
+            .unwrap();
+        let environment = String::from_utf8(output.stdout).unwrap();
+
+        assert!(
+            environment
+                .lines()
+                .any(|line| line == "MARKDOWNER_PROBE_TEST_FIXED=fixed")
+        );
+        assert!(
+            !environment
+                .lines()
+                .any(|line| line.starts_with(&format!("{unsafe_name}="))),
+            "unsafe ambient variable {unsafe_name} reached the probe"
+        );
+        let pwd = environment
+            .lines()
+            .find_map(|line| line.strip_prefix("PWD="))
+            .unwrap();
+        let tmpdir = environment
+            .lines()
+            .find_map(|line| line.strip_prefix("TMPDIR="))
+            .unwrap();
+        assert_eq!(pwd, tmpdir);
+        assert_ne!(Path::new(pwd), std::env::current_dir().unwrap());
+        assert!(Path::new(pwd).starts_with(std::env::temp_dir().canonicalize().unwrap()));
+        assert!(!Path::new(pwd).exists());
+    }
+
+    struct CompatibleOpenCodeRunner {
+        environments: Mutex<Vec<Vec<(OsString, OsString)>>>,
+    }
+
+    impl ProbeRunner for CompatibleOpenCodeRunner {
+        fn run(
+            &self,
+            _executable: &Path,
+            _args: &[OsString],
+            environment: &[(OsString, OsString)],
+        ) -> Result<ProbeOutput, LocalAgentError> {
+            let environment_map: BTreeMap<OsString, OsString> =
+                environment.iter().cloned().collect();
+            let xdg_paths: Vec<&Path> = [
+                "XDG_CONFIG_HOME",
+                "XDG_CACHE_HOME",
+                "XDG_DATA_HOME",
+                "XDG_STATE_HOME",
+            ]
+            .into_iter()
+            .map(|name| Path::new(environment_map.get(OsStr::new(name)).unwrap()))
+            .collect();
+            let root = xdg_paths[0].parent().unwrap();
+            for path in &xdg_paths {
+                assert_eq!(path.parent(), Some(root));
+                assert!(path.is_dir());
+                assert!(fs::read_dir(path).unwrap().next().is_none());
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+
+                    assert_eq!(
+                        fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                        0o700
+                    );
+                }
+            }
+            assert_eq!(
+                environment_map.get(OsStr::new("OPENCODE_DISABLE_CLAUDE_CODE")),
+                Some(&OsString::from("1"))
+            );
+            assert_eq!(
+                environment_map.get(OsStr::new("OPENCODE_DISABLE_DEFAULT_PLUGINS")),
+                Some(&OsString::from("true"))
+            );
+            let mut environments = self.environments.lock().unwrap();
+            let stdout = match environments.len() {
+                0 => b"opencode 1.2.3\n".to_vec(),
+                1 => OPEN_CODE_RUN_HELP.as_bytes().to_vec(),
+                2 => OPEN_CODE_DEBUG_CONFIG_HELP.as_bytes().to_vec(),
+                3 => fully_denied_open_code_config().to_string().into_bytes(),
+                _ => panic!("unexpected extra OpenCode probe"),
+            };
+            environments.push(environment.to_vec());
+            Ok(ProbeOutput {
+                success: true,
+                stdout,
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn every_open_code_probe_applies_the_owned_fixed_environment() {
+        let temp = tempdir().unwrap();
+        let executable = temp.path().join("opencode");
+        create_executable(&executable);
+        let resolved = ResolvedAgent {
+            kind: LocalAgentKind::Opencode,
+            path: executable.canonicalize().unwrap(),
+            path_label: "bin/opencode".to_string(),
+        };
+        let runner = CompatibleOpenCodeRunner {
+            environments: Mutex::new(Vec::new()),
+        };
+
+        probe_agent(&resolved, &runner).unwrap();
+
+        let expected: BTreeMap<OsString, OsString> =
+            owned_opencode_environment().into_iter().collect();
+        let environments = runner.environments.lock().unwrap();
+        assert_eq!(environments.len(), 4);
+        for environment in environments.iter() {
+            let environment: BTreeMap<OsString, OsString> = environment.iter().cloned().collect();
+            for (name, value) in &expected {
+                assert_eq!(environment.get(name), Some(value));
+            }
+            assert!(environment.contains_key(OsStr::new("PATH")));
+            assert_eq!(
+                environment.get(OsStr::new("OPENCODE_DISABLE_CLAUDE_CODE")),
+                Some(&OsString::from("1"))
+            );
+            assert_eq!(
+                environment.get(OsStr::new("OPENCODE_DISABLE_DEFAULT_PLUGINS")),
+                Some(&OsString::from("true"))
+            );
+            for name in [
+                "XDG_CONFIG_HOME",
+                "XDG_CACHE_HOME",
+                "XDG_DATA_HOME",
+                "XDG_STATE_HOME",
+            ] {
+                let path = Path::new(environment.get(OsStr::new(name)).unwrap());
+                assert!(!path.exists(), "OpenCode probe isolation leaked {name}");
+            }
+            assert_eq!(environment.len(), expected.len() + 7);
+        }
+        let config_homes: std::collections::HashSet<&OsString> = environments
+            .iter()
+            .map(|environment| {
+                environment
+                    .iter()
+                    .find(|(name, _)| name.as_os_str() == OsStr::new("XDG_CONFIG_HOME"))
+                    .map(|(_, value)| value)
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(config_homes.len(), 4);
+    }
+
+    struct PathSubstitutingClaudeRunner {
+        calls: Mutex<usize>,
+    }
+
+    impl ProbeRunner for PathSubstitutingClaudeRunner {
+        fn run(
+            &self,
+            executable: &Path,
+            _args: &[OsString],
+            _environment: &[(OsString, OsString)],
+        ) -> Result<ProbeOutput, LocalAgentError> {
+            let mut calls = self.calls.lock().unwrap();
+            let output = if *calls == 0 {
+                let displaced = executable.with_extension("displaced");
+                fs::rename(executable, displaced).unwrap();
+                create_executable_script(executable, "#!/bin/sh\nexit 9\n");
+                b"claude 2.1.226\n".to_vec()
+            } else {
+                CLAUDE_HELP.as_bytes().to_vec()
+            };
+            *calls += 1;
+            Ok(ProbeOutput {
+                success: true,
+                stdout: output,
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn capability_probe_rejects_pathname_substitution_after_version_probe() {
+        let temp = tempdir().unwrap();
+        let executable = temp.path().join("claude");
+        create_executable_script(&executable, "#!/bin/sh\nexit 0\n");
+        let resolved = ResolvedAgent {
+            kind: LocalAgentKind::Claude,
+            path: executable.canonicalize().unwrap(),
+            path_label: "bin/claude".to_string(),
+        };
+        let runner = PathSubstitutingClaudeRunner {
+            calls: Mutex::new(0),
+        };
+
+        let error = probe_agent(&resolved, &runner).unwrap_err();
+
+        assert_eq!(error, LocalAgentError::ProbeFailed);
+        assert_eq!(*runner.calls.lock().unwrap(), 1);
+    }
+
+    struct SameInodeMutatingClaudeRunner {
+        calls: Mutex<usize>,
+    }
+
+    impl ProbeRunner for SameInodeMutatingClaudeRunner {
+        fn run(
+            &self,
+            executable: &Path,
+            _args: &[OsString],
+            _environment: &[(OsString, OsString)],
+        ) -> Result<ProbeOutput, LocalAgentError> {
+            let mut calls = self.calls.lock().unwrap();
+            let output = if *calls == 0 {
+                fs::write(executable, "#!/bin/sh\nexit 9\n").unwrap();
+                b"claude 2.1.226\n".to_vec()
+            } else {
+                CLAUDE_HELP.as_bytes().to_vec()
+            };
+            *calls += 1;
+            Ok(ProbeOutput {
+                success: true,
+                stdout: output,
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn capability_probe_rejects_same_inode_content_mutation_after_version_probe() {
+        use std::os::unix::fs::MetadataExt;
+
+        let temp = tempdir().unwrap();
+        let executable = temp.path().join("claude");
+        create_executable_script(&executable, "#!/bin/sh\nexit 0\n");
+        let inode = fs::metadata(&executable).unwrap().ino();
+        let resolved = ResolvedAgent {
+            kind: LocalAgentKind::Claude,
+            path: executable.canonicalize().unwrap(),
+            path_label: "bin/claude".to_string(),
+        };
+        let runner = SameInodeMutatingClaudeRunner {
+            calls: Mutex::new(0),
+        };
+
+        let error = probe_agent(&resolved, &runner).unwrap_err();
+
+        assert_eq!(fs::metadata(executable).unwrap().ino(), inode);
+        assert_eq!(error, LocalAgentError::ProbeFailed);
+        assert_eq!(*runner.calls.lock().unwrap(), 1);
+    }
+
+    struct InterpreterMutatingClaudeRunner {
+        calls: Mutex<usize>,
+        interpreter: PathBuf,
+    }
+
+    impl ProbeRunner for InterpreterMutatingClaudeRunner {
+        fn run(
+            &self,
+            _executable: &Path,
+            _args: &[OsString],
+            _environment: &[(OsString, OsString)],
+        ) -> Result<ProbeOutput, LocalAgentError> {
+            let mut calls = self.calls.lock().unwrap();
+            let output = if *calls == 0 {
+                fs::write(&self.interpreter, "#!/bin/sh\nexit 9\n").unwrap();
+                b"claude 2.1.226\n".to_vec()
+            } else {
+                CLAUDE_HELP.as_bytes().to_vec()
+            };
+            *calls += 1;
+            Ok(ProbeOutput {
+                success: true,
+                stdout: output,
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn capability_probe_rejects_env_interpreter_content_mutation() {
+        let temp = tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let interpreter = bin.join("node");
+        create_executable_script(&interpreter, "#!/bin/sh\nexit 0\n");
+        let executable = bin.join("claude");
+        create_executable_script(&executable, "#!/usr/bin/env node\n");
+        let executable = executable.canonicalize().unwrap();
+        let proof = ExecutableProof::capture_with_constraints(
+            &executable,
+            std::env::join_paths([&bin]).unwrap(),
+            None,
+            None,
+        )
+        .unwrap();
+        let resolved = ResolvedAgent {
+            kind: LocalAgentKind::Claude,
+            path: executable,
+            path_label: "bin/claude".to_string(),
+        };
+        let runner = InterpreterMutatingClaudeRunner {
+            calls: Mutex::new(0),
+            interpreter,
+        };
+
+        let error = probe_agent_with_proof(&resolved, &proof, &runner, None, None).unwrap_err();
+
+        assert_eq!(error, LocalAgentError::ProbeFailed);
+        assert_eq!(*runner.calls.lock().unwrap(), 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn executable_proof_rejects_an_earlier_env_interpreter_path_substitution() {
+        let temp = tempdir().unwrap();
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        fs::create_dir(&first).unwrap();
+        fs::create_dir(&second).unwrap();
+        create_executable_script(&second.join("node"), "#!/bin/sh\nexit 0\n");
+        let executable = temp.path().join("claude");
+        create_executable_script(&executable, "#!/usr/bin/env node\n");
+        let executable = executable.canonicalize().unwrap();
+        let proof = ExecutableProof::capture_with_constraints(
+            &executable,
+            std::env::join_paths([&first, &second]).unwrap(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        create_executable_script(&first.join("node"), "#!/bin/sh\nexit 9\n");
+
+        assert_eq!(
+            proof.verify_path(&executable),
+            Err(LocalAgentError::ProbeFailed)
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn executable_proof_rejects_arbitrary_env_shebang_targets() {
+        let temp = tempdir().unwrap();
+        for (name, shebang) in [
+            ("exact", "#!/usr/bin/env python\n"),
+            ("alias", "#!/usr/bin/../bin/env python\n"),
+        ] {
+            let executable = temp.path().join(name);
+            create_executable_script(&executable, shebang);
+            let executable = executable.canonicalize().unwrap();
+
+            let error = match ExecutableProof::capture_with_constraints(
+                &executable,
+                std::env::join_paths([temp.path()]).unwrap(),
+                None,
+                None,
+            ) {
+                Err(error) => error,
+                Ok(_) => panic!("arbitrary env target unexpectedly received a proof"),
+            };
+
+            assert_eq!(error, LocalAgentError::ProbeFailed);
+        }
+    }
+
+    #[test]
+    fn shebang_parsing_matches_macos_end_and_whitespace_rules() {
+        let parsed = parse_shebang_interpreter(b"#!/safe/runtime#ignored\n")
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.interpreter, Path::new("/safe/runtime"));
+        assert!(parsed.arguments.is_empty());
+
+        assert!(
+            parse_shebang_interpreter(b"#!/usr/bin/env node\r\n").is_err(),
+            "carriage return must not be treated as macOS shebang whitespace"
+        );
+        assert!(
+            parse_shebang_interpreter(b"#!/usr/bin/env\x0bnode\n").is_err(),
+            "vertical tab must not be treated as macOS shebang whitespace"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn executable_proof_recursively_pins_a_scripted_env_target_interpreter() {
+        let temp = tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let nested_interpreter = temp.path().join("runtime");
+        create_executable_bytes(&nested_interpreter, b"native-runtime-v1");
+        let node = bin.join("node");
+        create_executable_script(
+            &node,
+            &format!("#!{}\n", nested_interpreter.to_string_lossy()),
+        );
+        let executable = temp.path().join("claude");
+        create_executable_script(&executable, "#!/usr/bin/env node\n");
+        let executable = executable.canonicalize().unwrap();
+        let proof = ExecutableProof::capture_with_constraints(
+            &executable,
+            std::env::join_paths([&bin]).unwrap(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        fs::write(&nested_interpreter, b"native-runtime-v2").unwrap();
+
+        assert_eq!(
+            proof.verify_path(&executable),
+            Err(LocalAgentError::ProbeFailed)
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn executable_proof_rejects_a_group_writable_env_target_interpreter() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let node = bin.join("node");
+        create_executable_bytes(&node, b"native-runtime");
+        fs::set_permissions(&node, fs::Permissions::from_mode(0o775)).unwrap();
+        let executable = temp.path().join("claude");
+        create_executable_script(&executable, "#!/usr/bin/env node\n");
+        let executable = executable.canonicalize().unwrap();
+
+        let error = match ExecutableProof::capture_with_constraints(
+            &executable,
+            std::env::join_paths([&bin]).unwrap(),
+            None,
+            None,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("group-writable interpreter unexpectedly received a proof"),
+        };
+
+        assert_eq!(error, LocalAgentError::ProbeFailed);
     }
 
     struct TimeoutRunner;
@@ -1591,10 +3231,14 @@ Usage: opencode debug config
     }
 
     #[test]
+    #[cfg(unix)]
     fn installed_incompatible_status_keeps_only_the_sanitized_version() {
+        let temp = tempdir().unwrap();
+        let executable = temp.path().join("claude");
+        create_executable(&executable);
         let resolved = ResolvedAgent {
             kind: LocalAgentKind::Claude,
-            path: PathBuf::from("/private/secret/bin/claude"),
+            path: executable.canonicalize().unwrap(),
             path_label: "bin/claude".to_string(),
         };
         let runner = IncompatibleClaudeRunner {
@@ -1610,7 +3254,7 @@ Usage: opencode debug config
         assert!(
             !serde_json::to_string(&status)
                 .unwrap()
-                .contains("private/secret")
+                .contains(temp.path().to_string_lossy().as_ref())
         );
     }
 
@@ -1637,11 +3281,15 @@ Usage: opencode debug config
     }
 
     #[test]
+    #[cfg(unix)]
     fn capability_timeout_is_five_seconds_and_returns_a_stable_sanitized_reason() {
         assert_eq!(PROBE_TIMEOUT, Duration::from_secs(5));
+        let temp = tempdir().unwrap();
+        let executable = temp.path().join("claude");
+        create_executable(&executable);
         let resolved = ResolvedAgent {
             kind: LocalAgentKind::Claude,
-            path: PathBuf::from("/private/secret/bin/claude"),
+            path: executable.canonicalize().unwrap(),
             path_label: "bin/claude".to_string(),
         };
 
@@ -1652,7 +3300,12 @@ Usage: opencode debug config
             status.reason.as_deref(),
             Some(CAPABILITY_PROBE_TIMEOUT_REASON)
         );
-        assert!(!status.reason.unwrap().contains("/private/secret"));
+        assert!(
+            !status
+                .reason
+                .unwrap()
+                .contains(temp.path().to_string_lossy().as_ref())
+        );
     }
 
     #[test]
