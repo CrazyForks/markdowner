@@ -15,6 +15,12 @@ import type {
   AiRunResult,
   AiStreamEvent,
 } from '@/features/ai/types';
+import type {
+  LocalAgentRunRequest,
+  LocalAgentRunResult,
+  LocalAgentStatus,
+  LocalAgentStreamEvent,
+} from '@/features/ai/localAgents/types';
 import {
   normalizeDraftBackupEntries,
   type DraftBackupEntry,
@@ -466,6 +472,23 @@ export async function aiRun(
 
 export async function aiCancel(requestId: string): Promise<boolean> {
   return invoke<boolean>('ai_cancel', { requestId });
+}
+
+export async function localAgentStatuses(): Promise<LocalAgentStatus[]> {
+  return invoke<LocalAgentStatus[]>('local_agent_statuses');
+}
+
+export async function localAgentRun(
+  request: LocalAgentRunRequest,
+  onEvent: (event: LocalAgentStreamEvent) => void,
+): Promise<LocalAgentRunResult> {
+  const channel = new Channel<LocalAgentStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke<LocalAgentRunResult>('local_agent_run', { request, onEvent: channel });
+}
+
+export async function localAgentCancel(requestId: string): Promise<boolean> {
+  return invoke<boolean>('local_agent_cancel', { requestId });
 }
 
 export async function aiListActive(): Promise<AiActiveRun[]> {

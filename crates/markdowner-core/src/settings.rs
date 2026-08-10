@@ -220,6 +220,8 @@ pub struct Settings {
     pub ai_zdr_only: bool,
     #[serde(deserialize_with = "deserialize_bool_or_false")]
     pub ai_cloud_disclosure_accepted: bool,
+    #[serde(deserialize_with = "deserialize_bool_or_false")]
+    pub local_agent_disclosure_accepted: bool,
     #[serde(deserialize_with = "deserialize_ai_default_scope")]
     pub ai_default_scope: String,
     #[serde(deserialize_with = "deserialize_bool_or_true")]
@@ -283,6 +285,7 @@ impl Default for Settings {
             ai_translation_target_language: default_ai_translation_target_language(),
             ai_zdr_only: true,
             ai_cloud_disclosure_accepted: false,
+            local_agent_disclosure_accepted: false,
             ai_default_scope: "document".to_string(),
             ai_history_enabled: true,
         }
@@ -710,5 +713,33 @@ mod tests {
         assert_eq!(serialized["aiCloudDisclosureAccepted"], true);
         assert_eq!(serialized["aiDefaultScope"], "document");
         assert_eq!(serialized["aiHistoryEnabled"], true);
+    }
+
+    #[test]
+    fn local_agent_disclosure_defaults_false_and_round_trips_independently() {
+        let legacy: Settings = serde_json::from_value(serde_json::json!({
+            "aiCloudDisclosureAccepted": true
+        }))
+        .expect("legacy settings parse");
+        assert!(legacy.ai_cloud_disclosure_accepted);
+        assert!(!legacy.local_agent_disclosure_accepted);
+
+        let parsed: Settings = serde_json::from_value(serde_json::json!({
+            "aiCloudDisclosureAccepted": false,
+            "localAgentDisclosureAccepted": true
+        }))
+        .expect("settings parse");
+        assert!(!parsed.ai_cloud_disclosure_accepted);
+        assert!(parsed.local_agent_disclosure_accepted);
+
+        let serialized = serde_json::to_value(parsed).expect("settings serialize");
+        assert_eq!(serialized["localAgentDisclosureAccepted"], true);
+        assert_eq!(serialized["aiCloudDisclosureAccepted"], false);
+
+        let malformed: Settings = serde_json::from_value(serde_json::json!({
+            "localAgentDisclosureAccepted": "true"
+        }))
+        .expect("malformed setting parse");
+        assert!(!malformed.local_agent_disclosure_accepted);
     }
 }

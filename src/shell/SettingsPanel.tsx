@@ -59,6 +59,7 @@ import { openExternalUrlInNewWindow } from '@/lib/desktop';
 import type { UpdateInfo } from '@/lib/updateCheck';
 import type { InlineStyleTone } from '@/lib/inlineStylePalette';
 import { OpenRouterSettings } from '@/features/ai/OpenRouterSettings';
+import { LocalAgentSettings } from '@/features/ai/localAgents/LocalAgentSettings';
 import { InlineStyleColorSettings } from './InlineStyleColorSettings';
 import { PdfPaperControls } from './PdfPaperControls';
 
@@ -1537,6 +1538,13 @@ export function SettingsPanel({
           }
           onHistoryEnabledChange={(aiHistoryEnabled) =>
             onSettingsChange({ ...settings, aiHistoryEnabled })
+          }
+        />
+
+        <LocalAgentSettings
+          disclosureAccepted={settings.localAgentDisclosureAccepted}
+          onDisclosureAcceptedChange={(localAgentDisclosureAccepted) =>
+            onSettingsChange({ ...settings, localAgentDisclosureAccepted })
           }
         />
 

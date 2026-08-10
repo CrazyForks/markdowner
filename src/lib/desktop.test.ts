@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const channels = vi.hoisted(() => [] as Array<{ onmessage?: (event: unknown) => void }>);
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
+  Channel: class {
+    onmessage?: (event: unknown) => void;
+
+    constructor() {
+      channels.push(this);
+    }
+  },
 }));
 
 import {
@@ -11,12 +19,17 @@ import {
   exportPdfFile,
   exportPdfFiles,
   exportTextFiles,
+  localAgentCancel,
+  localAgentRun,
+  localAgentStatuses,
   reloadActiveDocumentFromDisk,
 } from './desktop';
+import type { LocalAgentRunRequest, LocalAgentStreamEvent } from '@/features/ai/localAgents/types';
 
 describe('desktop document reload', () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    channels.length = 0;
   });
 
   it('invokes the dedicated disk reload command instead of opening the cached document', async () => {
@@ -46,6 +59,44 @@ describe('desktop document reload', () => {
       path: '/tmp/notes.md',
       expectedSource: '# Previous',
       expectedDirty: false,
+    });
+  });
+});
+
+describe('desktop local-agent bridge', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    channels.length = 0;
+  });
+
+  it('forwards status, streamed events, and cancellation through the local-agent commands', async () => {
+    const request: LocalAgentRunRequest = {
+      requestId: 'local-agent-1',
+      documentId: 'notes.md',
+      agent: 'claude',
+      target: 'selection',
+      source: '# Notes',
+      selection: { start: 0, end: 7 },
+      cursor: null,
+      instruction: 'Improve this.',
+    };
+    const onEvent = vi.fn();
+    const event: LocalAgentStreamEvent = { type: 'running', requestId: 'local-agent-1' };
+    invokeMock.mockResolvedValue(undefined);
+
+    await localAgentStatuses();
+    await localAgentRun(request, onEvent);
+    channels[0]?.onmessage?.(event);
+    await localAgentCancel('local-agent-1');
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'local_agent_statuses');
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'local_agent_run', {
+      request,
+      onEvent: channels[0],
+    });
+    expect(onEvent).toHaveBeenCalledWith(event);
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'local_agent_cancel', {
+      requestId: 'local-agent-1',
     });
   });
 });

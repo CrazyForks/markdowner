@@ -39,6 +39,7 @@ vi.mock('@/lib/desktop', () => ({
   aiSaveKey: vi.fn(),
   aiVerifyKey: vi.fn(),
   aiDeleteKey: vi.fn(),
+  localAgentStatuses: vi.fn(),
 }));
 
 const availableUpdate: UpdateInfo = {
@@ -269,6 +270,27 @@ describe('SettingsPanel update section', () => {
     fireEvent.click(screen.getByRole('switch', { name: /Keep local AI history/i }));
     expect(onSettingsChange).toHaveBeenCalledWith(
       expect.objectContaining({ aiHistoryEnabled: false }),
+    );
+  });
+
+  it('persists local-agent disclosure independently immediately after OpenRouter settings', () => {
+    const onSettingsChange = vi.fn();
+    renderPanel({ onSettingsChange });
+
+    const openRouterSection = screen.getByTestId('settings-openrouter');
+    const localAgentSection = screen.getByTestId('settings-local-agents');
+    const siblingSections = Array.from(openRouterSection.parentElement?.children ?? [])
+      .filter((element) => element.hasAttribute('data-testid'));
+    expect(siblingSections.indexOf(localAgentSection)).toBe(
+      siblingSections.indexOf(openRouterSection) + 1,
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Allow local agent processing' }));
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aiCloudDisclosureAccepted: false,
+        localAgentDisclosureAccepted: true,
+      }),
     );
   });
 

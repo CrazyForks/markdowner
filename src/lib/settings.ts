@@ -132,6 +132,7 @@ export interface Settings extends InlineStyleColorSettings {
   aiTranslationTargetLanguage: string;
   aiZdrOnly: boolean;
   aiCloudDisclosureAccepted: boolean;
+  localAgentDisclosureAccepted: boolean;
   aiDefaultScope: 'document' | 'workspace';
   aiHistoryEnabled: boolean;
 }
@@ -271,6 +272,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiTranslationTargetLanguage: defaultAiTranslationTargetLanguage(),
   aiZdrOnly: true,
   aiCloudDisclosureAccepted: false,
+  localAgentDisclosureAccepted: false,
   aiDefaultScope: 'document',
   aiHistoryEnabled: true,
 };
@@ -594,6 +596,10 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   if (typeof merged.aiCloudDisclosureAccepted !== 'boolean') {
     merged.aiCloudDisclosureAccepted =
       DEFAULT_SETTINGS.aiCloudDisclosureAccepted;
+  }
+  if (typeof merged.localAgentDisclosureAccepted !== 'boolean') {
+    merged.localAgentDisclosureAccepted =
+      DEFAULT_SETTINGS.localAgentDisclosureAccepted;
   }
   if (merged.aiDefaultScope !== 'document' && merged.aiDefaultScope !== 'workspace') {
     merged.aiDefaultScope = DEFAULT_SETTINGS.aiDefaultScope;

@@ -523,4 +523,28 @@ describe('AI settings', () => {
       aiHistoryEnabled: true,
     });
   });
+
+  it('keeps local-agent disclosure separate while migrating malformed persisted values', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({});
+    await expect(loadSettings()).resolves.toMatchObject({
+      aiCloudDisclosureAccepted: false,
+      localAgentDisclosureAccepted: false,
+    });
+
+    invokeMock.mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      aiCloudDisclosureAccepted: false,
+      localAgentDisclosureAccepted: true,
+    });
+    await expect(loadSettings()).resolves.toMatchObject({
+      aiCloudDisclosureAccepted: false,
+      localAgentDisclosureAccepted: true,
+    });
+
+    invokeMock.mockResolvedValue({ localAgentDisclosureAccepted: 'yes' });
+    await expect(loadSettings()).resolves.toMatchObject({
+      localAgentDisclosureAccepted: false,
+    });
+  });
 });
