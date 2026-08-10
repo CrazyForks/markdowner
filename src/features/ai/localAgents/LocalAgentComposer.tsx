@@ -75,13 +75,21 @@ export function LocalAgentComposer({
   const [instruction, setInstruction] = useState("");
   const [target, setTarget] = useState<LocalAgentTargetKind>(snapshot.kind);
   const [runningRequestId, setRunningRequestId] = useState<string | null>(null);
+  const [cancellingRequestId, setCancellingRequestId] = useState<string | null>(
+    null,
+  );
   const [lifecycleStatus, setLifecycleStatus] = useState("");
   const [error, setError] = useState("");
   const mountedRef = useRef(true);
   const statusGenerationRef = useRef(0);
   const runGenerationRef = useRef(0);
   const runningRequestIdRef = useRef<string | null>(null);
-  const cancelRequestedIdRef = useRef<string | null>(null);
+  const cancelAttemptRef = useRef<{
+    requestId: string;
+    generation: number;
+    inFlight: boolean;
+    cancelled: boolean;
+  } | null>(null);
   const activeCancelRef = useRef<
     ((requestId: string) => Promise<boolean>) | null
   >(null);
@@ -93,11 +101,25 @@ export function LocalAgentComposer({
     mountedRef.current = true;
     return () => {
       const activeRequestId = runningRequestIdRef.current;
+      const activeGeneration = runGenerationRef.current;
       statusGenerationRef.current += 1;
       mountedRef.current = false;
       runGenerationRef.current += 1;
-      if (activeRequestId && cancelRequestedIdRef.current !== activeRequestId) {
-        cancelRequestedIdRef.current = activeRequestId;
+      const attempt = cancelAttemptRef.current;
+      if (
+        activeRequestId &&
+        !(
+          attempt?.requestId === activeRequestId &&
+          attempt.generation === activeGeneration &&
+          (attempt.inFlight || attempt.cancelled)
+        )
+      ) {
+        cancelAttemptRef.current = {
+          requestId: activeRequestId,
+          generation: activeGeneration,
+          inFlight: true,
+          cancelled: false,
+        };
         void activeCancelRef.current?.(activeRequestId).catch(() => undefined);
       }
     };
@@ -176,6 +198,18 @@ export function LocalAgentComposer({
         target === "document" ? asDocumentLocalAgentTarget(snapshot) : snapshot,
       ),
   );
+  const isCurrentRun = (requestId: string, generation: number) =>
+    mountedRef.current &&
+    runGenerationRef.current === generation &&
+    runningRequestIdRef.current === requestId;
+  const isCancelledRun = (requestId: string, generation: number) => {
+    const attempt = cancelAttemptRef.current;
+    return (
+      attempt?.requestId === requestId &&
+      attempt.generation === generation &&
+      attempt.cancelled
+    );
+  };
 
   const selectAgent = (agent: LocalAgentKind) => {
     const status = statuses.find((candidate) => candidate.kind === agent);
@@ -233,7 +267,7 @@ export function LocalAgentComposer({
     const generation = runGenerationRef.current + 1;
     runGenerationRef.current = generation;
     runningRequestIdRef.current = requestId;
-    cancelRequestedIdRef.current = null;
+    cancelAttemptRef.current = null;
     activeCancelRef.current = services.cancel;
     setRunningRequestId(requestId);
     setLifecycleStatus("Starting local agent…");
@@ -243,7 +277,8 @@ export function LocalAgentComposer({
         if (
           !mountedRef.current ||
           runGenerationRef.current !== generation ||
-          event.requestId !== requestId
+          event.requestId !== requestId ||
+          isCancelledRun(requestId, generation)
         )
           return;
         if (event.type === "failed") {
@@ -252,17 +287,24 @@ export function LocalAgentComposer({
           setLifecycleStatus(lifecycleLabel(event.type));
         }
       });
-      if (mountedRef.current && runGenerationRef.current === generation) {
+      if (
+        isCurrentRun(requestId, generation) &&
+        !isCancelledRun(requestId, generation)
+      ) {
         onResult(result, requestSnapshot, request);
       }
     } catch {
-      if (mountedRef.current && runGenerationRef.current === generation) {
+      if (
+        isCurrentRun(requestId, generation) &&
+        !isCancelledRun(requestId, generation)
+      ) {
         setError("Could not run local agent.");
       }
     } finally {
-      if (mountedRef.current && runGenerationRef.current === generation) {
+      if (isCurrentRun(requestId, generation)) {
         runningRequestIdRef.current = null;
         activeCancelRef.current = null;
+        setCancellingRequestId(null);
         setRunningRequestId(null);
       }
     }
@@ -270,13 +312,56 @@ export function LocalAgentComposer({
 
   const handleCancel = async () => {
     const requestId = runningRequestIdRef.current;
-    if (!requestId || cancelRequestedIdRef.current === requestId) return;
-    cancelRequestedIdRef.current = requestId;
+    const generation = runGenerationRef.current;
+    const previousAttempt = cancelAttemptRef.current;
+    if (
+      !requestId ||
+      (previousAttempt?.requestId === requestId &&
+        previousAttempt.generation === generation &&
+        (previousAttempt.inFlight || previousAttempt.cancelled))
+    ) {
+      return;
+    }
+    const attempt = {
+      requestId,
+      generation,
+      inFlight: true,
+      cancelled: false,
+    };
+    cancelAttemptRef.current = attempt;
+    setCancellingRequestId(requestId);
     setLifecycleStatus("Cancelling local agent…");
     try {
-      await (activeCancelRef.current ?? services.cancel)(requestId);
+      const cancelled = await (activeCancelRef.current ?? services.cancel)(
+        requestId,
+      );
+      if (
+        !isCurrentRun(requestId, generation) ||
+        cancelAttemptRef.current !== attempt
+      ) {
+        return;
+      }
+      if (!cancelled) {
+        cancelAttemptRef.current = null;
+        setCancellingRequestId(null);
+        setError("Could not cancel local agent.");
+        return;
+      }
+      attempt.inFlight = false;
+      attempt.cancelled = true;
+      runningRequestIdRef.current = null;
+      activeCancelRef.current = null;
+      setCancellingRequestId(null);
+      setRunningRequestId(null);
+      setError("");
+      setLifecycleStatus("Local agent request cancelled.");
     } catch {
-      if (mountedRef.current && runningRequestIdRef.current === requestId) {
+      if (
+        isCurrentRun(requestId, generation) &&
+        cancelAttemptRef.current === attempt
+      ) {
+        cancelAttemptRef.current = null;
+        setCancellingRequestId(null);
         setError("Could not cancel local agent.");
       }
     }
@@ -473,6 +558,7 @@ export function LocalAgentComposer({
               type="button"
               variant="destructive"
               aria-label="Cancel local agent"
+              disabled={cancellingRequestId === runningRequestId}
               onClick={() => void handleCancel()}
             >
               <Square aria-hidden="true" />

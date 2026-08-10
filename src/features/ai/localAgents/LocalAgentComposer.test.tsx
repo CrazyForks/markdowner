@@ -379,7 +379,7 @@ describe("LocalAgentComposer", () => {
 
   it("keeps Close disabled during a run, cancels its exact request, and sanitizes service failures", async () => {
     const pending = deferred<LocalAgentRunResult>();
-    const cancel = vi.fn().mockResolvedValue(true);
+    const cancel = vi.fn().mockResolvedValue(false);
     const run = vi
       .fn()
       .mockImplementation(
@@ -478,6 +478,151 @@ describe("LocalAgentComposer", () => {
     unmount();
     expect(cancel).toHaveBeenCalledTimes(1);
     await act(async () => pending.resolve(resultFor(run.mock.calls[0][0])));
+  });
+
+  it("retries a false cancellation result and ignores the late cancelled run result", async () => {
+    const pending = deferred<LocalAgentRunResult>();
+    const cancel = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const run = vi.fn().mockReturnValue(pending.promise);
+    const { props } = renderComposer({
+      services: {
+        listStatuses: vi.fn().mockResolvedValue(statuses),
+        run,
+        cancel,
+      },
+    });
+    await waitForStatuses();
+    fireEvent.change(screen.getByLabelText("Instruction"), {
+      target: { value: "Use it" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run @codex" }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel local agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not cancel local agent.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Cancel local agent" }),
+    ).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel local agent" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
+    expect(
+      screen.getByText("Local agent request cancelled."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Close local agent" }),
+    ).toBeEnabled();
+
+    await act(async () => pending.resolve(resultFor(run.mock.calls[0][0])));
+    expect(props.onResult).not.toHaveBeenCalled();
+  });
+
+  it("retries a rejected cancellation without leaking its error", async () => {
+    const pending = deferred<LocalAgentRunResult>();
+    const cancel = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error("token sk-secret at /private/tmp/cancel"),
+      )
+      .mockResolvedValueOnce(true);
+    const run = vi.fn().mockReturnValue(pending.promise);
+    renderComposer({
+      services: {
+        listStatuses: vi.fn().mockResolvedValue(statuses),
+        run,
+        cancel,
+      },
+    });
+    await waitForStatuses();
+    fireEvent.change(screen.getByLabelText("Instruction"), {
+      target: { value: "Use it" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run @codex" }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel local agent" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not cancel local agent.");
+    expect(alert).not.toHaveTextContent(/sk-secret|private\/tmp/i);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel local agent" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
+    expect(
+      screen.getByText("Local agent request cancelled."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a cancellation attempt single-flight until it completes", async () => {
+    const pendingRun = deferred<LocalAgentRunResult>();
+    const pendingCancel = deferred<boolean>();
+    const cancel = vi.fn().mockReturnValue(pendingCancel.promise);
+    const run = vi.fn().mockReturnValue(pendingRun.promise);
+    renderComposer({
+      services: {
+        listStatuses: vi.fn().mockResolvedValue(statuses),
+        run,
+        cancel,
+      },
+    });
+    await waitForStatuses();
+    fireEvent.change(screen.getByLabelText("Instruction"), {
+      target: { value: "Use it" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run @codex" }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    const cancelButton = screen.getByRole("button", {
+      name: "Cancel local agent",
+    });
+    fireEvent.click(cancelButton);
+    fireEvent.click(cancelButton);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(cancelButton).toBeDisabled();
+    await act(async () => pendingCancel.resolve(false));
+    expect(
+      screen.getByRole("button", { name: "Cancel local agent" }),
+    ).toBeEnabled();
+  });
+
+  it("ignores a late failed cancellation after the request has completed and another run starts", async () => {
+    const firstRun = deferred<LocalAgentRunResult>();
+    const secondRun = deferred<LocalAgentRunResult>();
+    const lateCancel = deferred<boolean>();
+    const cancel = vi.fn().mockReturnValue(lateCancel.promise);
+    const run = vi
+      .fn()
+      .mockReturnValueOnce(firstRun.promise)
+      .mockReturnValueOnce(secondRun.promise);
+    const { props } = renderComposer({
+      services: {
+        listStatuses: vi.fn().mockResolvedValue(statuses),
+        run,
+        cancel,
+      },
+    });
+    await waitForStatuses();
+    fireEvent.change(screen.getByLabelText("Instruction"), {
+      target: { value: "Use it" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run @codex" }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel local agent" }));
+
+    await act(async () => firstRun.resolve(resultFor(run.mock.calls[0][0])));
+    await waitFor(() => expect(props.onResult).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Run @codex" }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    await act(async () =>
+      lateCancel.reject(new Error("private cancellation details")),
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Close local agent" }),
+    ).toBeDisabled();
   });
 
   it("ignores stale status responses after unmount and forwards only content-free lifecycle status", async () => {
