@@ -521,7 +521,6 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
     insertContentAtMock: vi.fn(),
     insertContentMock: vi.fn(),
     focusChainMock: vi.fn(),
-    restoreWithoutHistoryMock: vi.fn(),
     setLinkMock: vi.fn(),
     unsetLinkMock: vi.fn(),
     isActive: vi.fn(() => false),
@@ -603,7 +602,8 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
       mutableSegments[index].from += delta;
     }
     editor.markdown = mutableSegments.map((item) => item.text).join('\n');
-    editor.state.doc = rebuildDoc();
+    editor.state = { ...editor.state, doc: rebuildDoc() };
+    if (editor.view) editor.view.state = editor.state;
   };
 
   const transaction = {
@@ -619,16 +619,12 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
           text: content.__markdown,
           from: 0,
         });
-        editor.state.doc = rebuildDoc();
+        editor.state = { ...editor.state, doc: rebuildDoc() };
+        if (editor.view) editor.view.state = editor.state;
       }
       return transaction;
     }),
-    setMeta: vi.fn((key: string, value: unknown) => {
-      if (key === 'addToHistory' && value === false) {
-        editor.restoreWithoutHistoryMock();
-      }
-      return transaction;
-    }),
+    setMeta: vi.fn(() => transaction),
   };
 
   editor.state = {
@@ -644,6 +640,18 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
   editor.view = {
     state: editor.state,
     dispatch: vi.fn(),
+    updateState: vi.fn((state: any) => {
+      editor.state = state;
+      editor.view.state = state;
+      const restoredMarkdown = state.doc?.content?.__markdown;
+      if (typeof restoredMarkdown === 'string') {
+        editor.markdown = restoredMarkdown;
+        mutableSegments.splice(0, mutableSegments.length, {
+          text: restoredMarkdown,
+          from: 0,
+        });
+      }
+    }),
     focus: vi.fn(),
     coordsAtPos: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
     posAtDOM: vi.fn(() => 1),
@@ -669,16 +677,20 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
           ? previousSelection.constructor
           : undefined;
       editor.lastSelection = next;
-      editor.state.selection = {
-        ...(previousSelectionConstructor
-          ? { constructor: previousSelectionConstructor }
-          : {}),
-        from: next.from,
-        to: next.to,
-        anchor: next.from,
-        head: next.to,
-        $from: mockSelectionAnchor,
+      editor.state = {
+        ...editor.state,
+        selection: {
+          ...(previousSelectionConstructor
+            ? { constructor: previousSelectionConstructor }
+            : {}),
+          from: next.from,
+          to: next.to,
+          anchor: next.from,
+          head: next.to,
+          $from: mockSelectionAnchor,
+        },
       };
+      editor.view.state = editor.state;
       return true;
     }),
   };
@@ -2179,7 +2191,8 @@ describe('App recent documents', () => {
     fireEvent.click(run);
     await waitFor(() => expect(localAgentRunMock).toHaveBeenCalledTimes(1));
     const request = localAgentRunMock.mock.calls[0][0];
-    editor.restoreWithoutHistoryMock.mockClear();
+    editor.view.updateState.mockClear();
+    const preApplicationState = editor.state;
     const originalChain = editor.chain;
     editor.chain = vi.fn(() => {
       const chain = originalChain();
@@ -2208,7 +2221,8 @@ describe('App recent documents', () => {
     expect(await screen.findByTestId('ai-review-tab')).toBeVisible();
     expect(editor.insertContentAtMock).toHaveBeenCalledTimes(1);
     expect(editor.markdown).toBe(source);
-    expect(editor.restoreWithoutHistoryMock).toHaveBeenCalledTimes(1);
+    expect(editor.view.updateState).toHaveBeenCalledOnce();
+    expect(editor.view.updateState).toHaveBeenCalledWith(preApplicationState);
     expect(screen.getByRole('button', { name: 'Open as new document' })).toBeEnabled();
     expect(screen.queryByText('Could not run local agent.')).not.toBeInTheDocument();
     expect(replaceActiveDocumentSourceMock).not.toHaveBeenCalled();

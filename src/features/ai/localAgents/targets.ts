@@ -23,6 +23,26 @@ export type WysiwygLocalAgentApplyOutcome =
   | { status: 'not-applied' }
   | { status: 'failed' };
 
+interface WysiwygApplicationState {
+  doc: { content: { size: number } };
+  selection: { from: number; to: number };
+}
+
+interface WysiwygApplicationEditor<State extends WysiwygApplicationState> {
+  chain: () => {
+    focus: () => {
+      insertContentAt: (
+        range: { from: number; to: number },
+        content: string,
+        options: { contentType: 'markdown' },
+      ) => { run: () => boolean };
+    };
+  };
+  state: State;
+  view?: { updateState: (state: State) => void };
+  getMarkdown?: () => string;
+}
+
 export function isValidLocalAgentTargetSnapshot(
   snapshot: LocalAgentTargetSnapshot,
 ): boolean {
@@ -187,33 +207,10 @@ export function applySourceLocalAgentResult(input: {
   return nextSource;
 }
 
-export function applyWysiwygLocalAgentResult(input: {
-  editor: {
-    chain: () => {
-      focus: () => {
-        insertContentAt: (
-          range: { from: number; to: number },
-          content: string,
-          options: { contentType: 'markdown' },
-        ) => { run: () => boolean };
-      };
-    };
-    state: {
-      doc: { content: { size: number } };
-      selection: { from: number; to: number };
-      tr?: {
-        replaceWith: (
-          from: number,
-          to: number,
-          content: any,
-        ) => {
-          setMeta: (key: string, value: unknown) => unknown;
-        };
-      };
-    };
-    view?: { dispatch: (transaction: any) => void };
-    getMarkdown?: () => string;
-  };
+export function applyWysiwygLocalAgentResult<
+  State extends WysiwygApplicationState,
+>(input: {
+  editor: WysiwygApplicationEditor<State>;
   snapshot: LocalAgentTargetSnapshot;
   currentDocumentId: string;
   currentSource: string;
@@ -239,7 +236,7 @@ export function applyWysiwygLocalAgentResult(input: {
     return { status: 'not-applied' };
   }
 
-  const previousDoc = input.editor.state.doc;
+  const previousState = input.editor.state;
   try {
     const applied = input.editor
       .chain()
@@ -251,16 +248,16 @@ export function applyWysiwygLocalAgentResult(input: {
       )
       .run();
     if (applied === false) {
-      restoreWysiwygDocument(input.editor, previousDoc);
+      restoreWysiwygEditorState(input.editor, previousState);
       return { status: 'not-applied' };
     }
     if (typeof input.editor.getMarkdown !== 'function') {
-      restoreWysiwygDocument(input.editor, previousDoc);
+      restoreWysiwygEditorState(input.editor, previousState);
       return { status: 'failed' };
     }
     return { status: 'applied', markdown: input.editor.getMarkdown() };
   } catch {
-    restoreWysiwygDocument(input.editor, previousDoc);
+    restoreWysiwygEditorState(input.editor, previousState);
     return { status: 'failed' };
   }
 }
@@ -364,37 +361,15 @@ function sameLiveWysiwygSelection(
   return selection?.from === range.start && selection.to === range.end;
 }
 
-function restoreWysiwygDocument(
-  editor: {
-    state: {
-      doc: { content: { size: number } };
-      tr?: {
-        replaceWith: (
-          from: number,
-          to: number,
-          content: any,
-        ) => {
-          setMeta: (key: string, value: unknown) => unknown;
-        };
-      };
-    };
-    view?: { dispatch: (transaction: any) => void };
-  },
-  previousDoc: { content: { size: number } },
+function restoreWysiwygEditorState<State extends WysiwygApplicationState>(
+  editor: WysiwygApplicationEditor<State>,
+  previousState: State,
 ): void {
-  if (editor.state.doc === previousDoc) return;
-  const transactionState = editor.state.tr;
-  if (!transactionState || !editor.view) return;
+  if (editor.state === previousState || !editor.view) return;
   try {
-    const transaction = transactionState.replaceWith(
-      0,
-      editor.state.doc.content.size,
-      previousDoc.content,
-    );
-    transaction.setMeta('addToHistory', false);
-    editor.view.dispatch(transaction);
+    editor.view.updateState(previousState);
   } catch {
-    // A failed best-effort restore must still fail closed to Review.
+    // A failed state restore must still fail closed to Review.
   }
 }
 

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { closeHistory, history, undo, undoDepth } from '@tiptap/pm/history';
+import { Schema } from '@tiptap/pm/model';
+import { EditorState, TextSelection, type Transaction } from '@tiptap/pm/state';
 
 import {
   applySourceLocalAgentResult,
@@ -37,6 +40,41 @@ function resultFor(request: LocalAgentRunRequest): LocalAgentRunResult {
     markdown: 'BETA',
     summary: 'Rewrote the target.',
     warnings: [],
+  };
+}
+
+const historySchema = new Schema({
+  nodes: {
+    doc: { content: 'paragraph+' },
+    paragraph: { content: 'text*', toDOM: () => ['p', 0] },
+    text: {},
+  },
+});
+
+function createHistoryHarness() {
+  let state = EditorState.create({
+    doc: historySchema.node('doc', null, [
+      historySchema.node('paragraph', null, historySchema.text('alpha beta')),
+    ]),
+    plugins: [history()],
+  });
+  const dispatch = (transaction: Transaction) => {
+    state = state.apply(transaction);
+  };
+  const updateState = (nextState: EditorState) => {
+    state = nextState;
+  };
+
+  dispatch(state.tr.insertText('!', 11));
+  dispatch(closeHistory(state.tr));
+  dispatch(state.tr.setSelection(TextSelection.create(state.doc, 7, 11)));
+
+  return {
+    get state() {
+      return state;
+    },
+    dispatch,
+    updateState,
   };
 }
 
@@ -363,24 +401,24 @@ describe('local-agent targets', () => {
     });
     if (!snapshot) throw new Error('target required');
     const request = requestFor(snapshot);
-    const originalDoc = { content: { size: 12, marker: 'original' } };
-    const mutatedDoc = { content: { size: 12, marker: 'mutated' } };
-    let markdown = source;
-    const restoreTransaction: any = {
-      replaceWith: vi.fn(() => restoreTransaction),
-      setMeta: vi.fn(() => restoreTransaction),
-    };
-    const state: any = {
-      doc: originalDoc,
+    const originalState = {
+      doc: { content: { size: 12, marker: 'original' } },
       selection: { from: 7, to: 11 },
-      tr: restoreTransaction,
     };
+    const mutatedState = {
+      doc: { content: { size: 12, marker: 'mutated' } },
+      selection: { from: 11, to: 11 },
+    };
+    let currentState = originalState;
+    let markdown = source;
     const editor = {
-      state,
+      get state() {
+        return currentState;
+      },
       getMarkdown: vi.fn(() => markdown),
       view: {
-        dispatch: vi.fn(() => {
-          state.doc = originalDoc;
+        updateState: vi.fn((state: typeof originalState) => {
+          currentState = state;
           markdown = source;
         }),
       },
@@ -388,7 +426,7 @@ describe('local-agent targets', () => {
         focus: () => ({
           insertContentAt: () => ({
             run: () => {
-              state.doc = mutatedDoc;
+              currentState = mutatedState;
               markdown = 'alpha BETA';
               throw new Error('Markdown command failed');
             },
@@ -408,16 +446,9 @@ describe('local-agent targets', () => {
       }),
     ).toEqual({ status: 'failed' });
     expect(markdown).toBe(source);
-    expect(editor.view.dispatch).toHaveBeenCalledTimes(1);
-    expect(restoreTransaction.replaceWith).toHaveBeenCalledWith(
-      0,
-      mutatedDoc.content.size,
-      originalDoc.content,
-    );
-    expect(restoreTransaction.setMeta).toHaveBeenCalledWith(
-      'addToHistory',
-      false,
-    );
+    expect(currentState).toBe(originalState);
+    expect(editor.view.updateState).toHaveBeenCalledOnce();
+    expect(editor.view.updateState).toHaveBeenCalledWith(originalState);
   });
 
   it('restores the pre-apply WYSIWYG document when post-command serialization throws', () => {
@@ -433,32 +464,32 @@ describe('local-agent targets', () => {
     });
     if (!snapshot) throw new Error('target required');
     const request = requestFor(snapshot);
-    const originalDoc = { content: { size: 12, marker: 'original' } };
-    const mutatedDoc = { content: { size: 12, marker: 'mutated' } };
-    const restoreTransaction: any = {
-      replaceWith: vi.fn(() => restoreTransaction),
-      setMeta: vi.fn(() => restoreTransaction),
-    };
-    const state: any = {
-      doc: originalDoc,
+    const originalState = {
+      doc: { content: { size: 12, marker: 'original' } },
       selection: { from: 7, to: 11 },
-      tr: restoreTransaction,
     };
+    const mutatedState = {
+      doc: { content: { size: 12, marker: 'mutated' } },
+      selection: { from: 11, to: 11 },
+    };
+    let currentState = originalState;
     const editor = {
-      state,
+      get state() {
+        return currentState;
+      },
       getMarkdown: vi.fn(() => {
         throw new Error('Markdown serialization failed');
       }),
       view: {
-        dispatch: vi.fn(() => {
-          state.doc = originalDoc;
+        updateState: vi.fn((state: typeof originalState) => {
+          currentState = state;
         }),
       },
       chain: vi.fn(() => ({
         focus: () => ({
           insertContentAt: () => ({
             run: () => {
-              state.doc = mutatedDoc;
+              currentState = mutatedState;
               return true;
             },
           }),
@@ -476,11 +507,117 @@ describe('local-agent targets', () => {
         result: resultFor(request),
       }),
     ).toEqual({ status: 'failed' });
-    expect(editor.view.dispatch).toHaveBeenCalledTimes(1);
-    expect(restoreTransaction.setMeta).toHaveBeenCalledWith(
-      'addToHistory',
-      false,
-    );
+    expect(currentState).toBe(originalState);
+    expect(editor.view.updateState).toHaveBeenCalledOnce();
+    expect(editor.view.updateState).toHaveBeenCalledWith(originalState);
+  });
+
+  it('restores the exact ProseMirror state and prior undo history after a failed mutation', () => {
+    const harness = createHistoryHarness();
+    const preApplicationState = harness.state;
+    const preApplicationUndoDepth = undoDepth(preApplicationState);
+    const source = 'alpha beta!';
+    const snapshot = captureWysiwygLocalAgentTarget({
+      source,
+      markdownAnchor: 6,
+      markdownHead: 10,
+      proseMirrorFrom: 7,
+      proseMirrorTo: 11,
+      proseMirrorDocumentSize: preApplicationState.doc.content.size,
+      documentId: 'doc-1',
+    });
+    if (!snapshot) throw new Error('target required');
+    const request = requestFor(snapshot);
+    const updateState = vi.fn(harness.updateState);
+    const editor = {
+      get state() {
+        return harness.state;
+      },
+      view: { dispatch: harness.dispatch, updateState },
+      getMarkdown: vi.fn(() => harness.state.doc.textContent),
+      chain: vi.fn(() => ({
+        focus: () => ({
+          insertContentAt: () => ({
+            run: () => {
+              harness.dispatch(harness.state.tr.insertText('BETA', 7, 11));
+              throw new Error('Markdown command failed after dispatch');
+            },
+          }),
+        }),
+      })),
+    };
+
+    expect(
+      applyWysiwygLocalAgentResult({
+        editor,
+        snapshot,
+        currentDocumentId: 'doc-1',
+        currentSource: source,
+        request,
+        result: resultFor(request),
+      }),
+    ).toEqual({ status: 'failed' });
+    expect(updateState).toHaveBeenCalledOnce();
+    expect(updateState).toHaveBeenCalledWith(preApplicationState);
+    expect(harness.state).toBe(preApplicationState);
+    expect(harness.state.doc.textContent).toBe(source);
+    expect(undoDepth(harness.state)).toBe(preApplicationUndoDepth);
+
+    expect(undo(harness.state, harness.dispatch)).toBe(true);
+    expect(harness.state.doc.textContent).toBe('alpha beta');
+  });
+
+  it('keeps a successful WYSIWYG application as one undoable transaction', () => {
+    const harness = createHistoryHarness();
+    const preApplicationUndoDepth = undoDepth(harness.state);
+    const source = 'alpha beta!';
+    const snapshot = captureWysiwygLocalAgentTarget({
+      source,
+      markdownAnchor: 6,
+      markdownHead: 10,
+      proseMirrorFrom: 7,
+      proseMirrorTo: 11,
+      proseMirrorDocumentSize: harness.state.doc.content.size,
+      documentId: 'doc-1',
+    });
+    if (!snapshot) throw new Error('target required');
+    const request = requestFor(snapshot);
+    const editor = {
+      get state() {
+        return harness.state;
+      },
+      view: {
+        dispatch: harness.dispatch,
+        updateState: harness.updateState,
+      },
+      getMarkdown: vi.fn(() => harness.state.doc.textContent),
+      chain: vi.fn(() => ({
+        focus: () => ({
+          insertContentAt: () => ({
+            run: () => {
+              harness.dispatch(harness.state.tr.insertText('BETA', 7, 11));
+              return true;
+            },
+          }),
+        }),
+      })),
+    };
+
+    expect(
+      applyWysiwygLocalAgentResult({
+        editor,
+        snapshot,
+        currentDocumentId: 'doc-1',
+        currentSource: source,
+        request,
+        result: resultFor(request),
+      }),
+    ).toEqual({ status: 'applied', markdown: 'alpha BETA!' });
+    expect(undoDepth(harness.state)).toBe(preApplicationUndoDepth + 1);
+
+    expect(undo(harness.state, harness.dispatch)).toBe(true);
+    expect(harness.state.doc.textContent).toBe(source);
+    expect(undoDepth(harness.state)).toBe(preApplicationUndoDepth);
   });
 
   it('rejects a live WYSIWYG selection that moved away from the captured range', () => {
