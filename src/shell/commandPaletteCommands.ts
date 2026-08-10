@@ -44,6 +44,7 @@ export type CommandPaletteActions = {
   installLatestUpdate: () => void;
   openDocumentStats: () => void;
   runAiOnSelection: () => void;
+  runLocalAgent: () => void;
   setTheme: (themeKind: ThemeKind) => void;
   followSystemTheme: () => void;
   importTheme: () => void;
@@ -256,6 +257,13 @@ export function buildCommandPaletteCommands(
       label: 'AI: Run on Selection…',
       disabled: !activeDocumentOpen || !hasActiveSelection,
       run: actions.runAiOnSelection,
+    },
+    {
+      id: 'ai.runLocalAgent',
+      category: 'AI',
+      label: 'Run local agent',
+      disabled: !activeDocumentOpen,
+      run: actions.runLocalAgent,
     },
     {
       id: 'navigation.back',

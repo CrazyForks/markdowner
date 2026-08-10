@@ -63,6 +63,9 @@ const aiHistoryDeleteMock = vi.fn();
 const aiHistoryClearMock = vi.fn();
 const aiRenderSelectedOperationsMock = vi.fn();
 const aiDiscardResultMock = vi.fn();
+const localAgentStatusesMock = vi.fn();
+const localAgentRunMock = vi.fn();
+const localAgentCancelMock = vi.fn();
 const openDialogMock = vi.fn();
 const saveDialogMock = vi.fn();
 const messageMock = vi.fn();
@@ -145,6 +148,9 @@ vi.mock('./lib/desktop', () => ({
   aiInterviewResume: vi.fn(),
   aiRenderSelectedOperations: aiRenderSelectedOperationsMock,
   aiDiscardResult: aiDiscardResultMock,
+  localAgentStatuses: localAgentStatusesMock,
+  localAgentRun: localAgentRunMock,
+  localAgentCancel: localAgentCancelMock,
 }));
 
 vi.mock('@/shell/TerminalPanel', async () => {
@@ -296,6 +302,10 @@ const tiptapMockState = vi.hoisted(() => ({
   lastOptions: null as any,
 }));
 
+const sourceEditorMockState = vi.hoisted(() => ({
+  lastProps: null as any,
+}));
+
 const sourceSkillHighlightMock = vi.hoisted(() => ({
   extension: '__skill_highlight__',
   create: vi.fn(() => '__skill_highlight__'),
@@ -335,32 +345,37 @@ vi.mock('@uiw/react-codemirror', () => ({
     value,
     onChange,
     extensions,
+    onCreateEditor,
   }: {
     value: string;
     onChange: (value: string) => void;
     extensions?: unknown[];
-  }) => (
-    <textarea
-      aria-label="Source editor"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      data-line-wrap={
-        Array.isArray(extensions) && extensions.includes(LINE_WRAPPING_SENTINEL)
-          ? 'true'
-          : 'false'
-      }
-      data-skill-highlight={
-        Array.isArray(extensions) && extensions.includes(sourceSkillHighlightMock.extension)
-          ? 'true'
-          : 'false'
-      }
-      data-skill-completion={
-        Array.isArray(extensions) && extensions.includes(sourceSkillCompletionMock.extension)
-          ? 'true'
-          : 'false'
-      }
-    />
-  ),
+    onCreateEditor?: (view: unknown) => void;
+  }) => {
+    sourceEditorMockState.lastProps = { onCreateEditor };
+    return (
+      <textarea
+        aria-label="Source editor"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        data-line-wrap={
+          Array.isArray(extensions) && extensions.includes(LINE_WRAPPING_SENTINEL)
+            ? 'true'
+            : 'false'
+        }
+        data-skill-highlight={
+          Array.isArray(extensions) && extensions.includes(sourceSkillHighlightMock.extension)
+            ? 'true'
+            : 'false'
+        }
+        data-skill-completion={
+          Array.isArray(extensions) && extensions.includes(sourceSkillCompletionMock.extension)
+            ? 'true'
+            : 'false'
+        }
+      />
+    );
+  },
   EditorView: {
     lineWrapping: LINE_WRAPPING_SENTINEL,
     theme: (spec: unknown) => ({ spec }),
@@ -499,6 +514,7 @@ interface MockTiptapTextSegment {
 
 function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegment[]) {
   const mutableSegments = segments.map((segment) => ({ ...segment }));
+  const eventHandlers = new Map<string, Set<() => void>>();
   const editor: any = {
     markdown,
     lastSelection: null,
@@ -609,6 +625,7 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
     focus: vi.fn(),
     coordsAtPos: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
     posAtDOM: vi.fn(() => 1),
+    hasFocus: vi.fn(() => true),
     // The WYSIWYG link interceptor attaches a capture-phase click listener to
     // the editor DOM; tests dispatch real clicks on anchors appended here.
     dom: document.createElement('div'),
@@ -691,8 +708,81 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
     },
   };
   editor.getMarkdown = vi.fn(() => editor.markdown);
+  editor.on = vi.fn((name: string, handler: () => void) => {
+    if (!eventHandlers.has(name)) eventHandlers.set(name, new Set());
+    eventHandlers.get(name)?.add(handler);
+  });
+  editor.off = vi.fn((name: string, handler: () => void) => {
+    eventHandlers.get(name)?.delete(handler);
+  });
+  editor.emit = (name: string) => {
+    eventHandlers.get(name)?.forEach((handler) => handler());
+  };
 
   return editor;
+}
+
+function setEligibleLocalAgentMentionSelection(
+  editor: any,
+  position: number,
+  overrides: {
+    empty?: boolean;
+    parentName?: string;
+    ancestorNames?: string[];
+    inlineCode?: boolean;
+  } = {},
+) {
+  const parentName = overrides.parentName ?? 'paragraph';
+  const ancestorNames = overrides.ancestorNames ?? [parentName];
+  const nodes = ancestorNames.map((name) => ({
+    type: { name },
+    isTextblock: name === parentName,
+  }));
+  const parent = nodes[nodes.length - 1];
+  editor.state.selection = {
+    from: position,
+    to: position,
+    anchor: position,
+    head: position,
+    empty: overrides.empty ?? true,
+    $from: {
+      parent,
+      depth: nodes.length - 1,
+      node: (depth: number) => nodes[depth],
+      marks: () =>
+        overrides.inlineCode ? [{ type: { name: 'code' } }] : [],
+    },
+  };
+  editor.view.state = editor.state;
+}
+
+function createMockSourceEditorView(anchor: number, head: number) {
+  const scrollDOM = document.createElement('div');
+  const doc = {
+    lines: 1,
+    line: vi.fn(() => ({ from: 0, length: Math.max(anchor, head) })),
+  };
+  const view: any = {
+    state: {
+      doc,
+      selection: { main: { anchor, head } },
+      field: vi.fn(() => ({ size: 0 })),
+    },
+    dispatch: vi.fn((transaction: { selection?: { anchor: number; head?: number } }) => {
+      if (transaction.selection) {
+        view.state.selection.main = {
+          anchor: transaction.selection.anchor,
+          head: transaction.selection.head ?? transaction.selection.anchor,
+        };
+      }
+    }),
+    focus: vi.fn(),
+    hasFocus: true,
+    requestMeasure: vi.fn(),
+    lineBlockAt: vi.fn(() => ({ top: 0, bottom: 20 })),
+    scrollDOM,
+  };
+  return view;
 }
 
 describe('App recent documents', () => {
@@ -828,6 +918,42 @@ describe('App recent documents', () => {
     aiRenderSelectedOperationsMock.mockResolvedValue('# Improved');
     aiDiscardResultMock.mockReset();
     aiDiscardResultMock.mockResolvedValue(undefined);
+    localAgentStatusesMock.mockReset();
+    localAgentStatusesMock.mockResolvedValue([
+      {
+        kind: 'claude',
+        mention: '@claude',
+        label: 'Claude Code',
+        installed: true,
+        compatible: true,
+        pathLabel: '/…/claude',
+        version: '1.0.0',
+        reason: null,
+      },
+      {
+        kind: 'codex',
+        mention: '@codex',
+        label: 'Codex',
+        installed: true,
+        compatible: true,
+        pathLabel: '/…/codex',
+        version: '1.0.0',
+        reason: null,
+      },
+      {
+        kind: 'opencode',
+        mention: '@opencode',
+        label: 'OpenCode',
+        installed: true,
+        compatible: true,
+        pathLabel: '/…/opencode',
+        version: '1.0.0',
+        reason: null,
+      },
+    ]);
+    localAgentRunMock.mockReset();
+    localAgentCancelMock.mockReset();
+    localAgentCancelMock.mockResolvedValue(true);
     openDialogMock.mockReset();
     saveDialogMock.mockReset();
     messageMock.mockReset();
@@ -843,6 +969,7 @@ describe('App recent documents', () => {
     sourceSkillHighlightMock.create.mockClear();
     tiptapMockState.editor = null;
     tiptapMockState.lastOptions = null;
+    sourceEditorMockState.lastProps = null;
     closeRequestedHandler = undefined;
     dragDropHandler = undefined;
     menuCommandHandler = undefined;
@@ -1418,6 +1545,251 @@ describe('App recent documents', () => {
     );
     expect(editor.insertContentAtMock).toHaveBeenCalledTimes(1);
     expect(editor.markdown).toBe('alpha BETA');
+  });
+
+  it('keeps AI actions on OpenRouter and hands the captured selection to local agents', async () => {
+    const source = 'alpha beta';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'selection.md',
+        activeDocumentPath: '/tmp/project/selection.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+    await waitFor(() => {
+      expect(editor.on).toHaveBeenCalledWith('selectionUpdate', expect.any(Function));
+    });
+    act(() => {
+      editor.commands.setTextSelection({ from: 6, to: 10 });
+      editor.emit('selectionUpdate');
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'AI actions' }));
+    expect(
+      await screen.findByRole('dialog', { name: /prompt selected text/i }),
+    ).toBeVisible();
+    expect(screen.getByText('beta')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use local agent' }));
+
+    expect(
+      await screen.findByRole('dialog', { name: /run a local agent/i }),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Local agent')).toHaveValue('@');
+    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+      'selection',
+    );
+  });
+
+  it('opens a local agent mention at an eligible WYSIWYG caret without inserting @', async () => {
+    const source = 'hello ';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'mention.md',
+        activeDocumentPath: '/tmp/project/mention.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    await screen.findByTestId('mock-tiptap-editor');
+    setEligibleLocalAgentMentionSelection(editor, 6);
+
+    const event = new KeyboardEvent('keydown', {
+      key: '@',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const preventDefault = vi.spyOn(event, 'preventDefault');
+    const handled = tiptapMockState.lastOptions.editorProps.handleKeyDown(
+      editor.view,
+      event,
+    );
+
+    expect(handled).toBe(true);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(editor.insertContentMock).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole('dialog', { name: /run a local agent/i }),
+    ).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+      'insert',
+    );
+  });
+
+  it.each([
+    ['word', 'word', 4, {}, false],
+    ['email', 'name@example.com', 5, {}, false],
+    ['code block', 'word', 4, { parentName: 'codeBlock' }, false],
+    ['frontmatter', 'word', 4, { parentName: 'frontMatter' }, false],
+    [
+      'table cell',
+      'word',
+      4,
+      { ancestorNames: ['doc', 'table', 'tableRow', 'tableCell', 'paragraph'] },
+      false,
+    ],
+    ['inline code', 'word', 4, { inlineCode: true }, false],
+    ['IME composition', 'word', 4, {}, true],
+  ])(
+    'leaves an ineligible %s @ mention as ordinary WYSIWYG input',
+    async (_label, source, position, selectionOverrides, isComposing) => {
+      const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+      tiptapMockState.editor = editor;
+      bootstrapMock.mockResolvedValue(
+        baseSnapshot({
+          activeDocumentName: 'ordinary.md',
+          activeDocumentPath: '/tmp/project/ordinary.md',
+          activeDocumentSource: source,
+          mode: 'Wysiwyg',
+        }),
+      );
+
+      const { default: App } = await import('./App');
+      render(<App />);
+      await screen.findByTestId('mock-tiptap-editor');
+      setEligibleLocalAgentMentionSelection(editor, position, selectionOverrides);
+
+      const event = {
+        key: '@',
+        shiftKey: true,
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        isComposing,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent;
+      const handled = tiptapMockState.lastOptions.editorProps.handleKeyDown(
+        editor.view,
+        event,
+      );
+
+      expect(handled).toBe(false);
+      expect(event.preventDefault).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /run a local agent/i })).toBeNull();
+    },
+  );
+
+  it('captures a WYSIWYG caret from the Command Palette for a local agent', async () => {
+    const source = 'alpha beta';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'palette.md',
+        activeDocumentPath: '/tmp/project/palette.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    await screen.findByTestId('mock-tiptap-editor');
+    setEligibleLocalAgentMentionSelection(editor, 6);
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+    fireEvent.click(
+      await within(palette).findByRole('option', { name: /run local agent/i }),
+    );
+
+    expect(
+      await screen.findByRole('dialog', { name: /run a local agent/i }),
+    ).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+      'insert',
+    );
+  });
+
+  it('captures a Source selection from the Command Palette for a local agent', async () => {
+    const source = 'alpha beta';
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'source.md',
+        activeDocumentPath: '/tmp/project/source.md',
+        activeDocumentSource: source,
+        mode: 'Editor',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    await screen.findByLabelText('Source editor');
+    const view = createMockSourceEditorView(6, 10);
+    await act(async () => {
+      sourceEditorMockState.lastProps.onCreateEditor(view);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(view.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ selection: { anchor: 0, head: 0 } }),
+      );
+    });
+    view.state.selection.main = { anchor: 6, head: 10 };
+    view.dispatch.mockImplementation(() => undefined);
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+    fireEvent.click(
+      await within(palette).findByRole('option', { name: /run local agent/i }),
+    );
+
+    expect(
+      await screen.findByRole('dialog', { name: /run a local agent/i }),
+    ).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+      'selection',
+    );
+  });
+
+  it('clears an open local agent mention when the editor mode changes', async () => {
+    const source = 'hello ';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    tiptapMockState.editor = editor;
+    const initial = baseSnapshot({
+      activeDocumentName: 'mode.md',
+      activeDocumentPath: '/tmp/project/mode.md',
+      activeDocumentSource: source,
+      mode: 'Wysiwyg',
+    });
+    bootstrapMock.mockResolvedValue(initial);
+    setModeMock.mockResolvedValue({ ...initial, mode: 'Editor' });
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    await screen.findByTestId('mock-tiptap-editor');
+    setEligibleLocalAgentMentionSelection(editor, 6);
+
+    const event = new KeyboardEvent('keydown', {
+      key: '@',
+      shiftKey: true,
+      cancelable: true,
+    });
+    tiptapMockState.lastOptions.editorProps.handleKeyDown(editor.view, event);
+    expect(
+      await screen.findByRole('dialog', { name: /run a local agent/i }),
+    ).toBeVisible();
+
+    const menu = await openAppMenu();
+    fireEvent.click(within(menu).getByRole('menuitemradio', { name: /^editor/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /run a local agent/i })).toBeNull();
+    });
   });
 
   it('smoke-tests empty-state controls without runtime errors', async () => {

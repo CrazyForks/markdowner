@@ -57,6 +57,15 @@ import { AiReviewTab } from '@/features/ai/AiReviewTab';
 import { FrontMatterExtension } from '@/components/wysiwyg/frontMatterExtension';
 import { AiSelectionPopover } from '@/features/ai/AiSelectionPopover';
 import { AiFeaturePanel } from '@/features/ai/AiFeaturePanel';
+import { LocalAgentComposer } from '@/features/ai/localAgents/LocalAgentComposer';
+import { isEligibleLocalAgentMentionKey } from '@/features/ai/localAgents/mentions';
+import {
+  captureSourceLocalAgentTarget,
+  captureWysiwygLocalAgentTarget,
+  localAgentTargetFromAiSelectionSnapshot,
+  type LocalAgentTargetSnapshot,
+} from '@/features/ai/localAgents/targets';
+import type { LocalAgentKind } from '@/features/ai/localAgents/types';
 import {
   createAiReview,
   createPendingAiReview,
@@ -583,6 +592,14 @@ export default function App() {
   const [aiSelectionSnapshot, setAiSelectionSnapshot] =
     useState<AiSelectionSnapshot | null>(null);
   const [aiSelectionPromptOpen, setAiSelectionPromptOpen] = useState(false);
+  const [localAgentSnapshot, setLocalAgentSnapshot] =
+    useState<LocalAgentTargetSnapshot | null>(null);
+  const [localAgentComposerOpen, setLocalAgentComposerOpen] = useState(false);
+  const [localAgentPreferredAgent, setLocalAgentPreferredAgent] =
+    useState<LocalAgentKind | null>(null);
+  const openLocalAgentComposerRef = useRef<
+    (selection: { from: number; to: number }) => void
+  >(() => undefined);
   const [aiSelectionAnchor, setAiSelectionAnchor] = useState<{
     top: number;
     left: number;
@@ -1982,6 +1999,12 @@ export default function App() {
           viewComposing: (view as { composing?: boolean }).composing,
           lastCompositionEndAt: lastWysiwygCompositionEndAtRef.current,
         })) {
+          return true;
+        }
+        const mentionRange = isEligibleLocalAgentMentionKey(view, event);
+        if (mentionRange) {
+          event.preventDefault();
+          openLocalAgentComposerRef.current(mentionRange);
           return true;
         }
         // ArrowUp at the very first cursor position of a code_block parks the
@@ -3668,7 +3691,100 @@ export default function App() {
     setAiSelectionSnapshot(null);
     setAiSelectionPromptOpen(false);
     setAiSelectionAnchor(null);
+    setLocalAgentSnapshot(null);
+    setLocalAgentComposerOpen(false);
+    setLocalAgentPreferredAgent(null);
   }, [activeTabId, currentMode]);
+
+  const openLocalAgentComposer = useEffectEvent(
+    (
+      captured: LocalAgentTargetSnapshot,
+      preferredAgent: LocalAgentKind | null = null,
+    ) => {
+      setAiSelectionSnapshot(null);
+      setAiSelectionPromptOpen(false);
+      setAiSelectionAnchor(null);
+      setLocalAgentSnapshot(captured);
+      setLocalAgentPreferredAgent(preferredAgent);
+      setLocalAgentComposerOpen(true);
+    },
+  );
+
+  const closeLocalAgentComposer = useEffectEvent(() => {
+    setLocalAgentSnapshot(null);
+    setLocalAgentComposerOpen(false);
+    setLocalAgentPreferredAgent(null);
+    focusActiveEditor();
+  });
+
+  const captureAndOpenWysiwygLocalAgent = useEffectEvent(
+    (selection: { from: number; to: number }) => {
+      const currentEditor = editorInstanceRef.current;
+      const activeDocumentTab = tabsRef.current.find(
+        (tab) =>
+          tab.id === activeTabIdRef.current && tab.kind === 'document',
+      );
+      if (!currentEditor || !activeDocumentTab) return;
+
+      const source = flushWysiwygDraftNow() ?? localDraftRef.current;
+      const captured = captureWysiwygLocalAgentTarget({
+        source,
+        markdownAnchor: wysiwygMarkdownOffsetAtPosition(
+          currentEditor,
+          selection.from,
+        ),
+        markdownHead: wysiwygMarkdownOffsetAtPosition(
+          currentEditor,
+          selection.to,
+        ),
+        proseMirrorFrom: selection.from,
+        proseMirrorTo: selection.to,
+        proseMirrorDocumentSize: currentEditor.state.doc.content.size,
+        documentId: activeDocumentTab.id,
+      });
+      if (captured) openLocalAgentComposer(captured);
+    },
+  );
+  openLocalAgentComposerRef.current = captureAndOpenWysiwygLocalAgent;
+
+  const openLocalAgentForCurrentTarget = useEffectEvent(() => {
+    if (currentMode === 'Wysiwyg') {
+      const selection = editorInstanceRef.current?.state.selection;
+      if (!selection) return;
+      captureAndOpenWysiwygLocalAgent({
+        from: selection.from,
+        to: selection.to,
+      });
+      return;
+    }
+
+    const view = sourceEditorViewRef.current;
+    const activeDocumentTab = tabsRef.current.find(
+      (tab) =>
+        tab.id === activeTabIdRef.current && tab.kind === 'document',
+    );
+    if (!view || !activeDocumentTab) return;
+    const selection = view.state.selection.main;
+    const captured = captureSourceLocalAgentTarget({
+      source: localDraftRef.current,
+      anchor: selection.anchor,
+      head: selection.head,
+      documentId: activeDocumentTab.id,
+    });
+    if (captured) openLocalAgentComposer(captured);
+  });
+
+  const openLocalAgentFromAiSelection = useEffectEvent(
+    (selection: AiSelectionSnapshot) => {
+      openLocalAgentComposer(
+        localAgentTargetFromAiSelectionSnapshot(selection),
+      );
+    },
+  );
+
+  // Task 9 owns guarded application and Review routing. Keep the Task 8
+  // entry-point seam inert until that result path is connected.
+  const handleLocalAgentResult = useEffectEvent(() => undefined);
 
   const handleSourceAiSelectionChange = useEffectEvent((view: EditorView) => {
     const activeDocumentTab = tabsRef.current.find(
@@ -6718,6 +6834,7 @@ export default function App() {
       installLatestUpdate: () => void updateCheck.install(),
       openDocumentStats: () => setIsDocumentStatsOpen(true),
       runAiOnSelection: openAiForCurrentSelection,
+      runLocalAgent: openLocalAgentForCurrentTarget,
       setTheme: (themeKind) => void handleSetTheme(themeKind),
       followSystemTheme: () => void handleFollowSystemTheme(),
       importTheme: () => void handleImportTheme(),
@@ -7111,6 +7228,22 @@ export default function App() {
             focusActiveEditor();
           }}
           onResult={handleAiSelectionResult}
+          onLocalAgent={openLocalAgentFromAiSelection}
+        />
+      ) : null}
+      {localAgentSnapshot && localAgentComposerOpen ? (
+        <LocalAgentComposer
+          snapshot={localAgentSnapshot}
+          disclosureAccepted={settings.localAgentDisclosureAccepted}
+          preferredAgent={localAgentPreferredAgent}
+          onDisclosureAcceptedChange={(localAgentDisclosureAccepted) =>
+            handleSettingsChange({
+              ...settings,
+              localAgentDisclosureAccepted,
+            })
+          }
+          onClose={closeLocalAgentComposer}
+          onResult={handleLocalAgentResult}
         />
       ) : null}
       <AppOverlays

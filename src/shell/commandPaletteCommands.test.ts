@@ -44,6 +44,7 @@ function actions(overrides: Partial<CommandPaletteActions> = {}): CommandPalette
     installLatestUpdate: vi.fn(),
     openDocumentStats: vi.fn(),
     runAiOnSelection: vi.fn(),
+    runLocalAgent: vi.fn(),
     setTheme: vi.fn(),
     followSystemTheme: vi.fn(),
     importTheme: vi.fn(),
@@ -157,6 +158,7 @@ describe('buildCommandPaletteCommands', () => {
       'view.mode.Editor',
       'view.mode.SplitView',
       'ai.runSelection',
+      'ai.runLocalAgent',
       'navigation.back',
       'navigation.forward',
       'terminal.toggle',
@@ -210,6 +212,9 @@ describe('buildCommandPaletteCommands', () => {
     expect(commands.find((command) => command.id === 'ai.runSelection')?.disabled).toBe(
       true,
     );
+    expect(commands.find((command) => command.id === 'ai.runLocalAgent')?.disabled).toBe(
+      true,
+    );
   });
 
   it('enables AI selection execution only when a non-empty selection exists', () => {
@@ -227,6 +232,27 @@ describe('buildCommandPaletteCommands', () => {
     expect(command?.disabled).toBe(false);
     command?.run?.();
     expect(runAiOnSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs a local agent for any open document, including a collapsed caret', () => {
+    const runLocalAgent = vi.fn();
+    const commands = buildCommandPaletteCommands({
+      activeDocumentOpen: true,
+      hasActiveSelection: false,
+      canGoBack: true,
+      canGoForward: true,
+      settings: settings(),
+      actions: actions({ runLocalAgent }),
+    });
+
+    const command = commands.find((candidate) => candidate.id === 'ai.runLocalAgent');
+    expect(command).toMatchObject({
+      category: 'AI',
+      label: 'Run local agent',
+      disabled: false,
+    });
+    command?.run?.();
+    expect(runLocalAgent).toHaveBeenCalledTimes(1);
   });
 
   it('disables workspace HTML and PDF export without a workspace root', () => {
