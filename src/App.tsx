@@ -3904,7 +3904,7 @@ export default function App() {
         } else {
           const currentEditor = editorInstanceRef.current;
           if (currentEditor) {
-            applied = applyWysiwygLocalAgentResult({
+            const outcome = applyWysiwygLocalAgentResult({
               editor: currentEditor,
               snapshot: captured,
               currentDocumentId: activeDocumentTab.id,
@@ -3912,7 +3912,10 @@ export default function App() {
               request,
               result,
             });
-            if (applied) nextSource = currentEditor.getMarkdown();
+            if (outcome.status === 'applied') {
+              applied = true;
+              nextSource = outcome.markdown;
+            }
           }
         }
       }
@@ -5983,7 +5986,22 @@ export default function App() {
       }
 
       await switchToTab(sourceTab.id);
-      if (activeTabIdRef.current !== sourceTab.id) return;
+      const currentSourceTab = tabsRef.current.find(
+        (tab) =>
+          tab.id === review.sourceDocumentId && tab.kind === 'document',
+      );
+      if (
+        activeTabIdRef.current !== review.sourceDocumentId ||
+        !currentSourceTab ||
+        currentSourceTab.draft !== review.sourceSnapshot ||
+        localDraftRef.current !== review.sourceSnapshot ||
+        snapshotRef.current.activeDocumentPath !== currentSourceTab.path
+      ) {
+        announceShell(
+          'AI changes were not applied because the source document changed',
+        );
+        return;
+      }
 
       await withBusy(async () => {
         const next = await replaceActiveDocumentSource(markdown);

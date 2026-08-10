@@ -100,6 +100,7 @@ export function LocalAgentComposer({
     ((requestId: string) => Promise<boolean>) | null
   >(null);
   const mentionInputRef = useRef<HTMLInputElement | null>(null);
+  const instructionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const changeButtonRef = useRef<HTMLButtonElement | null>(null);
   const restoreChangeFocusRef = useRef(false);
 
@@ -161,8 +162,10 @@ export function LocalAgentComposer({
     } else if (restoreChangeFocusRef.current) {
       restoreChangeFocusRef.current = false;
       changeButtonRef.current?.focus();
+    } else if (preferredAgent !== null) {
+      instructionInputRef.current?.focus();
     }
-  }, [mentionOpen, selectedAgent]);
+  }, [mentionOpen, preferredAgent, selectedAgent]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -514,6 +517,7 @@ export function LocalAgentComposer({
         <div className="grid gap-1.5">
           <Label htmlFor="local-agent-instruction">Instruction</Label>
           <textarea
+            ref={instructionInputRef}
             id="local-agent-instruction"
             aria-label="Instruction"
             rows={3}

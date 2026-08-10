@@ -159,6 +159,7 @@ describe("LocalAgentComposer", () => {
     expect(screen.getByLabelText("Instruction")).toHaveValue(
       "Keep the same prompt",
     );
+    expect(screen.getByLabelText("Instruction")).toHaveFocus();
     expect(screen.getByLabelText("Apply result to")).toHaveValue("document");
 
     cleanup();

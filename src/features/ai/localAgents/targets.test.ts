@@ -209,7 +209,10 @@ describe('local-agent targets', () => {
 
     expect(
       applySourceLocalAgentResult({
-        view: { dispatch },
+        view: {
+          state: { selection: { main: { anchor: 6, head: 10 } } },
+          dispatch,
+        },
         snapshot,
         currentDocumentId: 'doc-1',
         currentSource: 'alpha beta',
@@ -225,6 +228,33 @@ describe('local-agent targets', () => {
     });
   });
 
+  it('rejects a live Source selection that moved away from the captured range', () => {
+    const snapshot = captureSourceLocalAgentTarget({
+      source: 'alpha beta',
+      anchor: 6,
+      head: 10,
+      documentId: 'doc-1',
+    });
+    if (!snapshot) throw new Error('target required');
+    const request = requestFor(snapshot);
+    const dispatch = vi.fn();
+
+    expect(
+      applySourceLocalAgentResult({
+        view: {
+          state: { selection: { main: { anchor: 0, head: 0 } } },
+          dispatch,
+        },
+        snapshot,
+        currentDocumentId: 'doc-1',
+        currentSource: 'alpha beta',
+        request,
+        result: resultFor(request),
+      }),
+    ).toBeNull();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it('rejects stale source, stale documents, and mismatched metadata without dispatching', () => {
     const snapshot = captureSourceLocalAgentTarget({
       source: 'alpha beta',
@@ -238,7 +268,10 @@ describe('local-agent targets', () => {
 
     expect(
       applySourceLocalAgentResult({
-        view: { dispatch },
+        view: {
+          state: { selection: { main: { anchor: 6, head: 10 } } },
+          dispatch,
+        },
         snapshot,
         currentDocumentId: 'doc-1',
         currentSource: 'alpha BETA',
@@ -248,7 +281,10 @@ describe('local-agent targets', () => {
     ).toBeNull();
     expect(
       applySourceLocalAgentResult({
-        view: { dispatch },
+        view: {
+          state: { selection: { main: { anchor: 6, head: 10 } } },
+          dispatch,
+        },
         snapshot,
         currentDocumentId: 'doc-2',
         currentSource: 'alpha beta',
@@ -258,7 +294,10 @@ describe('local-agent targets', () => {
     ).toBeNull();
     expect(
       applySourceLocalAgentResult({
-        view: { dispatch },
+        view: {
+          state: { selection: { main: { anchor: 6, head: 10 } } },
+          dispatch,
+        },
         snapshot,
         currentDocumentId: 'doc-1',
         currentSource: 'alpha beta',
@@ -286,7 +325,11 @@ describe('local-agent targets', () => {
     const focus = vi.fn(() => ({ insertContentAt }));
     const editor = {
       chain: vi.fn(() => ({ focus })),
-      state: { doc: { content: { size: 12 } } },
+      getMarkdown: vi.fn(() => 'alpha BETA'),
+      state: {
+        doc: { content: { size: 12 } },
+        selection: { from: 7, to: 11 },
+      },
     };
 
     expect(
@@ -298,13 +341,179 @@ describe('local-agent targets', () => {
         request,
         result: resultFor(request),
       }),
-    ).toBe(true);
+    ).toEqual({ status: 'applied', markdown: 'alpha BETA' });
     expect(insertContentAt).toHaveBeenCalledTimes(1);
     expect(insertContentAt).toHaveBeenCalledWith(
       { from: 7, to: 11 },
       'BETA',
       { contentType: 'markdown' },
     );
+  });
+
+  it('restores the pre-apply WYSIWYG document when the Markdown command throws after mutation', () => {
+    const source = 'alpha beta';
+    const snapshot = captureWysiwygLocalAgentTarget({
+      source,
+      markdownAnchor: 6,
+      markdownHead: 10,
+      proseMirrorFrom: 7,
+      proseMirrorTo: 11,
+      proseMirrorDocumentSize: 12,
+      documentId: 'doc-1',
+    });
+    if (!snapshot) throw new Error('target required');
+    const request = requestFor(snapshot);
+    const originalDoc = { content: { size: 12, marker: 'original' } };
+    const mutatedDoc = { content: { size: 12, marker: 'mutated' } };
+    let markdown = source;
+    const restoreTransaction: any = {
+      replaceWith: vi.fn(() => restoreTransaction),
+      setMeta: vi.fn(() => restoreTransaction),
+    };
+    const state: any = {
+      doc: originalDoc,
+      selection: { from: 7, to: 11 },
+      tr: restoreTransaction,
+    };
+    const editor = {
+      state,
+      getMarkdown: vi.fn(() => markdown),
+      view: {
+        dispatch: vi.fn(() => {
+          state.doc = originalDoc;
+          markdown = source;
+        }),
+      },
+      chain: vi.fn(() => ({
+        focus: () => ({
+          insertContentAt: () => ({
+            run: () => {
+              state.doc = mutatedDoc;
+              markdown = 'alpha BETA';
+              throw new Error('Markdown command failed');
+            },
+          }),
+        }),
+      })),
+    };
+
+    expect(
+      applyWysiwygLocalAgentResult({
+        editor,
+        snapshot,
+        currentDocumentId: 'doc-1',
+        currentSource: source,
+        request,
+        result: resultFor(request),
+      }),
+    ).toEqual({ status: 'failed' });
+    expect(markdown).toBe(source);
+    expect(editor.view.dispatch).toHaveBeenCalledTimes(1);
+    expect(restoreTransaction.replaceWith).toHaveBeenCalledWith(
+      0,
+      mutatedDoc.content.size,
+      originalDoc.content,
+    );
+    expect(restoreTransaction.setMeta).toHaveBeenCalledWith(
+      'addToHistory',
+      false,
+    );
+  });
+
+  it('restores the pre-apply WYSIWYG document when post-command serialization throws', () => {
+    const source = 'alpha beta';
+    const snapshot = captureWysiwygLocalAgentTarget({
+      source,
+      markdownAnchor: 6,
+      markdownHead: 10,
+      proseMirrorFrom: 7,
+      proseMirrorTo: 11,
+      proseMirrorDocumentSize: 12,
+      documentId: 'doc-1',
+    });
+    if (!snapshot) throw new Error('target required');
+    const request = requestFor(snapshot);
+    const originalDoc = { content: { size: 12, marker: 'original' } };
+    const mutatedDoc = { content: { size: 12, marker: 'mutated' } };
+    const restoreTransaction: any = {
+      replaceWith: vi.fn(() => restoreTransaction),
+      setMeta: vi.fn(() => restoreTransaction),
+    };
+    const state: any = {
+      doc: originalDoc,
+      selection: { from: 7, to: 11 },
+      tr: restoreTransaction,
+    };
+    const editor = {
+      state,
+      getMarkdown: vi.fn(() => {
+        throw new Error('Markdown serialization failed');
+      }),
+      view: {
+        dispatch: vi.fn(() => {
+          state.doc = originalDoc;
+        }),
+      },
+      chain: vi.fn(() => ({
+        focus: () => ({
+          insertContentAt: () => ({
+            run: () => {
+              state.doc = mutatedDoc;
+              return true;
+            },
+          }),
+        }),
+      })),
+    };
+
+    expect(
+      applyWysiwygLocalAgentResult({
+        editor,
+        snapshot,
+        currentDocumentId: 'doc-1',
+        currentSource: source,
+        request,
+        result: resultFor(request),
+      }),
+    ).toEqual({ status: 'failed' });
+    expect(editor.view.dispatch).toHaveBeenCalledTimes(1);
+    expect(restoreTransaction.setMeta).toHaveBeenCalledWith(
+      'addToHistory',
+      false,
+    );
+  });
+
+  it('rejects a live WYSIWYG selection that moved away from the captured range', () => {
+    const snapshot = captureWysiwygLocalAgentTarget({
+      source: 'alpha beta',
+      markdownAnchor: 6,
+      markdownHead: 10,
+      proseMirrorFrom: 7,
+      proseMirrorTo: 11,
+      proseMirrorDocumentSize: 12,
+      documentId: 'doc-1',
+    });
+    if (!snapshot) throw new Error('target required');
+    const request = requestFor(snapshot);
+    const chain = vi.fn();
+
+    expect(
+      applyWysiwygLocalAgentResult({
+        editor: {
+          chain,
+          state: {
+            doc: { content: { size: 12 } },
+            selection: { from: 1, to: 1 },
+          },
+        } as never,
+        snapshot,
+        currentDocumentId: 'doc-1',
+        currentSource: 'alpha beta',
+        request,
+        result: resultFor(request),
+      }),
+    ).toEqual({ status: 'not-applied' });
+    expect(chain).not.toHaveBeenCalled();
   });
 
   it('revalidates the ProseMirror target before inserting', () => {
@@ -327,7 +536,10 @@ describe('local-agent targets', () => {
       applyWysiwygLocalAgentResult({
         editor: {
           chain: vi.fn(() => ({ focus })),
-          state: { doc: { content: { size: 6 } } },
+          state: {
+            doc: { content: { size: 6 } },
+            selection: { from: 7, to: 7 },
+          },
         },
         snapshot,
         currentDocumentId: 'doc-1',
@@ -335,7 +547,7 @@ describe('local-agent targets', () => {
         request,
         result: resultFor(request),
       }),
-    ).toBe(false);
+    ).toEqual({ status: 'not-applied' });
     expect(insertContentAt).not.toHaveBeenCalled();
   });
 
@@ -362,7 +574,7 @@ describe('local-agent targets', () => {
         request,
         result: resultFor(request),
       }),
-    ).toBe(false);
+    ).toEqual({ status: 'not-applied' });
     expect(chain).not.toHaveBeenCalled();
   });
 

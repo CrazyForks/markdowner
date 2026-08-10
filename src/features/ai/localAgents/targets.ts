@@ -18,6 +18,11 @@ export interface LocalAgentTargetSnapshot {
   proseMirrorRange: AiByteRange | null;
 }
 
+export type WysiwygLocalAgentApplyOutcome =
+  | { status: 'applied'; markdown: string }
+  | { status: 'not-applied' }
+  | { status: 'failed' };
+
 export function isValidLocalAgentTargetSnapshot(
   snapshot: LocalAgentTargetSnapshot,
 ): boolean {
@@ -146,6 +151,9 @@ export function localAgentTargetFromAiSelectionSnapshot(
 
 export function applySourceLocalAgentResult(input: {
   view: {
+    state: {
+      selection: { main: { anchor: number; head: number } };
+    };
     dispatch: (transaction: {
       changes: { from: number; to: number; insert: string };
       selection: { anchor: number };
@@ -159,7 +167,13 @@ export function applySourceLocalAgentResult(input: {
   result: LocalAgentRunResult;
 }): string | null {
   const range = validApplicationRange(input);
-  if (input.snapshot.surface !== 'source' || !range) return null;
+  if (
+    input.snapshot.surface !== 'source' ||
+    !range ||
+    !sameLiveSourceSelection(input.view.state.selection.main, range)
+  ) {
+    return null;
+  }
 
   const nextSource =
     input.currentSource.slice(0, range.start) +
@@ -184,31 +198,50 @@ export function applyWysiwygLocalAgentResult(input: {
         ) => { run: () => boolean };
       };
     };
-    state: { doc: { content: { size: number } } };
+    state: {
+      doc: { content: { size: number } };
+      selection: { from: number; to: number };
+      tr?: {
+        replaceWith: (
+          from: number,
+          to: number,
+          content: any,
+        ) => {
+          setMeta: (key: string, value: unknown) => unknown;
+        };
+      };
+    };
+    view?: { dispatch: (transaction: any) => void };
+    getMarkdown?: () => string;
   };
   snapshot: LocalAgentTargetSnapshot;
   currentDocumentId: string;
   currentSource: string;
   request: LocalAgentRunRequest;
   result: LocalAgentRunResult;
-}): boolean {
+}): WysiwygLocalAgentApplyOutcome {
   const range = validApplicationRange(input);
   const proseMirrorRange = input.snapshot.proseMirrorRange;
   if (input.snapshot.surface !== 'wysiwyg' || !range || !proseMirrorRange) {
-    return false;
+    return { status: 'not-applied' };
   }
   const documentSize = input.editor.state?.doc?.content?.size;
   if (
+    !sameLiveWysiwygSelection(
+      input.editor.state?.selection ?? null,
+      proseMirrorRange,
+    ) ||
     !isProseMirrorRangeWithinDocument(
       proseMirrorRange,
       documentSize,
     )
   ) {
-    return false;
+    return { status: 'not-applied' };
   }
 
-  return (
-    input.editor
+  const previousDoc = input.editor.state.doc;
+  try {
+    const applied = input.editor
       .chain()
       .focus()
       .insertContentAt(
@@ -216,8 +249,20 @@ export function applyWysiwygLocalAgentResult(input: {
         input.result.markdown,
         { contentType: 'markdown' },
       )
-      .run() !== false
-  );
+      .run();
+    if (applied === false) {
+      restoreWysiwygDocument(input.editor, previousDoc);
+      return { status: 'not-applied' };
+    }
+    if (typeof input.editor.getMarkdown !== 'function') {
+      restoreWysiwygDocument(input.editor, previousDoc);
+      return { status: 'failed' };
+    }
+    return { status: 'applied', markdown: input.editor.getMarkdown() };
+  } catch {
+    restoreWysiwygDocument(input.editor, previousDoc);
+    return { status: 'failed' };
+  }
 }
 
 function captureLocalAgentTarget(input: {
@@ -299,6 +344,58 @@ function validApplicationRange(input: {
 
 function sameRange(left: AiByteRange | null, right: AiByteRange): boolean {
   return left?.start === right.start && left.end === right.end;
+}
+
+function sameLiveSourceSelection(
+  selection: { anchor: number; head: number } | null | undefined,
+  range: AiByteRange,
+): boolean {
+  if (!selection) return false;
+  return (
+    Math.min(selection.anchor, selection.head) === range.start &&
+    Math.max(selection.anchor, selection.head) === range.end
+  );
+}
+
+function sameLiveWysiwygSelection(
+  selection: { from: number; to: number } | null | undefined,
+  range: AiByteRange,
+): boolean {
+  return selection?.from === range.start && selection.to === range.end;
+}
+
+function restoreWysiwygDocument(
+  editor: {
+    state: {
+      doc: { content: { size: number } };
+      tr?: {
+        replaceWith: (
+          from: number,
+          to: number,
+          content: any,
+        ) => {
+          setMeta: (key: string, value: unknown) => unknown;
+        };
+      };
+    };
+    view?: { dispatch: (transaction: any) => void };
+  },
+  previousDoc: { content: { size: number } },
+): void {
+  if (editor.state.doc === previousDoc) return;
+  const transactionState = editor.state.tr;
+  if (!transactionState || !editor.view) return;
+  try {
+    const transaction = transactionState.replaceWith(
+      0,
+      editor.state.doc.content.size,
+      previousDoc.content,
+    );
+    transaction.setMeta('addToHistory', false);
+    editor.view.dispatch(transaction);
+  } catch {
+    // A failed best-effort restore must still fail closed to Review.
+  }
 }
 
 function isRangeWithin(range: AiByteRange, maximum: number): boolean {

@@ -521,6 +521,7 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
     insertContentAtMock: vi.fn(),
     insertContentMock: vi.fn(),
     focusChainMock: vi.fn(),
+    restoreWithoutHistoryMock: vi.fn(),
     setLinkMock: vi.fn(),
     unsetLinkMock: vi.fn(),
     isActive: vi.fn(() => false),
@@ -528,7 +529,10 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
   const mockSelectionAnchor = { parent: { type: { name: 'paragraph' } } };
 
   const rebuildDoc = () => ({
-    content: { size: editor.markdown.length + 2 },
+    content: {
+      size: editor.markdown.length + 2,
+      __markdown: editor.markdown,
+    },
     textBetween: (from: number, to: number, blockSeparator = '\n') =>
       mutableSegments
         .map((segment) => {
@@ -608,6 +612,23 @@ function createMockTiptapEditor(markdown: string, segments: MockTiptapTextSegmen
       return transaction;
     }),
     scrollIntoView: vi.fn(() => transaction),
+    replaceWith: vi.fn((_from: number, _to: number, content: any) => {
+      if (typeof content?.__markdown === 'string') {
+        editor.markdown = content.__markdown;
+        mutableSegments.splice(0, mutableSegments.length, {
+          text: content.__markdown,
+          from: 0,
+        });
+        editor.state.doc = rebuildDoc();
+      }
+      return transaction;
+    }),
+    setMeta: vi.fn((key: string, value: unknown) => {
+      if (key === 'addToHistory' && value === false) {
+        editor.restoreWithoutHistoryMock();
+      }
+      return transaction;
+    }),
   };
 
   editor.state = {
@@ -1275,12 +1296,126 @@ describe('App recent documents', () => {
       await screen.findByText('Improve the heading.'),
     ).toBeInTheDocument();
     expect(replaceActiveDocumentSourceMock).not.toHaveBeenCalled();
+    const unchangedSourceSnapshot = baseSnapshot({
+      activeDocumentName: 'requirements.md',
+      activeDocumentPath: '/tmp/project/requirements.md',
+      activeDocumentSource: source,
+    });
+    openDocumentMock.mockResolvedValue(unchangedSourceSnapshot);
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(unchangedSourceSnapshot);
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply all' }));
 
     await waitFor(() =>
       expect(replaceActiveDocumentSourceMock).toHaveBeenCalledWith(proposed),
     );
+  });
+
+  it('rechecks the Review source after tab activation reloads newer disk content', async () => {
+    const source = '# Original';
+    const newerSource = '# Newer external edit';
+    const proposed = '# Improved old snapshot';
+    const sourceSnapshot = baseSnapshot({
+      activeDocumentName: 'requirements.md',
+      activeDocumentPath: '/tmp/project/requirements.md',
+      activeDocumentSource: source,
+      activeDocumentDirty: false,
+    });
+    bootstrapMock.mockResolvedValue(sourceSnapshot);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return { aiCloudDisclosureAccepted: true };
+      }
+      return undefined;
+    });
+    aiRunMock.mockImplementation(async (request) => ({
+      requestId: request.requestId,
+      documentId: request.documentId,
+      task: request.task,
+      model: request.model,
+      generationId: 'generation-race',
+      result: {
+        sourceRevisionHash: 'revision-race',
+        proposedMarkdown: proposed,
+        validation: { passed: true, issues: [] },
+        operations: [
+          {
+            id: 'operation-race',
+            kind: 'replace',
+            targetSegmentId: 'segment-race',
+            sourceRange: { start: 0, end: source.length },
+            originalMarkdown: source,
+            proposedMarkdown: proposed,
+            findingIds: [],
+          },
+        ],
+        hunks: [
+          {
+            operationId: 'operation-race',
+            sourceRange: { start: 0, end: source.length },
+            originalMarkdown: source,
+            proposedMarkdown: proposed,
+          },
+        ],
+        summary: 'Improve the heading.',
+        findings: [],
+        assumptions: [],
+        detectedSourceLanguage: 'en',
+        targetLanguage: null,
+        warnings: [],
+      },
+      validationIssues: [],
+      rawDiagnostic: null,
+      usage: null,
+      retryAfterSeconds: null,
+    }));
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^ai feature/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI task' }), {
+      target: { value: 'custom' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Custom prompt' }), {
+      target: { value: 'Improve this requirement.' },
+    });
+    const runButton = await screen.findByRole('button', { name: /^run$/i });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    fireEvent.click(runButton);
+
+    expect(await screen.findByTestId('ai-review-tab')).toBeVisible();
+    expect(await screen.findByText('Improve the heading.')).toBeVisible();
+    expect(aiRunMock.mock.calls[0][0]).toMatchObject({
+      source,
+      task: 'custom',
+    });
+    openDocumentMock.mockResolvedValue(sourceSnapshot);
+    reloadActiveDocumentFromDiskMock.mockResolvedValue(
+      baseSnapshot({
+        ...sourceSnapshot,
+        activeDocumentSource: newerSource,
+      }),
+    );
+    reloadActiveDocumentFromDiskMock.mockClear();
+    replaceActiveDocumentSourceMock.mockClear();
+    const applyAll = screen.getByRole('button', { name: 'Apply all' });
+    expect(applyAll).toBeEnabled();
+    fireEvent.click(applyAll);
+
+    await waitFor(() =>
+      expect(reloadActiveDocumentFromDiskMock).toHaveBeenCalledWith({
+        path: '/tmp/project/requirements.md',
+        expectedSource: source,
+        expectedDirty: false,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId('ai-review-tab')).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: /working/i })).not.toBeInTheDocument(),
+    );
+    expect(replaceActiveDocumentSourceMock).not.toHaveBeenCalled();
   });
 
   it('opens a Summary in a new untitled document without changing the source', async () => {
@@ -1917,6 +2052,265 @@ describe('App recent documents', () => {
     expect(aiDiscardResultMock).not.toHaveBeenCalled();
   });
 
+  it('opens Review when the WYSIWYG caret moves while a local agent run is pending', async () => {
+    const source = 'alpha ';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    let resolveRun: ((result: {
+      schemaVersion: 1;
+      requestId: string;
+      documentId: string;
+      agent: 'codex';
+      target: 'insert';
+      markdown: string;
+      summary: string;
+      warnings: string[];
+    }) => void) | undefined;
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'local-caret-drift.md',
+        activeDocumentPath: '/tmp/project/local-caret-drift.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+    localAgentRunMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRun = (result) => resolve(result);
+        }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    await screen.findByTestId('mock-tiptap-editor');
+    editor.commands.setTextSelection({ from: 6, to: 6 });
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+    fireEvent.click(
+      await within(palette).findByRole('option', { name: /run local agent/i }),
+    );
+    const codexOption = await screen.findByRole('option', { name: /@codex.*Codex/i });
+    await waitFor(() => expect(codexOption).toBeEnabled());
+    fireEvent.click(codexOption);
+    fireEvent.change(screen.getByLabelText('Instruction'), {
+      target: { value: 'Insert a task table' },
+    });
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Allow local agent processing' }),
+    );
+    const run = screen.getByRole('button', { name: 'Run @codex' });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    await waitFor(() => expect(localAgentRunMock).toHaveBeenCalledTimes(1));
+    const request = localAgentRunMock.mock.calls[0][0];
+
+    editor.commands.setTextSelection({ from: 0, to: 0 });
+    await act(async () => {
+      resolveRun?.({
+        schemaVersion: 1,
+        requestId: request.requestId,
+        documentId: request.documentId,
+        agent: 'codex',
+        target: 'insert',
+        markdown: '\n\n| Item | Done |\n| --- | --- |\n| First | No |',
+        summary: 'Inserted a task table.',
+        warnings: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByTestId('ai-review-tab')).toBeVisible();
+    expect(editor.insertContentAtMock).not.toHaveBeenCalled();
+    expect(editor.markdown).toBe(source);
+    expect(screen.getByRole('button', { name: 'Open as new document' })).toBeEnabled();
+    expect(replaceActiveDocumentSourceMock).not.toHaveBeenCalled();
+  });
+
+  it('restores a partial WYSIWYG mutation and opens Review when Markdown insertion throws', async () => {
+    const source = 'alpha ';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    let resolveRun: ((result: {
+      schemaVersion: 1;
+      requestId: string;
+      documentId: string;
+      agent: 'codex';
+      target: 'insert';
+      markdown: string;
+      summary: string;
+      warnings: string[];
+    }) => void) | undefined;
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'local-insert-failure.md',
+        activeDocumentPath: '/tmp/project/local-insert-failure.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+    localAgentRunMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRun = (result) => resolve(result);
+        }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    await screen.findByTestId('mock-tiptap-editor');
+    editor.commands.setTextSelection({ from: 6, to: 6 });
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+    fireEvent.click(
+      await within(palette).findByRole('option', { name: /run local agent/i }),
+    );
+    const codexOption = await screen.findByRole('option', { name: /@codex.*Codex/i });
+    await waitFor(() => expect(codexOption).toBeEnabled());
+    fireEvent.click(codexOption);
+    fireEvent.change(screen.getByLabelText('Instruction'), {
+      target: { value: 'Insert a task table' },
+    });
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Allow local agent processing' }),
+    );
+    const run = screen.getByRole('button', { name: 'Run @codex' });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    await waitFor(() => expect(localAgentRunMock).toHaveBeenCalledTimes(1));
+    const request = localAgentRunMock.mock.calls[0][0];
+    editor.restoreWithoutHistoryMock.mockClear();
+    const originalChain = editor.chain;
+    editor.chain = vi.fn(() => {
+      const chain = originalChain();
+      const insertContentAt = chain.insertContentAt;
+      chain.insertContentAt = vi.fn((...args: any[]) => {
+        insertContentAt(...args);
+        throw new Error('Markdown parser failed after mutation');
+      });
+      return chain;
+    });
+
+    await act(async () => {
+      resolveRun?.({
+        schemaVersion: 1,
+        requestId: request.requestId,
+        documentId: request.documentId,
+        agent: 'codex',
+        target: 'insert',
+        markdown: '\n\n| Item | Done |\n| --- | --- |\n| First | No |',
+        summary: 'Inserted a task table.',
+        warnings: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByTestId('ai-review-tab')).toBeVisible();
+    expect(editor.insertContentAtMock).toHaveBeenCalledTimes(1);
+    expect(editor.markdown).toBe(source);
+    expect(editor.restoreWithoutHistoryMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Open as new document' })).toBeEnabled();
+    expect(screen.queryByText('Could not run local agent.')).not.toBeInTheDocument();
+    expect(replaceActiveDocumentSourceMock).not.toHaveBeenCalled();
+  });
+
+  it('opens Review when the Source selection moves while a local agent run is pending', async () => {
+    const source = 'alpha beta';
+    let resolveRun: ((result: {
+      schemaVersion: 1;
+      requestId: string;
+      documentId: string;
+      agent: 'codex';
+      target: 'selection';
+      markdown: string;
+      summary: string;
+      warnings: string[];
+    }) => void) | undefined;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'local-selection-drift.md',
+        activeDocumentPath: '/tmp/project/local-selection-drift.md',
+        activeDocumentSource: source,
+        mode: 'Editor',
+      }),
+    );
+    localAgentRunMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRun = (result) => resolve(result);
+        }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+    await screen.findByLabelText('Source editor');
+    const view = createMockSourceEditorView(6, 10);
+    await act(async () => {
+      sourceEditorMockState.lastProps.onCreateEditor(view);
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(view.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ selection: { anchor: 0, head: 0 } }),
+      ),
+    );
+    view.state.selection.main = { anchor: 6, head: 10 };
+    view.dispatch.mockClear();
+
+    fireEvent.keyDown(window, { key: 'P', metaKey: true, shiftKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+    const runLocalAgent = await within(palette).findByRole('option', {
+      name: /run local agent/i,
+    });
+    view.state.selection.main = { anchor: 6, head: 10 };
+    fireEvent.click(runLocalAgent);
+    const codexOption = await screen.findByRole('option', { name: /@codex.*Codex/i });
+    await waitFor(() => expect(codexOption).toBeEnabled());
+    fireEvent.click(codexOption);
+    fireEvent.change(screen.getByLabelText('Instruction'), {
+      target: { value: 'Capitalize the selection' },
+    });
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Allow local agent processing' }),
+    );
+    const run = screen.getByRole('button', { name: 'Run @codex' });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    await waitFor(() => expect(localAgentRunMock).toHaveBeenCalledTimes(1));
+    const request = localAgentRunMock.mock.calls[0][0];
+    expect(request).toMatchObject({
+      agent: 'codex',
+      target: 'selection',
+      source,
+      selection: { start: 6, end: 10 },
+    });
+
+    view.state.selection.main = { anchor: 0, head: 0 };
+    await act(async () => {
+      resolveRun?.({
+        schemaVersion: 1,
+        requestId: request.requestId,
+        documentId: request.documentId,
+        agent: 'codex',
+        target: 'selection',
+        markdown: 'BETA',
+        summary: 'Capitalized the selection.',
+        warnings: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByTestId('ai-review-tab')).toBeVisible();
+    expect(screen.getByText('+ BETA')).toBeVisible();
+    expect(view.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        changes: expect.objectContaining({ insert: 'BETA' }),
+      }),
+    );
+    expect(screen.getByLabelText('Source editor')).toHaveValue(source);
+    expect(replaceActiveDocumentSourceMock).not.toHaveBeenCalled();
+  });
+
   it('opens a stale local agent selection as Review without redirecting it to the current caret', async () => {
     const source = 'alpha beta';
     let resolveRun: ((result: {
@@ -2150,6 +2544,7 @@ describe('App recent documents', () => {
     expect(screen.getByLabelText('Instruction')).toHaveValue(
       'Rewrite the whole document',
     );
+    expect(screen.getByLabelText('Instruction')).toHaveFocus();
     expect(screen.getByLabelText('Apply result to')).toHaveValue('document');
     expect(aiRunMock).not.toHaveBeenCalled();
     expect(aiRenderSelectedOperationsMock).not.toHaveBeenCalled();
