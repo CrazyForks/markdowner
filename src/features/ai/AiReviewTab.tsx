@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 
 import {
   isReviewSourceCurrent,
+  renderLocalReviewOperations,
   resolveReviewActions,
   type AiReview,
 } from './review';
@@ -74,7 +75,11 @@ export function AiReviewTab({
     setRenderingSelection(true);
     setSelectionError('');
     try {
-      onApply(await onRenderSelected(selectedIds));
+      onApply(
+        review.origin.kind === 'localAgent'
+          ? renderLocalReviewOperations(review, selectedIds)
+          : await onRenderSelected(selectedIds),
+      );
     } catch (reason) {
       setSelectionError(errorMessage(reason));
     } finally {
@@ -83,6 +88,14 @@ export function AiReviewTab({
   };
 
   const usage = runResult?.usage ?? null;
+  const localAgentLabel =
+    review.origin.kind === 'localAgent'
+      ? {
+          claude: 'Claude Code',
+          codex: 'Codex',
+          opencode: 'OpenCode',
+        }[review.origin.agent]
+      : null;
   const cost =
     usage?.costUsd === null || usage?.costUsd === undefined
       ? 'cost unavailable'
@@ -138,22 +151,28 @@ export function AiReviewTab({
             ) : null}
           </div>
           <div className="text-right text-xs text-muted-foreground">
-            <p>{runResult?.model ?? review.request.model}</p>
-            {usage ? (
-              <>
-                <p>
-                  Prompt {usage.promptTokens.toLocaleString()} · Completion{' '}
-                  {usage.completionTokens.toLocaleString()} · Total{' '}
-                  {usage.totalTokens.toLocaleString()}
-                </p>
-                <p>{cost}</p>
-              </>
+            {localAgentLabel ? (
+              <p>{localAgentLabel}</p>
             ) : (
-              <p>{cost}</p>
+              <>
+                <p>{runResult?.model ?? review.request.model}</p>
+                {usage ? (
+                  <>
+                    <p>
+                      Prompt {usage.promptTokens.toLocaleString()} · Completion{' '}
+                      {usage.completionTokens.toLocaleString()} · Total{' '}
+                      {usage.totalTokens.toLocaleString()}
+                    </p>
+                    <p>{cost}</p>
+                  </>
+                ) : (
+                  <p>{cost}</p>
+                )}
+                {runResult?.generationId ? (
+                  <p className="font-mono">{runResult.generationId}</p>
+                ) : null}
+              </>
             )}
-            {runResult?.generationId ? (
-              <p className="font-mono">{runResult.generationId}</p>
-            ) : null}
           </div>
         </header>
 
@@ -495,7 +514,9 @@ export function AiReviewTab({
             Rerun
           </Button>
           <p className="ml-auto text-[11px] text-muted-foreground">
-            Cancelling a request may not prevent provider usage charges.
+            {review.origin.kind === 'localAgent'
+              ? 'Markdowner applies this local-agent proposal only after your confirmation.'
+              : 'Cancelling a request may not prevent provider usage charges.'}
           </p>
           {selectionError ? (
             <p role="alert" className="w-full text-xs text-destructive">

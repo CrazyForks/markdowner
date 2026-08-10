@@ -60,14 +60,22 @@ import { AiFeaturePanel } from '@/features/ai/AiFeaturePanel';
 import { LocalAgentComposer } from '@/features/ai/localAgents/LocalAgentComposer';
 import { isEligibleLocalAgentMentionKey } from '@/features/ai/localAgents/mentions';
 import {
+  applySourceLocalAgentResult,
+  applyWysiwygLocalAgentResult,
   captureSourceLocalAgentTarget,
   captureWysiwygLocalAgentTarget,
   localAgentTargetFromAiSelectionSnapshot,
   type LocalAgentTargetSnapshot,
 } from '@/features/ai/localAgents/targets';
-import type { LocalAgentKind } from '@/features/ai/localAgents/types';
+import type {
+  LocalAgentKind,
+  LocalAgentRunRequest,
+  LocalAgentRunResult,
+  LocalAgentTargetKind,
+} from '@/features/ai/localAgents/types';
 import {
   createAiReview,
+  createLocalAgentReview,
   createPendingAiReview,
   settlePendingAiReview,
   type AiReview,
@@ -599,6 +607,16 @@ export default function App() {
     useState(0);
   const [localAgentPreferredAgent, setLocalAgentPreferredAgent] =
     useState<LocalAgentKind | null>(null);
+  const [localAgentInitialInstruction, setLocalAgentInitialInstruction] =
+    useState('');
+  const [localAgentInitialTarget, setLocalAgentInitialTarget] =
+    useState<LocalAgentTargetKind | null>(null);
+  const localAgentCaptureModeRef = useRef<EditorMode | null>(null);
+  const pendingLocalAgentRerunRef = useRef<{
+    sourceDocumentId: string;
+    snapshot: LocalAgentTargetSnapshot;
+    request: LocalAgentRunRequest;
+  } | null>(null);
   const openLocalAgentComposerRef = useRef<
     (selection: { from: number; to: number }) => void
   >(() => undefined);
@@ -3690,24 +3708,48 @@ export default function App() {
   });
 
   useEffect(() => {
+    const pendingRerun = pendingLocalAgentRerunRef.current;
+    if (pendingRerun?.sourceDocumentId === activeTabId) {
+      pendingLocalAgentRerunRef.current = null;
+      setAiSelectionSnapshot(null);
+      setAiSelectionPromptOpen(false);
+      setAiSelectionAnchor(null);
+      setLocalAgentSnapshot(pendingRerun.snapshot);
+      setLocalAgentPreferredAgent(pendingRerun.request.agent);
+      setLocalAgentInitialInstruction(pendingRerun.request.instruction);
+      setLocalAgentInitialTarget(pendingRerun.request.target);
+      localAgentCaptureModeRef.current = currentMode;
+      setLocalAgentComposerSessionId((sessionId) => sessionId + 1);
+      setLocalAgentComposerOpen(true);
+      return;
+    }
+    pendingLocalAgentRerunRef.current = null;
     setAiSelectionSnapshot(null);
     setAiSelectionPromptOpen(false);
     setAiSelectionAnchor(null);
     setLocalAgentSnapshot(null);
     setLocalAgentComposerOpen(false);
     setLocalAgentPreferredAgent(null);
+    setLocalAgentInitialInstruction('');
+    setLocalAgentInitialTarget(null);
+    localAgentCaptureModeRef.current = null;
   }, [activeTabId, currentMode]);
 
   const openLocalAgentComposer = useEffectEvent(
     (
       captured: LocalAgentTargetSnapshot,
       preferredAgent: LocalAgentKind | null = null,
+      initialInstruction = '',
+      initialTarget: LocalAgentTargetKind = captured.kind,
     ) => {
       setAiSelectionSnapshot(null);
       setAiSelectionPromptOpen(false);
       setAiSelectionAnchor(null);
       setLocalAgentSnapshot(captured);
       setLocalAgentPreferredAgent(preferredAgent);
+      setLocalAgentInitialInstruction(initialInstruction);
+      setLocalAgentInitialTarget(initialTarget);
+      localAgentCaptureModeRef.current = currentModeRef.current;
       setLocalAgentComposerSessionId((sessionId) => sessionId + 1);
       setLocalAgentComposerOpen(true);
     },
@@ -3717,6 +3759,9 @@ export default function App() {
     setLocalAgentSnapshot(null);
     setLocalAgentComposerOpen(false);
     setLocalAgentPreferredAgent(null);
+    setLocalAgentInitialInstruction('');
+    setLocalAgentInitialTarget(null);
+    localAgentCaptureModeRef.current = null;
     focusActiveEditor();
   });
 
@@ -3785,9 +3830,147 @@ export default function App() {
     },
   );
 
-  // Task 9 owns guarded application and Review routing. Keep the Task 8
-  // entry-point seam inert until that result path is connected.
-  const handleLocalAgentResult = useEffectEvent(() => undefined);
+  const activateLocalAgentReview = useEffectEvent((review: AiReview) => {
+    const reviewTab = createAiReviewTab(review);
+    const currentTabs = tabsRef.current;
+    const existingIndex = currentTabs.findIndex((tab) => tab.id === reviewTab.id);
+    const nextTabs =
+      existingIndex >= 0
+        ? currentTabs.map((tab, index) =>
+            index === existingIndex ? reviewTab : tab,
+          )
+        : [...currentTabs, reviewTab];
+
+    tabsRef.current = nextTabs;
+    activeTabIdRef.current = reviewTab.id;
+    setLocalAgentSnapshot(null);
+    setLocalAgentComposerOpen(false);
+    setLocalAgentPreferredAgent(null);
+    setLocalAgentInitialInstruction('');
+    setLocalAgentInitialTarget(null);
+    localAgentCaptureModeRef.current = null;
+    startTransition(() => {
+      setTabs(nextTabs);
+      setActiveTabId(reviewTab.id);
+    });
+  });
+
+  const handleLocalAgentResult = useEffectEvent(
+    (
+      result: LocalAgentRunResult,
+      captured: LocalAgentTargetSnapshot,
+      request: LocalAgentRunRequest,
+    ) => {
+      const activeDocumentTab = tabsRef.current.find(
+        (tab) =>
+          tab.id === activeTabIdRef.current && tab.kind === 'document',
+      );
+      const capturedDocumentTab = tabsRef.current.find(
+        (tab) => tab.id === captured.documentId && tab.kind === 'document',
+      );
+      const modeMatches = localAgentCaptureModeRef.current === currentModeRef.current;
+      const surfaceMatches =
+        captured.surface === 'wysiwyg'
+          ? currentModeRef.current === 'Wysiwyg'
+          : currentModeRef.current !== 'Wysiwyg';
+      const liveSource =
+        captured.surface === 'wysiwyg'
+          ? flushWysiwygDraftNow() ?? localDraftRef.current
+          : localDraftRef.current;
+      let applied = false;
+      let nextSource: string | null = null;
+
+      if (
+        captured.kind !== 'document' &&
+        request.target !== 'document' &&
+        result.target !== 'document' &&
+        modeMatches &&
+        surfaceMatches &&
+        activeDocumentTab
+      ) {
+        if (captured.surface === 'source') {
+          const view = sourceEditorViewRef.current;
+          if (view) {
+            nextSource = applySourceLocalAgentResult({
+              view,
+              snapshot: captured,
+              currentDocumentId: activeDocumentTab.id,
+              currentSource: liveSource,
+              request,
+              result,
+            });
+            applied = nextSource !== null;
+          }
+        } else {
+          const currentEditor = editorInstanceRef.current;
+          if (currentEditor) {
+            applied = applyWysiwygLocalAgentResult({
+              editor: currentEditor,
+              snapshot: captured,
+              currentDocumentId: activeDocumentTab.id,
+              currentSource: liveSource,
+              request,
+              result,
+            });
+            if (applied) nextSource = currentEditor.getMarkdown();
+          }
+        }
+      }
+
+      if (applied && activeDocumentTab && nextSource !== null) {
+        if (captured.surface === 'wysiwyg') {
+          publishWysiwygMarkdownDraft(nextSource);
+        } else {
+          localDraftRef.current = nextSource;
+          setLocalDraft(nextSource);
+        }
+        const nextTabs = tabsRef.current.map((tab) =>
+          tab.id === activeDocumentTab.id && tab.kind === 'document'
+            ? { ...tab, draft: nextSource }
+            : tab,
+        );
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
+        setLocalAgentSnapshot(null);
+        setLocalAgentComposerOpen(false);
+        setLocalAgentPreferredAgent(null);
+        setLocalAgentInitialInstruction('');
+        setLocalAgentInitialTarget(null);
+        localAgentCaptureModeRef.current = null;
+        announceShell(
+          captured.kind === 'selection'
+            ? 'Local agent replacement applied to the selected text'
+            : 'Local agent result inserted at the captured cursor',
+        );
+        focusActiveEditor();
+        return;
+      }
+
+      try {
+        const currentTabs = tabsRef.current.map((tab) =>
+          tab.id === activeDocumentTab?.id && tab.kind === 'document'
+            ? { ...tab, draft: liveSource }
+            : tab,
+        );
+        tabsRef.current = currentTabs;
+        setTabs(currentTabs);
+        const review = createLocalAgentReview(
+          captured,
+          request,
+          result,
+          capturedDocumentTab?.name ?? 'Untitled',
+        );
+        activateLocalAgentReview(review);
+        announceShell(
+          captured.kind === 'document'
+            ? 'Local agent document proposal is ready for review'
+            : 'The captured target changed. The local agent result was opened for review.',
+        );
+      } catch {
+        announceShell('The local agent result could not be matched to its request');
+      }
+    },
+  );
 
   const handleSourceAiSelectionChange = useEffectEvent((view: EditorView) => {
     const activeDocumentTab = tabsRef.current.find(
@@ -5852,7 +6035,30 @@ export default function App() {
         tab.id === review.sourceDocumentId && tab.kind === 'document',
     );
     if (sourceTab) {
+      if (review.origin.kind === 'localAgent' && review.localAgentContext) {
+        pendingLocalAgentRerunRef.current = {
+          sourceDocumentId: sourceTab.id,
+          snapshot: review.localAgentContext.snapshot,
+          request: review.localAgentContext.request,
+        };
+      }
       await switchToTab(sourceTab.id);
+    }
+    if (review.origin.kind === 'localAgent') {
+      const context = review.localAgentContext;
+      if (!sourceTab || !context) {
+        announceShell(
+          'The source document is closed. Reopen it before running the local agent again.',
+        );
+        return;
+      }
+      if (activeTabIdRef.current !== sourceTab.id) {
+        pendingLocalAgentRerunRef.current = null;
+        announceShell('Could not reopen the source document for the local agent');
+        return;
+      }
+      announceShell('Local agent request reopened with its captured target');
+      return;
     }
     applySidebarPanelState('ai', 'show');
     announceShell(
@@ -5901,7 +6107,10 @@ export default function App() {
 
     const targetTab = tabsRef.current.find((tab) => tab.id === targetId);
     if (targetTab?.kind === 'ai-review' && targetTab.aiReview) {
-      if (targetTab.aiReview.status === 'running') {
+      if (
+        targetTab.aiReview.origin.kind === 'openrouter' &&
+        targetTab.aiReview.status === 'running'
+      ) {
         const decision = await message(
           'This AI request is still running. Cancel it and close the Review tab?',
           {
@@ -5918,7 +6127,9 @@ export default function App() {
         dismissedAiRequestIdsRef.current.add(targetTab.aiReview.requestId);
         await aiCancel(targetTab.aiReview.requestId).catch(() => false);
       }
-      await aiDiscardResult(targetTab.aiReview.requestId).catch(() => undefined);
+      if (targetTab.aiReview.origin.kind === 'openrouter') {
+        await aiDiscardResult(targetTab.aiReview.requestId).catch(() => undefined);
+      }
     }
 
     const closedTab = snapshotClosedDocumentTab(targetId);
@@ -7240,6 +7451,8 @@ export default function App() {
           snapshot={localAgentSnapshot}
           disclosureAccepted={settings.localAgentDisclosureAccepted}
           preferredAgent={localAgentPreferredAgent}
+          initialInstruction={localAgentInitialInstruction}
+          initialTarget={localAgentInitialTarget ?? localAgentSnapshot.kind}
           onDisclosureAcceptedChange={(localAgentDisclosureAccepted) =>
             handleSettingsChange({
               ...settings,

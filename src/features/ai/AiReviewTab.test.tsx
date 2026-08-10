@@ -1,8 +1,23 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AiRunRequest, AiRunResult } from './types';
-import { createAiReview, createPendingAiReview } from './review';
+import {
+  createAiReview,
+  createLocalAgentReview,
+  createPendingAiReview,
+} from './review';
+import type { LocalAgentTargetSnapshot } from './localAgents/targets';
+import type {
+  LocalAgentRunRequest,
+  LocalAgentRunResult,
+} from './localAgents/types';
 import { AiReviewTab } from './AiReviewTab';
 
 afterEach(cleanup);
@@ -183,6 +198,29 @@ describe('AiReviewTab', () => {
     expect(onApply).toHaveBeenCalledWith('# PRD\n\nMeasurable.');
   });
 
+  it('keeps OpenRouter selected-operation rendering on the provider result service', async () => {
+    const onApply = vi.fn();
+    const onRenderSelected = vi.fn().mockResolvedValue('# Selected only');
+    render(
+      <AiReviewTab
+        review={createAiReview(request, runResult, 'requirements.md')}
+        currentSource={request.source}
+        sourcePresent
+        onApply={onApply}
+        onRenderSelected={onRenderSelected}
+        onOpenAsDocument={vi.fn()}
+        onRerun={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
+
+    await waitFor(() =>
+      expect(onRenderSelected).toHaveBeenCalledWith(['operation-1']),
+    );
+    expect(onApply).toHaveBeenCalledWith('# Selected only');
+  });
+
   it('disables apply when the source changed but keeps the proposal exportable', () => {
     render(
       <AiReviewTab
@@ -250,5 +288,122 @@ describe('AiReviewTab', () => {
 
     expect(screen.queryByRole('heading', { name: 'Source' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Translation' })).toBeInTheDocument();
+  });
+
+  it('renders local-agent identity and applies selected changes without provider rendering', async () => {
+    const snapshot: LocalAgentTargetSnapshot = {
+      documentId: 'doc-1',
+      source: '# Before\n',
+      surface: 'source',
+      kind: 'document',
+      characterRange: null,
+      byteRange: null,
+      selectedText: '',
+      proseMirrorRange: null,
+    };
+    const localRequest: LocalAgentRunRequest = {
+      requestId: 'local-review-1',
+      documentId: 'doc-1',
+      agent: 'codex',
+      target: 'document',
+      source: snapshot.source,
+      selection: null,
+      cursor: null,
+      instruction: 'Rewrite it',
+    };
+    const localResult: LocalAgentRunResult = {
+      schemaVersion: 1,
+      requestId: localRequest.requestId,
+      documentId: localRequest.documentId,
+      agent: localRequest.agent,
+      target: localRequest.target,
+      markdown: '# After\n',
+      summary: 'Rewrote the heading.',
+      warnings: ['Check the final tone.'],
+    };
+    const review = createLocalAgentReview(
+      snapshot,
+      localRequest,
+      localResult,
+      'notes.md',
+    );
+    const onApply = vi.fn();
+    const onRenderSelected = vi.fn().mockRejectedValue(
+      new Error('OpenRouter renderer must not be called'),
+    );
+
+    render(
+      <AiReviewTab
+        review={review}
+        currentSource={snapshot.source}
+        sourcePresent
+        onApply={onApply}
+        onRenderSelected={onRenderSelected}
+        onOpenAsDocument={vi.fn()}
+        onRerun={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Codex')).toBeVisible();
+    expect(screen.getByText('Rewrote the heading.')).toBeVisible();
+    expect(screen.getByText('Check the final tone.')).toBeVisible();
+    expect(screen.queryByText(/local-agent\/codex/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cost unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Prompt .*Completion .*Total/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
+
+    expect(onApply).toHaveBeenCalledWith('# After\n');
+    expect(onRenderSelected).not.toHaveBeenCalled();
+  });
+
+  it('keeps a stale local proposal openable but disables both apply paths', () => {
+    const snapshot: LocalAgentTargetSnapshot = {
+      documentId: 'doc-1',
+      source: 'alpha beta',
+      surface: 'source',
+      kind: 'selection',
+      characterRange: { start: 6, end: 10 },
+      byteRange: { start: 6, end: 10 },
+      selectedText: 'beta',
+      proseMirrorRange: null,
+    };
+    const localRequest: LocalAgentRunRequest = {
+      requestId: 'local-review-stale',
+      documentId: 'doc-1',
+      agent: 'opencode',
+      target: 'selection',
+      source: snapshot.source,
+      selection: { start: 6, end: 10 },
+      cursor: null,
+      instruction: 'Capitalize it',
+    };
+    const localResult: LocalAgentRunResult = {
+      schemaVersion: 1,
+      requestId: localRequest.requestId,
+      documentId: localRequest.documentId,
+      agent: localRequest.agent,
+      target: localRequest.target,
+      markdown: 'BETA',
+      summary: 'Capitalized it.',
+      warnings: [],
+    };
+
+    render(
+      <AiReviewTab
+        review={createLocalAgentReview(snapshot, localRequest, localResult)}
+        currentSource="alpha changed"
+        sourcePresent
+        onApply={vi.fn()}
+        onRenderSelected={vi.fn()}
+        onOpenAsDocument={vi.fn()}
+        onRerun={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('OpenCode')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Apply all' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply selected' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open as new document' })).toBeEnabled();
   });
 });

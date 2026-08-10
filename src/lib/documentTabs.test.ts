@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { createLocalAgentReview } from '../features/ai/review';
+
 import {
   EXPORT_PREVIEW_TAB_ID,
   EXPORT_PREVIEW_TAB_NAME,
@@ -8,6 +10,7 @@ import {
   createDocumentTab,
   createDocumentTabFromSnapshot,
   createExportPreviewTab,
+  createAiReviewTab,
   createMissingDocumentTab,
   createSettingsTab,
   documentTabMetadataFromSnapshot,
@@ -184,6 +187,72 @@ describe('createSettingsTab', () => {
       draft: '',
       missing: false,
     });
+  });
+});
+
+describe('local-agent Review tabs', () => {
+  it('preserves the local origin and activates the Review as a UI-only tab', () => {
+    const snapshot = {
+      documentId: 'doc-local',
+      source: '# Before\n',
+      surface: 'source' as const,
+      kind: 'document' as const,
+      characterRange: null,
+      byteRange: null,
+      selectedText: '',
+      proseMirrorRange: null,
+    };
+    const request = {
+      requestId: 'local-review-tab',
+      documentId: snapshot.documentId,
+      agent: 'codex' as const,
+      target: 'document' as const,
+      source: snapshot.source,
+      selection: null,
+      cursor: null,
+      instruction: 'Rewrite this document',
+    };
+    const review = createLocalAgentReview(snapshot, request, {
+      schemaVersion: 1,
+      requestId: request.requestId,
+      documentId: request.documentId,
+      agent: request.agent,
+      target: request.target,
+      markdown: '# After\n',
+      summary: 'Rewrote it.',
+      warnings: [],
+    }, 'notes.md');
+    const reviewTab = createAiReviewTab(review);
+
+    expect(reviewTab).toMatchObject({
+      kind: 'ai-review',
+      path: null,
+      name: 'AI Review · notes.md',
+      aiReview: {
+        origin: { kind: 'localAgent', agent: 'codex', target: 'document' },
+        localAgentContext: {
+          request: { instruction: 'Rewrite this document' },
+        },
+      },
+    });
+    expect(
+      resolveDocumentTabViewState({
+        tabs: [documentTab({ id: 'doc-local' }), reviewTab],
+        activeTabId: reviewTab.id,
+        localDraft: '# Before\n',
+      }),
+    ).toMatchObject({
+      activeTab: reviewTab,
+      isAiReviewTabActive: true,
+      activeAiReview: review,
+    });
+    expect(
+      resolveSwitchTabTransition({
+        tabs: [documentTab({ id: 'doc-local' }), reviewTab],
+        activeTabId: 'doc-local',
+        targetId: reviewTab.id,
+      }),
+    ).toEqual({ kind: 'activateAiReview', target: reviewTab, review });
   });
 });
 

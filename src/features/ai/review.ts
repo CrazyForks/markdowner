@@ -26,6 +26,10 @@ export interface AiReview {
   runResult: AiRunResult | null;
   createdAt: number;
   origin: AiReviewOrigin;
+  localAgentContext: {
+    snapshot: LocalAgentTargetSnapshot;
+    request: LocalAgentRunRequest;
+  } | null;
 }
 
 export interface ReviewActions {
@@ -53,6 +57,7 @@ export function createAiReview(
     runResult,
     createdAt: now,
     origin: { kind: 'openrouter' },
+    localAgentContext: null,
   };
 }
 
@@ -73,6 +78,7 @@ export function createPendingAiReview(
     runResult: null,
     createdAt: now,
     origin: { kind: 'openrouter' },
+    localAgentContext: null,
   };
 }
 
@@ -136,7 +142,38 @@ export function createLocalAgentReview(
   return {
     ...createAiReview(syntheticRequest, syntheticResult, sourceDocumentName),
     origin: { kind: 'localAgent', agent: request.agent, target: request.target },
+    localAgentContext: {
+      snapshot: cloneLocalAgentSnapshot(snapshot),
+      request: cloneLocalAgentRequest(request),
+    },
   };
+}
+
+export function renderLocalReviewOperations(
+  review: AiReview,
+  operationIds: string[],
+): string {
+  if (review.origin.kind !== 'localAgent') {
+    throw new Error('Selected rendering requires a local-agent review.');
+  }
+  const document = review.runResult?.result;
+  if (!document?.validation.passed || review.runResult?.validationIssues.length) {
+    throw new Error('The local-agent review is not valid.');
+  }
+
+  const knownIds = new Set(document.operations.map((operation) => operation.id));
+  const selectedIds = new Set(operationIds);
+  for (const operationId of selectedIds) {
+    if (!knownIds.has(operationId)) {
+      throw new Error(`Unknown local-agent operation: ${operationId}`);
+    }
+  }
+
+  if (selectedIds.size === 0) return review.sourceSnapshot;
+  if (selectedIds.size !== document.operations.length) {
+    throw new Error('The local-agent review contains an incomplete operation set.');
+  }
+  return document.proposedMarkdown;
 }
 
 export function settlePendingAiReview(
@@ -258,4 +295,28 @@ function applyLocalReviewOperation(
 
 function utf8Length(value: string): number {
   return new TextEncoder().encode(value).length;
+}
+
+function cloneLocalAgentSnapshot(
+  snapshot: LocalAgentTargetSnapshot,
+): LocalAgentTargetSnapshot {
+  return {
+    ...snapshot,
+    characterRange: snapshot.characterRange
+      ? { ...snapshot.characterRange }
+      : null,
+    byteRange: snapshot.byteRange ? { ...snapshot.byteRange } : null,
+    proseMirrorRange: snapshot.proseMirrorRange
+      ? { ...snapshot.proseMirrorRange }
+      : null,
+  };
+}
+
+function cloneLocalAgentRequest(
+  request: LocalAgentRunRequest,
+): LocalAgentRunRequest {
+  return {
+    ...request,
+    selection: request.selection ? { ...request.selection } : null,
+  };
 }

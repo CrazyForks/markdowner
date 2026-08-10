@@ -4,6 +4,7 @@ import {
   createAiReview,
   createLocalAgentReview,
   createPendingAiReview,
+  renderLocalReviewOperations,
   resolveReviewActions,
 } from './review';
 import type { AiRunRequest, AiRunResult } from './types';
@@ -262,6 +263,105 @@ describe('AI review origins', () => {
           proposedMarkdown: '# After\n',
         }),
       ],
+    });
+  });
+
+  it('renders selected local-agent operations entirely from the captured review', () => {
+    const snapshot: LocalAgentTargetSnapshot = {
+      documentId: 'doc-1',
+      source: '가나다 beta',
+      surface: 'source',
+      kind: 'selection',
+      characterRange: { start: 4, end: 8 },
+      byteRange: { start: 10, end: 14 },
+      selectedText: 'beta',
+      proseMirrorRange: null,
+    };
+    const request: LocalAgentRunRequest = {
+      requestId: 'local-render-1',
+      documentId: 'doc-1',
+      agent: 'opencode',
+      target: 'selection',
+      source: snapshot.source,
+      selection: { start: 10, end: 14 },
+      cursor: null,
+      instruction: '대문자로 바꿔 주세요',
+    };
+    const result: LocalAgentRunResult = {
+      schemaVersion: 1,
+      requestId: request.requestId,
+      documentId: request.documentId,
+      agent: request.agent,
+      target: request.target,
+      markdown: 'BETA',
+      summary: '선택 영역을 바꿨습니다.',
+      warnings: [],
+    };
+    const review = createLocalAgentReview(snapshot, request, result);
+
+    expect(renderLocalReviewOperations(review, ['local-agent:selection'])).toBe(
+      '가나다 BETA',
+    );
+    expect(renderLocalReviewOperations(review, [])).toBe('가나다 beta');
+    expect(() => renderLocalReviewOperations(review, ['unknown'])).toThrow(
+      /unknown local-agent operation/i,
+    );
+    expect(() =>
+      renderLocalReviewOperations(
+        createAiReview(openRouterRequest, openRouterResult),
+        [],
+      ),
+    ).toThrow(/local-agent review/i);
+  });
+
+  it('retains an immutable local-agent rerun context', () => {
+    const snapshot: LocalAgentTargetSnapshot = {
+      documentId: 'doc-1',
+      source: 'alpha',
+      surface: 'wysiwyg',
+      kind: 'insert',
+      characterRange: { start: 5, end: 5 },
+      byteRange: { start: 5, end: 5 },
+      selectedText: '',
+      proseMirrorRange: { start: 5, end: 5 },
+    };
+    const request: LocalAgentRunRequest = {
+      requestId: 'local-rerun-1',
+      documentId: 'doc-1',
+      agent: 'claude',
+      target: 'insert',
+      source: snapshot.source,
+      selection: null,
+      cursor: 5,
+      instruction: 'Add a conclusion',
+    };
+    const result: LocalAgentRunResult = {
+      schemaVersion: 1,
+      requestId: request.requestId,
+      documentId: request.documentId,
+      agent: request.agent,
+      target: request.target,
+      markdown: '\n\nConclusion',
+      summary: 'Added a conclusion.',
+      warnings: [],
+    };
+
+    const review = createLocalAgentReview(snapshot, request, result);
+    snapshot.source = 'mutated by caller';
+    request.instruction = 'mutated by caller';
+
+    expect(review.localAgentContext).toEqual({
+      snapshot: expect.objectContaining({
+        source: 'alpha',
+        surface: 'wysiwyg',
+        kind: 'insert',
+        proseMirrorRange: { start: 5, end: 5 },
+      }),
+      request: expect.objectContaining({
+        agent: 'claude',
+        target: 'insert',
+        instruction: 'Add a conclusion',
+      }),
     });
   });
 });

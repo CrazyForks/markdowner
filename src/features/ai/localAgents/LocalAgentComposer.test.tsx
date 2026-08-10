@@ -147,6 +147,26 @@ async function waitForStatuses() {
 }
 
 describe("LocalAgentComposer", () => {
+  it("restores an explicit rerun instruction and target without changing fresh defaults", () => {
+    renderComposer({
+      snapshot: selectionSnapshot,
+      preferredAgent: "claude",
+      initialInstruction: "Keep the same prompt",
+      initialTarget: "document",
+    });
+
+    expect(screen.getByText("@claude")).toBeInTheDocument();
+    expect(screen.getByLabelText("Instruction")).toHaveValue(
+      "Keep the same prompt",
+    );
+    expect(screen.getByLabelText("Apply result to")).toHaveValue("document");
+
+    cleanup();
+    renderComposer({ snapshot: selectionSnapshot });
+    expect(screen.getByLabelText("Instruction")).toHaveValue("");
+    expect(screen.getByLabelText("Apply result to")).toHaveValue("selection");
+  });
+
   it("shows the fixed mention completion, keyboard selection, and incompatible status reason", async () => {
     renderComposer({ preferredAgent: null });
     await waitFor(() =>

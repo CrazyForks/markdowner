@@ -38,6 +38,8 @@ export interface LocalAgentComposerProps {
   snapshot: LocalAgentTargetSnapshot;
   disclosureAccepted: boolean;
   preferredAgent?: LocalAgentKind | null;
+  initialInstruction?: string;
+  initialTarget?: LocalAgentTargetKind;
   onDisclosureAcceptedChange: (accepted: boolean) => void;
   onClose: () => void;
   onResult: (
@@ -58,6 +60,8 @@ export function LocalAgentComposer({
   snapshot,
   disclosureAccepted,
   preferredAgent = null,
+  initialInstruction = "",
+  initialTarget = snapshot.kind,
   onDisclosureAcceptedChange,
   onClose,
   onResult,
@@ -72,8 +76,10 @@ export function LocalAgentComposer({
   const [mentionOpen, setMentionOpen] = useState(preferredAgent === null);
   const [mentionQuery, setMentionQuery] = useState("@");
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
-  const [instruction, setInstruction] = useState("");
-  const [target, setTarget] = useState<LocalAgentTargetKind>(snapshot.kind);
+  const [instruction, setInstruction] = useState(initialInstruction);
+  const [target, setTarget] = useState<LocalAgentTargetKind>(
+    initialTarget === "document" ? "document" : snapshot.kind,
+  );
   const [runningRequestId, setRunningRequestId] = useState<string | null>(null);
   const [cancellingRequestId, setCancellingRequestId] = useState<string | null>(
     null,
