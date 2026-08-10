@@ -36,25 +36,28 @@ export function LocalAgentSettings({
   const [statuses, setStatuses] = useState<LocalAgentStatus[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const mounted = useRef(true);
+  const refreshGeneration = useRef(0);
 
   useEffect(() => {
     return () => {
-      mounted.current = false;
+      refreshGeneration.current += 1;
     };
   }, []);
 
   const refresh = async () => {
-    if (loading) return;
+    const generation = refreshGeneration.current + 1;
+    refreshGeneration.current = generation;
     setLoading(true);
     setError('');
     try {
       const next = await services.listStatuses();
-      if (mounted.current) setStatuses(next);
-    } catch (reason) {
-      if (mounted.current) setError(errorMessage(reason));
+      if (refreshGeneration.current === generation) setStatuses(next);
+    } catch {
+      if (refreshGeneration.current === generation) {
+        setError('Could not refresh local agent status.');
+      }
     } finally {
-      if (mounted.current) setLoading(false);
+      if (refreshGeneration.current === generation) setLoading(false);
     }
   };
 
@@ -79,8 +82,8 @@ export function LocalAgentSettings({
           variant="outline"
           size="sm"
           aria-label="Refresh local agent status"
+          aria-busy={loading}
           onClick={() => void refresh()}
-          disabled={loading}
         >
           <RefreshCw className={loading ? 'animate-spin' : undefined} aria-hidden="true" />
           {loading ? 'Refreshing…' : 'Refresh'}
@@ -150,9 +153,7 @@ export function LocalAgentSettings({
       </div>
 
       {error ? (
-        <p role="alert" className="text-xs text-destructive">
-          Could not refresh local agent status: {error}
-        </p>
+        <p role="alert" className="text-xs text-destructive">{error}</p>
       ) : null}
     </section>
   );
@@ -168,8 +169,4 @@ function statusClass(status: LocalAgentStatus | undefined): string {
   if (status?.compatible) return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
   if (status?.installed) return 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
   return 'bg-muted text-muted-foreground';
-}
-
-function errorMessage(reason: unknown): string {
-  return typeof reason === 'string' ? reason : (reason as Error)?.message || 'Unknown error';
 }

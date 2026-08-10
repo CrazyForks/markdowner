@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LocalAgentSettings } from './LocalAgentSettings';
@@ -39,6 +40,81 @@ const statuses = [
 ];
 
 describe('LocalAgentSettings', () => {
+  it('applies the first status refresh after StrictMode replays its effect cleanup', async () => {
+    const pending = deferred<typeof statuses>();
+    const listStatuses = vi.fn().mockReturnValue(pending.promise);
+    render(
+      <StrictMode>
+        <LocalAgentSettings
+          disclosureAccepted={false}
+          onDisclosureAcceptedChange={vi.fn()}
+          services={{ listStatuses }}
+        />
+      </StrictMode>,
+    );
+
+    const button = screen.getByRole('button', { name: 'Refresh local agent status' });
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => pending.resolve(statuses));
+
+    expect(screen.getByText('claude (Homebrew)')).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('lets the newest manual refresh win when an older response resolves last', async () => {
+    const older = deferred<typeof statuses>();
+    const newer = deferred<typeof statuses>();
+    const latestStatuses = statuses.map((status) =>
+      status.kind === 'claude' ? { ...status, version: '9.9.9' } : status,
+    );
+    const listStatuses = vi
+      .fn()
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise);
+    render(
+      <LocalAgentSettings
+        disclosureAccepted={false}
+        onDisclosureAcceptedChange={vi.fn()}
+        services={{ listStatuses }}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: 'Refresh local agent status' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(listStatuses).toHaveBeenCalledTimes(2));
+
+    await act(async () => newer.resolve(latestStatuses));
+    expect(screen.getAllByTestId('local-agent-status-row')[0]).toHaveTextContent('Version 9.9.9');
+
+    await act(async () => older.resolve(statuses));
+    expect(screen.getAllByTestId('local-agent-status-row')[0]).toHaveTextContent('Version 9.9.9');
+    expect(button).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('does not update after an in-flight manual refresh unmounts', async () => {
+    const pending = deferred<typeof statuses>();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { unmount } = render(
+      <StrictMode>
+        <LocalAgentSettings
+          disclosureAccepted={false}
+          onDisclosureAcceptedChange={vi.fn()}
+          services={{ listStatuses: vi.fn().mockReturnValue(pending.promise) }}
+        />
+      </StrictMode>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh local agent status' }));
+    unmount();
+    await act(async () => pending.resolve(statuses));
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it('refreshes fixed, redacted agent status rows and keeps local disclosure separate', async () => {
     const onDisclosureAcceptedChange = vi.fn();
     const listStatuses = vi.fn().mockResolvedValue(statuses);
@@ -80,17 +156,32 @@ describe('LocalAgentSettings', () => {
     expect(screen.getByText(/OpenCode may retain local session metadata/i)).toBeInTheDocument();
   });
 
-  it('keeps rows usable when status refresh fails', async () => {
+  it('keeps rows usable without rendering sensitive status-refresh failure details', async () => {
+    const unsafeFailure = new Error(
+      'AcmeSensitiveProvider rejected sk-local-secret at /private/tmp/local-agent-token',
+    );
     render(
       <LocalAgentSettings
         disclosureAccepted
         onDisclosureAcceptedChange={vi.fn()}
-        services={{ listStatuses: vi.fn().mockRejectedValue(new Error('Unavailable')) }}
+        services={{ listStatuses: vi.fn().mockRejectedValue(unsafeFailure) }}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh local agent status' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Unavailable');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Could not refresh local agent status.',
+    );
+    expect(alert).not.toHaveTextContent(/AcmeSensitiveProvider|sk-local-secret|private\/tmp/i);
     expect(screen.getAllByTestId('local-agent-status-row')).toHaveLength(3);
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
