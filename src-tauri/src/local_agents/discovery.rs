@@ -13,17 +13,17 @@ use std::{
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
 use super::{
     LocalAgentError, LocalAgentKind, LocalAgentStatus, OPEN_CODE_OWNED_AGENT, ResolvedAgent,
     owned_opencode_environment,
     process::{
-        RegisteredProcessGroup, RejectedProcessGroup, controlled_environment, create_owned_temp_dir,
+        OwnedTempCapability, RegisteredProcessGroup, RejectedProcessGroup, controlled_environment,
+        create_owned_temp_dir,
     },
 };
 
@@ -96,6 +96,9 @@ pub(super) const PASSIVE_CODEX_FEATURES: &[&str] = &[
 
 const CLAUDE_REQUIRED_FLAGS: &[&str] = &[
     "--safe-mode",
+    "--setting-sources",
+    "--settings",
+    "--disable-slash-commands",
     "--print",
     "--tools",
     "--permission-mode",
@@ -746,11 +749,15 @@ fn run_bounded_probe(
     command_deadline: Option<Instant>,
 ) -> Result<ProbeOutput, LocalAgentError> {
     ensure_probe_active(cancellation, command_deadline)?;
-    let probe_directory = create_owned_temp_dir().map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+    let mut probe_directory =
+        create_owned_temp_dir().map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
     let cwd = probe_directory.path().to_path_buf();
     let environment = controlled_environment(env::vars_os().collect(), environment, &cwd)
         .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
     ensure_probe_active(cancellation, command_deadline)?;
+    probe_directory
+        .verify_path_identity()
+        .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
     let mut command = Command::new(executable);
     command
         .args(args)
@@ -765,6 +772,11 @@ fn run_bounded_probe(
     let mut child = command
         .spawn()
         .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+    if probe_directory.verify_path_identity().is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(LocalAgentError::ProbeSpawnFailed);
+    }
     let mut process_group = match ProbeProcessGroup::register_child(&child) {
         ProbeProcessGroupRegistration::Registered(process_group) => process_group,
         ProbeProcessGroupRegistration::Rejected(mut rejected) => {
@@ -842,11 +854,15 @@ fn run_bounded_probe(
     if !process_group.terminate_and_confirm(PROBE_CLEANUP_TIMEOUT) {
         return Err(LocalAgentError::ProbeFailed);
     }
-    Ok(ProbeOutput {
+    let output = ProbeOutput {
         success: status.success(),
         stdout,
         stderr,
-    })
+    };
+    probe_directory
+        .close_blocking()
+        .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+    Ok(output)
 }
 
 #[cfg(unix)]
@@ -1307,14 +1323,51 @@ fn probe_agent_with_proof(
     result
 }
 
+struct ClaudeProbeEnvironment {
+    _directory: OwnedTempCapability,
+    values: Vec<(OsString, OsString)>,
+}
+
+impl ClaudeProbeEnvironment {
+    fn create() -> Result<Self, LocalAgentError> {
+        let mut directory =
+            create_owned_temp_dir().map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+        let mut values = Vec::new();
+        for (name, directory_name) in [
+            ("HOME", "home"),
+            ("CLAUDE_CONFIG_DIR", "config"),
+            ("XDG_CONFIG_HOME", "xdg-config"),
+            ("XDG_CACHE_HOME", "cache"),
+            ("XDG_DATA_HOME", "data"),
+            ("XDG_STATE_HOME", "state"),
+        ] {
+            let path = directory.create_probe_directory(directory_name)?;
+            values.push((OsString::from(name), path.into_os_string()));
+        }
+        for name in [
+            "CLAUDE_CODE_SAFE_MODE",
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+            "CLAUDE_CODE_DISABLE_CLAUDE_MDS",
+            "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS",
+        ] {
+            values.push((OsString::from(name), OsString::from("1")));
+        }
+        Ok(Self {
+            _directory: directory,
+            values,
+        })
+    }
+}
+
 struct OpenCodeProbeEnvironment {
-    _directory: TempDir,
+    _directory: OwnedTempCapability,
     values: Vec<(OsString, OsString)>,
 }
 
 impl OpenCodeProbeEnvironment {
     fn create() -> Result<Self, LocalAgentError> {
-        let directory = create_owned_temp_dir().map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+        let mut directory =
+            create_owned_temp_dir().map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
         let mut values: BTreeMap<OsString, OsString> =
             owned_opencode_environment().into_iter().collect();
         for (name, directory_name) in [
@@ -1323,8 +1376,7 @@ impl OpenCodeProbeEnvironment {
             ("XDG_DATA_HOME", "data"),
             ("XDG_STATE_HOME", "state"),
         ] {
-            let path = directory.path().join(directory_name);
-            create_private_probe_directory(&path)?;
+            let path = directory.create_probe_directory(directory_name)?;
             values.insert(OsString::from(name), path.into_os_string());
         }
         values.insert(
@@ -1342,14 +1394,6 @@ impl OpenCodeProbeEnvironment {
     }
 }
 
-fn create_private_probe_directory(path: &Path) -> Result<(), LocalAgentError> {
-    fs::create_dir(path).map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
-    #[cfg(unix)]
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
-    Ok(())
-}
-
 fn run_open_code_probe(
     executable: &Path,
     args: &[OsString],
@@ -1359,14 +1403,24 @@ fn run_open_code_probe(
     runner.run(executable, args, &environment.values)
 }
 
+fn run_claude_probe(
+    executable: &Path,
+    args: &[OsString],
+    runner: &impl ProbeRunner,
+) -> Result<ProbeOutput, LocalAgentError> {
+    let environment = ClaudeProbeEnvironment::create()?;
+    runner.run(executable, args, &environment.values)
+}
+
 fn probe_version(
     resolved: &ResolvedAgent,
     runner: &impl ProbeRunner,
 ) -> Result<String, LocalAgentError> {
     let args = [OsString::from("--version")];
     let version_output = match resolved.kind {
+        LocalAgentKind::Claude => run_claude_probe(&resolved.path, &args, runner)?,
         LocalAgentKind::Opencode => run_open_code_probe(&resolved.path, &args, runner)?,
-        LocalAgentKind::Claude | LocalAgentKind::Codex => runner.run(&resolved.path, &args, &[])?,
+        LocalAgentKind::Codex => runner.run(&resolved.path, &args, &[])?,
     };
     parse_version(&successful_probe_text(&version_output)?)
 }
@@ -1384,7 +1438,7 @@ fn probe_capabilities(
 }
 
 fn probe_claude(executable: &Path, runner: &impl ProbeRunner) -> Result<(), LocalAgentError> {
-    let output = runner.run(executable, &[OsString::from("--help")], &[])?;
+    let output = run_claude_probe(executable, &[OsString::from("--help")], runner)?;
     evaluate_claude_help(&successful_probe_text(&output)?).into_result()
 }
 
@@ -1699,13 +1753,14 @@ mod tests {
 
     use super::{
         BoundedProbeRunner, CAPABILITY_PROBE_TIMEOUT_REASON, CLAUDE_FLAGS_REASON,
-        CODEX_FEATURES_REASON, CancellableProbeRunner, ExecutableProof, LOGIN_SHELL_PATH_LIMIT,
-        MAX_EXECUTABLE_BYTES, OPEN_CODE_PERMISSIONS_REASON, PROBE_TIMEOUT, ProbeOutput,
-        ProbeRunner, codex_feature_probe_args, evaluate_claude_help, evaluate_codex_features,
-        evaluate_codex_help, evaluate_opencode_help, executable_sha256, executable_sha256_exact,
-        login_shell_path_value_with_runner, opencode_permissions_are_denied,
-        parse_shebang_interpreter, probe_agent, probe_agent_with_proof, probe_resolved_agent,
-        resolve_from_paths, search_path_directories, search_path_directories_with_runner,
+        CLAUDE_REQUIRED_FLAGS, CODEX_FEATURES_REASON, CancellableProbeRunner, ExecutableProof,
+        LOGIN_SHELL_PATH_LIMIT, MAX_EXECUTABLE_BYTES, OPEN_CODE_PERMISSIONS_REASON, PROBE_TIMEOUT,
+        ProbeOutput, ProbeRunner, codex_feature_probe_args, evaluate_claude_help,
+        evaluate_codex_features, evaluate_codex_help, evaluate_opencode_help, executable_sha256,
+        executable_sha256_exact, login_shell_path_value_with_runner,
+        opencode_permissions_are_denied, parse_shebang_interpreter, probe_agent,
+        probe_agent_with_proof, probe_resolved_agent, resolve_from_paths, search_path_directories,
+        search_path_directories_with_runner,
     };
     use crate::local_agents::{
         LocalAgentError, LocalAgentKind, ResolvedAgent, owned_opencode_environment,
@@ -1777,6 +1832,9 @@ Usage: codex exec [OPTIONS] [PROMPT]
     const CLAUDE_HELP: &str = "\
 Usage: claude [options]
   --safe-mode
+  --setting-sources <sources>
+  --settings <file-or-json>
+  --disable-slash-commands
   --print
   --tools <tools>
   --permission-mode <mode>
@@ -2013,11 +2071,13 @@ Usage: opencode debug config
     fn claude_help_requires_each_safety_flag_by_its_exact_name() {
         assert!(evaluate_claude_help(CLAUDE_HELP).compatible);
 
-        let renamed = CLAUDE_HELP.replace("--json-schema", "--json-schema-v2");
-        let evaluation = evaluate_claude_help(&renamed);
+        for flag in CLAUDE_REQUIRED_FLAGS {
+            let renamed = CLAUDE_HELP.replace(flag, &format!("{flag}-unsupported"));
+            let evaluation = evaluate_claude_help(&renamed);
 
-        assert!(!evaluation.compatible);
-        assert_eq!(evaluation.reason, Some(CLAUDE_FLAGS_REASON));
+            assert!(!evaluation.compatible, "missing required flag {flag}");
+            assert_eq!(evaluation.reason, Some(CLAUDE_FLAGS_REASON));
+        }
     }
 
     #[test]
@@ -2751,6 +2811,102 @@ Usage: opencode debug config
             })
             .collect();
         assert_eq!(config_homes.len(), 4);
+    }
+
+    struct CompatibleClaudeRunner {
+        environments: Mutex<Vec<Vec<(OsString, OsString)>>>,
+    }
+
+    impl ProbeRunner for CompatibleClaudeRunner {
+        fn run(
+            &self,
+            _executable: &Path,
+            _args: &[OsString],
+            environment: &[(OsString, OsString)],
+        ) -> Result<ProbeOutput, LocalAgentError> {
+            let environment_map: BTreeMap<OsString, OsString> =
+                environment.iter().cloned().collect();
+            let root_names = [
+                "HOME",
+                "CLAUDE_CONFIG_DIR",
+                "XDG_CONFIG_HOME",
+                "XDG_CACHE_HOME",
+                "XDG_DATA_HOME",
+                "XDG_STATE_HOME",
+            ];
+            let paths =
+                root_names.map(|name| Path::new(environment_map.get(OsStr::new(name)).unwrap()));
+            let root = paths[0].parent().unwrap();
+            for path in paths {
+                use std::os::unix::fs::PermissionsExt;
+
+                assert_eq!(path.parent(), Some(root));
+                assert!(path.is_dir());
+                assert!(fs::read_dir(path).unwrap().next().is_none());
+                assert_eq!(
+                    fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+            }
+            for name in [
+                "CLAUDE_CODE_SAFE_MODE",
+                "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+                "CLAUDE_CODE_DISABLE_CLAUDE_MDS",
+                "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS",
+            ] {
+                assert_eq!(
+                    environment_map.get(OsStr::new(name)),
+                    Some(&OsString::from("1"))
+                );
+            }
+            let mut environments = self.environments.lock().unwrap();
+            let stdout = match environments.len() {
+                0 => b"claude 2.1.226\n".to_vec(),
+                1 => CLAUDE_HELP.as_bytes().to_vec(),
+                _ => panic!("unexpected extra Claude probe"),
+            };
+            environments.push(environment.to_vec());
+            Ok(ProbeOutput {
+                success: true,
+                stdout,
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn every_claude_probe_uses_private_config_roots_and_fixed_controls() {
+        let temp = tempdir().unwrap();
+        let executable = temp.path().join("claude");
+        create_executable(&executable);
+        let resolved = ResolvedAgent {
+            kind: LocalAgentKind::Claude,
+            path: executable.canonicalize().unwrap(),
+            path_label: "bin/claude".to_string(),
+        };
+        let runner = CompatibleClaudeRunner {
+            environments: Mutex::new(Vec::new()),
+        };
+
+        probe_agent(&resolved, &runner).unwrap();
+
+        let environments = runner.environments.lock().unwrap();
+        assert_eq!(environments.len(), 2);
+        let homes = environments
+            .iter()
+            .map(|environment| {
+                environment
+                    .iter()
+                    .find(|(name, _)| name == OsStr::new("HOME"))
+                    .map(|(_, value)| value)
+                    .unwrap()
+            })
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(homes.len(), 2);
+        for home in homes {
+            assert!(!Path::new(home).exists());
+        }
     }
 
     struct PathSubstitutingClaudeRunner {

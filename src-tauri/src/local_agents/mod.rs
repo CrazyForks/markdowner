@@ -1208,8 +1208,8 @@ async fn run_registered_local_agent(
     ensure_before_deadline(deadline)?;
     let temp_dir = create_owned_temp_dir();
     ensure_before_deadline(deadline)?;
-    let temp_dir = temp_dir?;
-    let invocation = build_invocation(&resolved, request, temp_dir.path()).map_err(|_| {
+    let mut temp_dir = temp_dir?;
+    let invocation = build_invocation(&resolved, request, &mut temp_dir).map_err(|_| {
         LocalAgentError::run(
             "local_agent_setup_failed",
             "The local agent could not be prepared.",
@@ -1276,7 +1276,7 @@ async fn run_registered_local_agent(
         ensure_before_deadline(deadline)?;
         result
     })();
-    let cleanup = output.close_temp_dir();
+    let cleanup = output.close_temp_dir().await;
     finish_post_processing(processing, cleanup, deadline)
 }
 

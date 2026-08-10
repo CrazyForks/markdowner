@@ -1,18 +1,19 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     env,
-    ffi::{CStr, OsStr, OsString},
+    ffi::{CStr, CString, OsStr, OsString},
     fmt,
     fs::{self, File, OpenOptions},
     io::{ErrorKind, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant as StdInstant},
 };
 
 #[cfg(unix)]
 use std::os::unix::{
-    fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    ffi::OsStrExt,
+    fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     io::{AsRawFd, FromRawFd},
     process::CommandExt,
 };
@@ -46,6 +47,12 @@ const OPENCODE_DATA_DIRECTORY: &str = "opencode-data";
 const OPENCODE_STATE_DIRECTORY: &str = "opencode-state";
 const OPENCODE_DATA_AGENT_DIRECTORY: &str = "opencode";
 const OPENCODE_AUTH_FILE: &str = "auth.json";
+const CLAUDE_HOME_DIRECTORY: &str = "claude-home";
+const CLAUDE_CONFIG_DIRECTORY: &str = "claude-config";
+const CLAUDE_XDG_CONFIG_DIRECTORY: &str = "claude-xdg-config";
+const CLAUDE_CACHE_DIRECTORY: &str = "claude-cache";
+const CLAUDE_DATA_DIRECTORY: &str = "claude-data";
+const CLAUDE_STATE_DIRECTORY: &str = "claude-state";
 const CODEX_HOME_DIRECTORY: &str = "codex-home";
 const CODEX_AUTH_FILE: &str = "auth.json";
 const MAX_AGENT_AUTH_BYTES: usize = 1024 * 1024;
@@ -153,14 +160,16 @@ const OPENCODE_ENVIRONMENT: &[&str] = &[
 ];
 
 #[cfg(unix)]
-static LIVE_PROCESS_GROUPS: OnceLock<Mutex<ProcessGroupRegistry>> = OnceLock::new();
+static LIVE_PROCESS_GROUPS: OnceLock<Arc<Mutex<ProcessGroupRegistry>>> = OnceLock::new();
 
 #[cfg(unix)]
 #[derive(Default)]
 struct ProcessGroupRegistry {
     process_groups: BTreeSet<i32>,
     rejected_cleanups: usize,
-    active_operations: usize,
+    active_provider_operations: usize,
+    active_cleanup_operations: usize,
+    cleanup_failures: u64,
     shutting_down: bool,
 }
 
@@ -195,21 +204,40 @@ impl ProcessGroupRegistry {
         self.rejected_cleanups = self.rejected_cleanups.saturating_sub(1);
     }
 
-    fn begin_operation(&mut self) -> bool {
+    fn begin_provider_operation(&mut self) -> bool {
         if self.shutting_down {
             false
         } else {
-            self.active_operations = self.active_operations.saturating_add(1);
+            self.active_provider_operations = self.active_provider_operations.saturating_add(1);
             true
         }
     }
 
-    fn finish_operation(&mut self) {
-        self.active_operations = self.active_operations.saturating_sub(1);
+    fn finish_provider_operation(&mut self) {
+        self.active_provider_operations = self.active_provider_operations.saturating_sub(1);
+    }
+
+    fn reserve_cleanup_activity(&mut self) -> bool {
+        if self.shutting_down {
+            false
+        } else {
+            self.active_cleanup_operations = self.active_cleanup_operations.saturating_add(1);
+            true
+        }
+    }
+
+    fn finish_cleanup_activity(&mut self, succeeded: bool) {
+        self.active_cleanup_operations = self.active_cleanup_operations.saturating_sub(1);
+        if !succeeded {
+            self.cleanup_failures = self.cleanup_failures.saturating_add(1);
+        }
     }
 
     fn is_idle(&self) -> bool {
-        self.process_groups.is_empty() && self.rejected_cleanups == 0 && self.active_operations == 0
+        self.process_groups.is_empty()
+            && self.rejected_cleanups == 0
+            && self.active_provider_operations == 0
+            && self.active_cleanup_operations == 0
     }
 }
 
@@ -220,6 +248,306 @@ pub(super) struct ProcessOutput {
     temp_dir: Option<TempDir>,
     temp_identity: Option<FileIdentity>,
     temp_handle: Option<File>,
+    temp_parent_handle: Option<File>,
+    temp_name: Option<OsString>,
+    cleanup_activity: Option<CleanupActivityGuard>,
+    cleanup_cancellation: CancellationToken,
+    cleanup_deadline: StdInstant,
+    #[cfg(test)]
+    cleanup_interlock: Option<TestCleanupInterlock>,
+}
+
+pub(super) struct OwnedTempCapability {
+    temp_dir: Option<TempDir>,
+    path: PathBuf,
+    identity: FileIdentity,
+    root: Option<File>,
+    parent: Option<File>,
+    root_name: OsString,
+    adapter_files: Vec<OwnedFile>,
+    early_directories: Vec<OwnedDirectory>,
+    cleanup_activity: Option<CleanupActivityGuard>,
+    cleanup_cancellation: CancellationToken,
+    cleanup_deadline: StdInstant,
+    #[cfg(test)]
+    setup_interlock: Option<TestSetupInterlock>,
+    #[cfg(test)]
+    cleanup_interlock: Option<TestCleanupInterlock>,
+}
+
+struct OwnedTempParts {
+    temp_dir: TempDir,
+    identity: FileIdentity,
+    root: File,
+    parent: File,
+    root_name: OsString,
+    adapter_files: Vec<OwnedFile>,
+    cleanup_activity: CleanupActivityGuard,
+    cleanup_cancellation: CancellationToken,
+    cleanup_deadline: StdInstant,
+    #[cfg(test)]
+    cleanup_interlock: Option<TestCleanupInterlock>,
+}
+
+impl fmt::Debug for OwnedTempCapability {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OwnedTempCapability")
+            .field("adapter_file_count", &self.adapter_files.len())
+            .field("early_directory_count", &self.early_directories.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl OwnedTempCapability {
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(super) fn verify_path_identity(&self) -> Result<(), LocalAgentError> {
+        let root = self.root.as_ref().ok_or_else(temp_cleanup_error)?;
+        let parent = self.parent.as_ref().ok_or_else(temp_cleanup_error)?;
+        self.identity
+            .verify_owned_directory_at(parent, &self.root_name, root)?;
+        self.identity
+            .verify_handle_and_path(root, &self.path, FileRole::OwnedDirectory)
+    }
+
+    pub(super) fn write_adapter_file(
+        &mut self,
+        name: &str,
+        contents: &[u8],
+        is_result: bool,
+    ) -> Result<PathBuf, LocalAgentError> {
+        self.verify_path_identity()
+            .map_err(|_| LocalAgentError::AdapterSetupFailed)?;
+        if Path::new(name).components().count() != 1 {
+            return Err(LocalAgentError::AdapterSetupFailed);
+        }
+        #[cfg(test)]
+        if let Some(interlock) = self.setup_interlock.take() {
+            interlock.before_create.wait();
+            interlock.replacement_ready.wait();
+        }
+        let root = self
+            .root
+            .as_ref()
+            .ok_or(LocalAgentError::AdapterSetupFailed)?;
+        let path = self.path.join(name);
+        let mut handle = create_owned_file_at(root, OsStr::new(name))
+            .map_err(|_| LocalAgentError::AdapterSetupFailed)?;
+        handle
+            .write_all(contents)
+            .and_then(|()| handle.sync_all())
+            .map_err(|_| LocalAgentError::AdapterSetupFailed)?;
+        let identity = FileIdentity::from_handle_and_path(&handle, &path, FileRole::OwnedFile)
+            .map_err(|_| LocalAgentError::AdapterSetupFailed)?;
+        self.adapter_files.push(OwnedFile {
+            path: path.clone(),
+            handle,
+            identity,
+            is_result,
+            mutable_private: false,
+        });
+        self.verify_path_identity()
+            .map_err(|_| LocalAgentError::AdapterSetupFailed)?;
+        self.adapter_files
+            .last()
+            .ok_or(LocalAgentError::AdapterSetupFailed)?
+            .verify_identity()
+            .map_err(|_| LocalAgentError::AdapterSetupFailed)?;
+        Ok(path)
+    }
+
+    pub(super) fn create_probe_directory(
+        &mut self,
+        name: &str,
+    ) -> Result<PathBuf, LocalAgentError> {
+        let directory = self
+            .create_directory(Path::new(name), None)
+            .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+        let path = directory.path.clone();
+        self.early_directories.push(directory);
+        self.verify_path_identity()
+            .map_err(|_| LocalAgentError::ProbeSpawnFailed)?;
+        Ok(path)
+    }
+
+    fn create_directory(
+        &self,
+        relative: &Path,
+        parent: Option<&OwnedDirectory>,
+    ) -> Result<OwnedDirectory, LocalAgentError> {
+        self.verify_path_identity()?;
+        let name = relative
+            .file_name()
+            .filter(|_| {
+                relative
+                    .components()
+                    .all(|component| matches!(component, std::path::Component::Normal(_)))
+            })
+            .ok_or_else(|| identity_error(FileRole::OwnedDirectory))?;
+        let expected_parent = relative.parent().unwrap_or_else(|| Path::new(""));
+        let parent_handle = match parent {
+            Some(parent) => {
+                if parent.path != self.path.join(expected_parent) {
+                    return Err(identity_error(FileRole::OwnedDirectory));
+                }
+                parent.verify_identity()?;
+                &parent.handle
+            }
+            None => {
+                if !expected_parent.as_os_str().is_empty() {
+                    return Err(identity_error(FileRole::OwnedDirectory));
+                }
+                self.root.as_ref().ok_or_else(temp_cleanup_error)?
+            }
+        };
+        let path = self.path.join(relative);
+        let directory = create_owned_directory_at(parent_handle, name, &path)?;
+        self.verify_path_identity()?;
+        directory.verify_identity()?;
+        Ok(directory)
+    }
+
+    fn create_private_file(
+        &self,
+        relative: &Path,
+        parent: &OwnedDirectory,
+        contents: &[u8],
+    ) -> Result<OwnedFile, LocalAgentError> {
+        self.verify_path_identity()?;
+        let name = relative
+            .file_name()
+            .filter(|_| {
+                relative
+                    .components()
+                    .all(|component| matches!(component, std::path::Component::Normal(_)))
+            })
+            .ok_or_else(|| identity_error(FileRole::OwnedFile))?;
+        let expected_parent = relative.parent().ok_or_else(invalid_environment_error)?;
+        if parent.path != self.path.join(expected_parent) {
+            return Err(invalid_environment_error());
+        }
+        parent.verify_identity()?;
+        let path = self.path.join(relative);
+        let mut handle = create_owned_file_at(&parent.handle, name)?;
+        handle
+            .write_all(contents)
+            .and_then(|()| handle.sync_all())
+            .map_err(|_| {
+                LocalAgentError::run(
+                    "local_agent_setup_failed",
+                    "The local agent could not be prepared.",
+                )
+            })?;
+        let identity = FileIdentity::from_handle_and_path(&handle, &path, FileRole::OwnedFile)?;
+        self.verify_path_identity()?;
+        let file = OwnedFile {
+            path,
+            handle,
+            identity,
+            is_result: false,
+            mutable_private: true,
+        };
+        file.verify_identity()?;
+        Ok(file)
+    }
+
+    fn verify_adapter_files(&self) -> Result<(), LocalAgentError> {
+        self.verify_path_identity()?;
+        for file in &self.adapter_files {
+            file.verify_identity()?;
+        }
+        verify_root_entries_exact(
+            self.root.as_ref().ok_or_else(temp_cleanup_error)?,
+            self.adapter_files.iter().map(|file| file.path.as_path()),
+            std::iter::empty::<&Path>(),
+        )?;
+        self.verify_path_identity()
+    }
+
+    fn set_cleanup_context(&mut self, cancellation: &CancellationToken, deadline: StdInstant) {
+        self.cleanup_cancellation = cancellation.clone();
+        self.cleanup_deadline = deadline.max(StdInstant::now() + PROCESS_CLEANUP_TIMEOUT);
+    }
+
+    pub(super) fn close_blocking(&mut self) -> Result<(), LocalAgentError> {
+        let Some(job) = take_temp_cleanup_job(
+            TempCleanupSlot {
+                temp_dir: &mut self.temp_dir,
+                identity: Some(&self.identity),
+                root: &mut self.root,
+                parent: &mut self.parent,
+                root_name: Some(&self.root_name),
+                activity: &mut self.cleanup_activity,
+                clear_detached_contents: true,
+            },
+            #[cfg(test)]
+            self.cleanup_interlock.clone(),
+        )?
+        else {
+            return Ok(());
+        };
+        let shutdown_cleanup = job.activity.shutdown_started();
+        let deadline = if shutdown_cleanup {
+            StdInstant::now() + PROCESS_CLEANUP_TIMEOUT
+        } else {
+            self.cleanup_deadline
+        };
+        let watch_cancellation = !shutdown_cleanup && !self.cleanup_cancellation.is_cancelled();
+        run_temp_cleanup_job(
+            job,
+            self.cleanup_cancellation.clone(),
+            watch_cancellation,
+            CancellationToken::new(),
+            deadline,
+        )
+    }
+
+    fn into_parts(mut self) -> OwnedTempParts {
+        OwnedTempParts {
+            temp_dir: self.temp_dir.take().expect("owned temp directory"),
+            identity: self.identity.clone(),
+            root: self.root.take().expect("owned temp root"),
+            parent: self.parent.take().expect("owned temp parent"),
+            root_name: self.root_name.clone(),
+            adapter_files: std::mem::take(&mut self.adapter_files),
+            cleanup_activity: self
+                .cleanup_activity
+                .take()
+                .expect("reserved cleanup activity"),
+            cleanup_cancellation: self.cleanup_cancellation.clone(),
+            cleanup_deadline: self.cleanup_deadline,
+            #[cfg(test)]
+            cleanup_interlock: self.cleanup_interlock.take(),
+        }
+    }
+
+    #[cfg(all(test, unix))]
+    fn replace_cleanup_registry_for_test(&mut self, registry: Arc<Mutex<ProcessGroupRegistry>>) {
+        self.cleanup_activity = CleanupActivityGuard::reserve_with_registry(registry);
+    }
+}
+
+impl Drop for OwnedTempCapability {
+    fn drop(&mut self) {
+        schedule_temp_dir_cleanup(
+            TempCleanupSlot {
+                temp_dir: &mut self.temp_dir,
+                identity: Some(&self.identity),
+                root: &mut self.root,
+                parent: &mut self.parent,
+                root_name: Some(&self.root_name),
+                activity: &mut self.cleanup_activity,
+                clear_detached_contents: true,
+            },
+            self.cleanup_cancellation.clone(),
+            self.cleanup_deadline,
+            #[cfg(test)]
+            self.cleanup_interlock.clone(),
+        );
+    }
 }
 
 impl fmt::Debug for ProcessOutput {
@@ -237,28 +565,55 @@ impl fmt::Debug for ProcessOutput {
 }
 
 impl ProcessOutput {
-    pub(super) fn close_temp_dir(&mut self) -> Result<(), LocalAgentError> {
+    pub(super) async fn close_temp_dir(&mut self) -> Result<(), LocalAgentError> {
         close_temp_dir(
-            &mut self.temp_dir,
-            self.temp_identity.as_ref(),
-            &mut self.temp_handle,
+            TempCleanupSlot {
+                temp_dir: &mut self.temp_dir,
+                identity: self.temp_identity.as_ref(),
+                root: &mut self.temp_handle,
+                parent: &mut self.temp_parent_handle,
+                root_name: self.temp_name.as_deref(),
+                activity: &mut self.cleanup_activity,
+                clear_detached_contents: false,
+            },
+            &self.cleanup_cancellation,
+            self.cleanup_deadline,
+            #[cfg(test)]
+            self.cleanup_interlock.as_ref(),
         )
+        .await
     }
 }
 
 impl Drop for ProcessOutput {
     fn drop(&mut self) {
-        let _ = self.close_temp_dir();
+        schedule_temp_dir_cleanup(
+            TempCleanupSlot {
+                temp_dir: &mut self.temp_dir,
+                identity: self.temp_identity.as_ref(),
+                root: &mut self.temp_handle,
+                parent: &mut self.temp_parent_handle,
+                root_name: self.temp_name.as_deref(),
+                activity: &mut self.cleanup_activity,
+                clear_detached_contents: false,
+            },
+            self.cleanup_cancellation.clone(),
+            self.cleanup_deadline,
+            #[cfg(test)]
+            self.cleanup_interlock.clone(),
+        );
     }
 }
 
-pub(super) fn create_owned_temp_dir() -> Result<TempDir, LocalAgentError> {
+pub(super) fn create_owned_temp_dir() -> Result<OwnedTempCapability, LocalAgentError> {
+    let cleanup_activity = CleanupActivityGuard::reserve().ok_or_else(cancelled_error)?;
     let base = env::temp_dir().canonicalize().map_err(|_| {
         LocalAgentError::run(
             "local_agent_setup_failed",
             "The local agent could not be prepared.",
         )
     })?;
+    let parent = open_owned_directory(&base)?;
     let mut builder = Builder::new();
     builder.prefix("markdowner-local-agent-");
     #[cfg(unix)]
@@ -269,8 +624,30 @@ pub(super) fn create_owned_temp_dir() -> Result<TempDir, LocalAgentError> {
             "The local agent could not be prepared.",
         )
     })?;
-    verify_owned_directory(directory.path())?;
-    Ok(directory)
+    let path = directory.path().to_path_buf();
+    verify_owned_directory(&path)?;
+    let root = open_owned_directory_at(&parent, path.file_name().ok_or_else(temp_cleanup_error)?)?;
+    let identity = FileIdentity::from_handle_and_path(&root, &path, FileRole::OwnedDirectory)?;
+    let root_name = path.file_name().ok_or_else(temp_cleanup_error)?.to_owned();
+    let capability = OwnedTempCapability {
+        temp_dir: Some(directory),
+        path,
+        identity,
+        root: Some(root),
+        parent: Some(parent),
+        root_name,
+        adapter_files: Vec::new(),
+        early_directories: Vec::new(),
+        cleanup_activity: Some(cleanup_activity),
+        cleanup_cancellation: CancellationToken::new(),
+        cleanup_deadline: StdInstant::now() + PROCESS_CLEANUP_TIMEOUT,
+        #[cfg(test)]
+        setup_interlock: None,
+        #[cfg(test)]
+        cleanup_interlock: None,
+    };
+    capability.verify_path_identity()?;
+    Ok(capability)
 }
 
 pub(super) struct OwnedProcessInvocation {
@@ -279,6 +656,8 @@ pub(super) struct OwnedProcessInvocation {
     temp_dir: Option<TempDir>,
     temp_identity: FileIdentity,
     temp_handle: Option<File>,
+    temp_parent_handle: Option<File>,
+    temp_name: OsString,
     executable_identity: FileIdentity,
     executable_proof: ExecutableProof,
     inherited_environment: BTreeMap<OsString, OsString>,
@@ -287,6 +666,47 @@ pub(super) struct OwnedProcessInvocation {
     owned_directories: Vec<OwnedDirectory>,
     retained_auth_sources: Vec<RetainedSourceFile>,
     result_path: Option<PathBuf>,
+    cleanup_activity: Option<CleanupActivityGuard>,
+    cleanup_cancellation: CancellationToken,
+    cleanup_deadline: StdInstant,
+    #[cfg(test)]
+    spawn_interlock: Option<TestSpawnInterlock>,
+    #[cfg(test)]
+    workspace_spawn_interlock: Option<TestWorkspaceSpawnInterlock>,
+    #[cfg(test)]
+    cleanup_interlock: Option<TestCleanupInterlock>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestSpawnInterlock {
+    before_spawn: std::sync::Arc<std::sync::Barrier>,
+    replacement_ready: std::sync::Arc<std::sync::Barrier>,
+    spawn_returned: std::sync::Arc<std::sync::Barrier>,
+    original_restored: std::sync::Arc<std::sync::Barrier>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestWorkspaceSpawnInterlock {
+    before_spawn: std::sync::Arc<std::sync::Barrier>,
+    replacement_ready: std::sync::Arc<std::sync::Barrier>,
+    spawn_returned: std::sync::Arc<std::sync::Barrier>,
+    child_ready: std::sync::Arc<std::sync::Barrier>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestSetupInterlock {
+    before_create: std::sync::Arc<std::sync::Barrier>,
+    replacement_ready: std::sync::Arc<std::sync::Barrier>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestCleanupInterlock {
+    before_removal: std::sync::Arc<std::sync::Barrier>,
+    replacement_ready: std::sync::Arc<std::sync::Barrier>,
 }
 
 impl fmt::Debug for OwnedProcessInvocation {
@@ -309,7 +729,7 @@ impl fmt::Debug for OwnedProcessInvocation {
 impl OwnedProcessInvocation {
     pub(super) fn prepare(
         invocation: AdapterInvocation,
-        temp_dir: TempDir,
+        temp_dir: OwnedTempCapability,
         executable_proof: ExecutableProof,
         agent_kind: LocalAgentKind,
         cancellation: &CancellationToken,
@@ -328,13 +748,14 @@ impl OwnedProcessInvocation {
 
     fn prepare_with_inherited_environment(
         mut invocation: AdapterInvocation,
-        temp_dir: TempDir,
+        mut temp_dir: OwnedTempCapability,
         executable_proof: ExecutableProof,
         agent_kind: LocalAgentKind,
         cancellation: &CancellationToken,
         deadline: StdInstant,
         inherited_environment: BTreeMap<OsString, OsString>,
     ) -> Result<Self, LocalAgentError> {
+        temp_dir.set_cleanup_context(cancellation, deadline);
         ensure_process_active(cancellation, deadline)?;
         if invocation.stdin.len() > MAX_PROCESS_STDIN_BYTES {
             return Err(LocalAgentError::run(
@@ -342,8 +763,8 @@ impl OwnedProcessInvocation {
                 "The prepared local agent request is too large.",
             ));
         }
+        temp_dir.verify_path_identity()?;
         let temp_path = temp_dir.path().to_path_buf();
-        verify_owned_directory(&temp_path)?;
         if invocation.cwd != temp_path {
             return Err(LocalAgentError::run(
                 "invalid_temp_directory",
@@ -351,9 +772,7 @@ impl OwnedProcessInvocation {
             ));
         }
         invocation.cwd = temp_path.clone();
-        let temp_handle = open_owned_directory(&temp_path)?;
-        let temp_identity =
-            FileIdentity::from_handle_and_path(&temp_handle, &temp_path, FileRole::OwnedDirectory)?;
+        temp_dir.verify_adapter_files()?;
 
         if !invocation.executable.is_absolute()
             || invocation.executable.canonicalize().ok().as_ref() != Some(&invocation.executable)
@@ -389,99 +808,123 @@ impl OwnedProcessInvocation {
         let mut owned_files = Vec::new();
         let mut owned_directories = Vec::new();
         let mut retained_auth_sources = Vec::new();
-        let mut private_directory_paths = BTreeSet::new();
-        if agent_kind == LocalAgentKind::Opencode {
+        if agent_kind == LocalAgentKind::Claude {
+            for name in [
+                CLAUDE_HOME_DIRECTORY,
+                CLAUDE_CONFIG_DIRECTORY,
+                CLAUDE_XDG_CONFIG_DIRECTORY,
+                CLAUDE_CACHE_DIRECTORY,
+                CLAUDE_DATA_DIRECTORY,
+                CLAUDE_STATE_DIRECTORY,
+            ] {
+                owned_directories.push(temp_dir.create_directory(Path::new(name), None)?);
+            }
+        } else if agent_kind == LocalAgentKind::Opencode {
             for name in [
                 OPENCODE_CONFIG_DIRECTORY,
                 OPENCODE_CACHE_DIRECTORY,
                 OPENCODE_DATA_DIRECTORY,
                 OPENCODE_STATE_DIRECTORY,
             ] {
-                let path = temp_path.join(name);
-                owned_directories.push(create_owned_directory(&path)?);
-                private_directory_paths.insert(path);
+                owned_directories.push(temp_dir.create_directory(Path::new(name), None)?);
             }
-            let agent_data_path = temp_path
-                .join(OPENCODE_DATA_DIRECTORY)
-                .join(OPENCODE_DATA_AGENT_DIRECTORY);
-            owned_directories.push(create_owned_directory(&agent_data_path)?);
+            let data_directory = owned_directories
+                .iter()
+                .find(|directory| directory.path == temp_path.join(OPENCODE_DATA_DIRECTORY))
+                .ok_or_else(invalid_environment_error)?;
+            let agent_data_relative =
+                Path::new(OPENCODE_DATA_DIRECTORY).join(OPENCODE_DATA_AGENT_DIRECTORY);
+            let agent_data_directory =
+                temp_dir.create_directory(&agent_data_relative, Some(data_directory))?;
             if let Some((source, auth_file)) = copy_auth_file(
                 opencode_auth_source(&inherited_environment)?,
-                &agent_data_path.join(OPENCODE_AUTH_FILE),
+                &temp_dir,
+                &agent_data_relative.join(OPENCODE_AUTH_FILE),
+                &agent_data_directory,
                 cancellation,
                 deadline,
             )? {
                 retained_auth_sources.push(source);
                 owned_files.push(auth_file);
             }
+            owned_directories.push(agent_data_directory);
         } else if agent_kind == LocalAgentKind::Codex {
-            let codex_home = temp_path.join(CODEX_HOME_DIRECTORY);
-            owned_directories.push(create_owned_directory(&codex_home)?);
-            private_directory_paths.insert(codex_home.clone());
+            let codex_home = temp_dir.create_directory(Path::new(CODEX_HOME_DIRECTORY), None)?;
             if let Some((source, auth_file)) = copy_auth_file(
                 home_auth_source(&inherited_environment, &[".codex", CODEX_AUTH_FILE])?,
-                &codex_home.join(CODEX_AUTH_FILE),
+                &temp_dir,
+                &Path::new(CODEX_HOME_DIRECTORY).join(CODEX_AUTH_FILE),
+                &codex_home,
                 cancellation,
                 deadline,
             )? {
                 retained_auth_sources.push(source);
                 owned_files.push(auth_file);
             }
+            owned_directories.push(codex_home);
         }
-        for entry in fs::read_dir(&temp_path).map_err(|_| {
-            LocalAgentError::run(
-                "invalid_temp_directory",
-                "The local agent temporary directory is invalid.",
-            )
-        })? {
-            let path = entry
-                .map_err(|_| {
-                    LocalAgentError::run(
-                        "invalid_temp_directory",
-                        "The local agent temporary directory is invalid.",
-                    )
-                })?
-                .path();
-            if private_directory_paths.contains(&path) {
-                continue;
-            }
-            if path.parent() != Some(temp_path.as_path()) {
-                return Err(LocalAgentError::run(
-                    "invalid_temp_directory",
-                    "The local agent temporary directory is invalid.",
-                ));
-            }
-            let handle = open_no_follow(&path, true)?;
-            let identity = FileIdentity::from_handle_and_path(&handle, &path, FileRole::OwnedFile)?;
-            owned_files.push(OwnedFile {
-                is_result: result_path.as_deref() == Some(path.as_path()),
-                mutable_private: false,
-                path,
-                handle,
-                identity,
-            });
+        temp_dir.verify_path_identity()?;
+        for file in &temp_dir.adapter_files {
+            file.verify_identity()?;
         }
-        if result_path.is_some() && !owned_files.iter().any(|file| file.is_result) {
+        for file in &owned_files {
+            file.verify_identity()?;
+        }
+        for directory in &owned_directories {
+            directory.verify_identity()?;
+        }
+        verify_root_entries_exact(
+            temp_dir.root.as_ref().ok_or_else(temp_cleanup_error)?,
+            temp_dir
+                .adapter_files
+                .iter()
+                .map(|file| file.path.as_path()),
+            owned_directories
+                .iter()
+                .map(|directory| directory.path.as_path())
+                .filter(|path| path.parent() == Some(temp_path.as_path())),
+        )?;
+        temp_dir.verify_path_identity()?;
+        if result_path.is_some()
+            && !temp_dir
+                .adapter_files
+                .iter()
+                .any(|file| file.is_result && result_path.as_deref() == Some(file.path.as_path()))
+        {
             return Err(LocalAgentError::run(
                 "invalid_result_file",
                 "The local agent result file is invalid.",
             ));
         }
 
+        let mut parts = temp_dir.into_parts();
+        parts.adapter_files.append(&mut owned_files);
+
         Ok(Self {
             invocation,
             agent_kind,
-            temp_dir: Some(temp_dir),
-            temp_identity,
-            temp_handle: Some(temp_handle),
+            temp_dir: Some(parts.temp_dir),
+            temp_identity: parts.identity,
+            temp_handle: Some(parts.root),
+            temp_parent_handle: Some(parts.parent),
+            temp_name: parts.root_name,
             executable_identity,
             executable_proof,
             inherited_environment,
             _executable_handle: executable_handle,
-            owned_files,
+            owned_files: parts.adapter_files,
             owned_directories,
             retained_auth_sources,
             result_path,
+            cleanup_activity: Some(parts.cleanup_activity),
+            cleanup_cancellation: parts.cleanup_cancellation,
+            cleanup_deadline: parts.cleanup_deadline,
+            #[cfg(test)]
+            spawn_interlock: None,
+            #[cfg(test)]
+            workspace_spawn_interlock: None,
+            #[cfg(test)]
+            cleanup_interlock: parts.cleanup_interlock,
         })
     }
 
@@ -511,6 +954,22 @@ impl OwnedProcessInvocation {
             source.verify_identity()?;
         }
         Ok(())
+    }
+
+    fn verify_before_stdin(
+        &self,
+        cancellation: &CancellationToken,
+        deadline: StdInstant,
+    ) -> Result<(), LocalAgentError> {
+        self.verify_before_spawn(cancellation, deadline)?;
+        self.temp_identity.verify_owned_directory_handle(
+            self.temp_handle.as_ref().ok_or_else(temp_cleanup_error)?,
+        )
+    }
+
+    #[cfg(all(test, unix))]
+    fn replace_cleanup_registry_for_test(&mut self, registry: Arc<Mutex<ProcessGroupRegistry>>) {
+        self.cleanup_activity = CleanupActivityGuard::reserve_with_registry(registry);
     }
 
     fn read_result_file(&mut self) -> Result<Option<Vec<u8>>, LocalAgentError> {
@@ -559,84 +1018,278 @@ impl OwnedProcessInvocation {
         Ok(Some(bytes))
     }
 
-    fn close_temp_dir(&mut self) -> Result<(), LocalAgentError> {
+    async fn close_temp_dir(&mut self) -> Result<(), LocalAgentError> {
         close_temp_dir(
-            &mut self.temp_dir,
-            Some(&self.temp_identity),
-            &mut self.temp_handle,
+            TempCleanupSlot {
+                temp_dir: &mut self.temp_dir,
+                identity: Some(&self.temp_identity),
+                root: &mut self.temp_handle,
+                parent: &mut self.temp_parent_handle,
+                root_name: Some(&self.temp_name),
+                activity: &mut self.cleanup_activity,
+                clear_detached_contents: false,
+            },
+            &self.cleanup_cancellation,
+            self.cleanup_deadline,
+            #[cfg(test)]
+            self.cleanup_interlock.as_ref(),
         )
+        .await
     }
 }
 
 impl Drop for OwnedProcessInvocation {
     fn drop(&mut self) {
-        let _ = self.close_temp_dir();
+        schedule_temp_dir_cleanup(
+            TempCleanupSlot {
+                temp_dir: &mut self.temp_dir,
+                identity: Some(&self.temp_identity),
+                root: &mut self.temp_handle,
+                parent: &mut self.temp_parent_handle,
+                root_name: Some(&self.temp_name),
+                activity: &mut self.cleanup_activity,
+                clear_detached_contents: false,
+            },
+            self.cleanup_cancellation.clone(),
+            self.cleanup_deadline,
+            #[cfg(test)]
+            self.cleanup_interlock.clone(),
+        );
     }
 }
 
-fn close_temp_dir(
-    temp_dir: &mut Option<TempDir>,
-    identity: Option<&FileIdentity>,
-    directory_handle: &mut Option<File>,
-) -> Result<(), LocalAgentError> {
-    let Some(directory) = temp_dir.take() else {
-        return Ok(());
-    };
-    let path = directory.path().to_path_buf();
-    if let Some(identity) = identity {
-        let Some(handle) = directory_handle.as_ref() else {
-            let _ = directory.keep();
-            return Err(process_cleanup_error());
-        };
-        if let Err(error) = identity.verify_owned_directory_for_deletion(handle, &path) {
-            let _ = directory.keep();
-            return Err(error);
+struct TempCleanupJob {
+    identity: FileIdentity,
+    root: File,
+    parent: File,
+    root_name: OsString,
+    activity: CleanupActivityGuard,
+    clear_detached_contents: bool,
+    #[cfg(test)]
+    interlock: Option<TestCleanupInterlock>,
+}
+
+struct TempCleanupSlot<'a> {
+    temp_dir: &'a mut Option<TempDir>,
+    identity: Option<&'a FileIdentity>,
+    root: &'a mut Option<File>,
+    parent: &'a mut Option<File>,
+    root_name: Option<&'a OsStr>,
+    activity: &'a mut Option<CleanupActivityGuard>,
+    clear_detached_contents: bool,
+}
+
+struct TempCleanupBudget {
+    cancellation: CancellationToken,
+    watch_cancellation: bool,
+    supervisor_abort: CancellationToken,
+    deadline: StdInstant,
+    remaining_entries: usize,
+}
+
+impl TempCleanupBudget {
+    fn check(&self) -> Result<(), LocalAgentError> {
+        if self.watch_cancellation && self.cancellation.is_cancelled()
+            || self.supervisor_abort.is_cancelled()
+            || StdInstant::now() >= self.deadline
+        {
+            Err(temp_cleanup_error())
+        } else {
+            Ok(())
         }
-    }
-    if fs::remove_dir_all(&path).is_ok() {
-        let _ = directory.keep();
-        directory_handle.take();
-        return Ok(());
     }
 
-    if let Some(identity) = identity {
-        let Some(handle) = directory_handle.as_ref() else {
-            let _ = directory.keep();
-            return Err(process_cleanup_error());
+    fn consume_entry(&mut self) -> Result<(), LocalAgentError> {
+        self.check()?;
+        let Some(remaining) = self.remaining_entries.checked_sub(1) else {
+            return Err(temp_cleanup_error());
         };
-        if identity
-            .verify_owned_directory_for_deletion(handle, &path)
-            .is_err()
-        {
-            let _ = directory.keep();
-            return Err(temp_cleanup_error());
-        }
-        #[cfg(unix)]
-        if unsafe { libc::fchmod(handle.as_raw_fd(), 0o700) } != 0
-            || identity
-                .verify_owned_directory_for_deletion(handle, &path)
-                .is_err()
-        {
-            let _ = directory.keep();
-            return Err(temp_cleanup_error());
-        }
-        #[cfg(unix)]
-        if repair_owned_temp_tree(handle).is_err()
-            || identity
-                .verify_owned_directory_for_deletion(handle, &path)
-                .is_err()
-        {
-            let _ = directory.keep();
-            return Err(temp_cleanup_error());
-        }
+        self.remaining_entries = remaining;
+        Ok(())
     }
-    if fs::remove_dir_all(&path).is_err() {
-        let _ = directory.keep();
+}
+
+async fn close_temp_dir(
+    slot: TempCleanupSlot<'_>,
+    cancellation: &CancellationToken,
+    deadline: StdInstant,
+    #[cfg(test)] cleanup_interlock: Option<&TestCleanupInterlock>,
+) -> Result<(), LocalAgentError> {
+    let Some(job) = take_temp_cleanup_job(
+        slot,
+        #[cfg(test)]
+        cleanup_interlock.cloned(),
+    )?
+    else {
+        return Ok(());
+    };
+    supervise_temp_cleanup(job, cancellation.clone(), deadline).await
+}
+
+fn take_temp_cleanup_job(
+    slot: TempCleanupSlot<'_>,
+    #[cfg(test)] cleanup_interlock: Option<TestCleanupInterlock>,
+) -> Result<Option<TempCleanupJob>, LocalAgentError> {
+    let Some(directory) = slot.temp_dir.take() else {
+        return Ok(None);
+    };
+    let _retained_path = directory.keep();
+    let mut activity = slot.activity.take().ok_or_else(temp_cleanup_error)?;
+    activity.mark_started();
+    Ok(Some(TempCleanupJob {
+        identity: slot.identity.cloned().ok_or_else(temp_cleanup_error)?,
+        root: slot.root.take().ok_or_else(temp_cleanup_error)?,
+        parent: slot.parent.take().ok_or_else(temp_cleanup_error)?,
+        root_name: slot.root_name.ok_or_else(temp_cleanup_error)?.to_owned(),
+        activity,
+        clear_detached_contents: slot.clear_detached_contents,
+        #[cfg(test)]
+        interlock: cleanup_interlock,
+    }))
+}
+
+fn schedule_temp_dir_cleanup(
+    slot: TempCleanupSlot<'_>,
+    cancellation: CancellationToken,
+    deadline: StdInstant,
+    #[cfg(test)] cleanup_interlock: Option<TestCleanupInterlock>,
+) {
+    let Ok(Some(job)) = take_temp_cleanup_job(
+        slot,
+        #[cfg(test)]
+        cleanup_interlock,
+    ) else {
+        return;
+    };
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(async move {
+            let _ = supervise_temp_cleanup(job, cancellation, deadline).await;
+        });
+    } else {
+        let shutdown_cleanup = job.activity.shutdown_started();
+        let deadline = if shutdown_cleanup {
+            StdInstant::now() + PROCESS_CLEANUP_TIMEOUT
+        } else {
+            deadline
+        };
+        let supervisor_abort = CancellationToken::new();
+        let watch_cancellation = !shutdown_cleanup && !cancellation.is_cancelled();
+        let _ = std::thread::Builder::new()
+            .name("local-agent-temp-cleanup".to_string())
+            .spawn(move || {
+                let _ = run_temp_cleanup_job(
+                    job,
+                    cancellation,
+                    watch_cancellation,
+                    supervisor_abort,
+                    deadline,
+                );
+            });
+    }
+}
+
+async fn supervise_temp_cleanup(
+    job: TempCleanupJob,
+    cancellation: CancellationToken,
+    mut deadline: StdInstant,
+) -> Result<(), LocalAgentError> {
+    let shutdown_cleanup = job.activity.shutdown_started();
+    if shutdown_cleanup {
+        deadline = StdInstant::now() + PROCESS_CLEANUP_TIMEOUT;
+    }
+    if StdInstant::now() >= deadline {
         return Err(temp_cleanup_error());
     }
-    let _ = directory.keep();
-    directory_handle.take();
-    Ok(())
+    let watch_cancellation = !shutdown_cleanup && !cancellation.is_cancelled();
+    let supervisor_abort = CancellationToken::new();
+    let worker_abort = supervisor_abort.clone();
+    let worker_cancellation = cancellation.clone();
+    let mut worker = tokio::task::spawn_blocking(move || {
+        run_temp_cleanup_job(
+            job,
+            worker_cancellation,
+            watch_cancellation,
+            worker_abort,
+            deadline,
+        )
+    });
+    tokio::select! {
+        biased;
+        result = &mut worker => result.map_err(|_| temp_cleanup_error())?,
+        () = cancellation.cancelled(), if watch_cancellation => {
+            supervisor_abort.cancel();
+            Err(temp_cleanup_error())
+        }
+        () = tokio::time::sleep_until(TokioInstant::from_std(deadline)) => {
+            supervisor_abort.cancel();
+            Err(temp_cleanup_error())
+        }
+    }
+}
+
+fn run_temp_cleanup_job(
+    mut job: TempCleanupJob,
+    cancellation: CancellationToken,
+    watch_cancellation: bool,
+    supervisor_abort: CancellationToken,
+    deadline: StdInstant,
+) -> Result<(), LocalAgentError> {
+    let mut budget = TempCleanupBudget {
+        cancellation,
+        watch_cancellation,
+        supervisor_abort,
+        deadline,
+        remaining_entries: MAX_TEMP_CLEANUP_ENTRIES,
+    };
+    budget.check()?;
+    if job.clear_detached_contents {
+        job.identity.verify_owned_directory_handle(&job.root)?;
+    } else {
+        job.identity
+            .verify_owned_directory_at(&job.parent, &job.root_name, &job.root)?;
+    }
+    #[cfg(test)]
+    if let Some(interlock) = &job.interlock {
+        interlock.before_removal.wait();
+        interlock.replacement_ready.wait();
+    }
+    budget.check()?;
+    if job.clear_detached_contents {
+        job.identity.verify_owned_directory_handle(&job.root)?;
+    } else {
+        job.identity
+            .verify_owned_directory_at(&job.parent, &job.root_name, &job.root)?;
+    }
+
+    #[cfg(unix)]
+    {
+        if unsafe { libc::fchmod(job.root.as_raw_fd(), 0o700) } != 0 {
+            return Err(temp_cleanup_error());
+        }
+        remove_owned_directory_entries(job.root.as_raw_fd(), 0, &mut budget)?;
+        budget.check()?;
+        job.identity
+            .verify_owned_directory_at(&job.parent, &job.root_name, &job.root)?;
+        let root_name = CString::new(job.root_name.as_bytes()).map_err(|_| temp_cleanup_error())?;
+        budget.check()?;
+        if unsafe {
+            libc::unlinkat(
+                job.parent.as_raw_fd(),
+                root_name.as_ptr(),
+                libc::AT_REMOVEDIR,
+            )
+        } != 0
+        {
+            return Err(temp_cleanup_error());
+        }
+        job.activity.mark_succeeded();
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = job;
+        Err(temp_cleanup_error())
+    }
 }
 
 fn temp_cleanup_error() -> LocalAgentError {
@@ -647,34 +1300,34 @@ fn temp_cleanup_error() -> LocalAgentError {
 }
 
 #[cfg(unix)]
-fn repair_owned_temp_tree(root: &File) -> Result<(), LocalAgentError> {
-    let mut remaining_entries = MAX_TEMP_CLEANUP_ENTRIES;
-    repair_owned_directory_entries(root.as_raw_fd(), 0, &mut remaining_entries)
-}
-
-#[cfg(unix)]
-fn repair_owned_directory_entries(
+fn remove_owned_directory_entries(
     directory_fd: std::os::fd::RawFd,
     depth: usize,
-    remaining_entries: &mut usize,
+    budget: &mut TempCleanupBudget,
 ) -> Result<(), LocalAgentError> {
+    budget.check()?;
     if depth > MAX_TEMP_CLEANUP_DEPTH {
-        return Err(process_cleanup_error());
+        return Err(temp_cleanup_error());
     }
+    if unsafe { libc::lseek(directory_fd, 0, libc::SEEK_SET) } < 0 {
+        return Err(temp_cleanup_error());
+    }
+    budget.check()?;
     let duplicate = unsafe { libc::fcntl(directory_fd, libc::F_DUPFD_CLOEXEC, 0) };
     if duplicate < 0 {
-        return Err(process_cleanup_error());
+        return Err(temp_cleanup_error());
     }
     let stream = unsafe { libc::fdopendir(duplicate) };
     if stream.is_null() {
         unsafe {
             libc::close(duplicate);
         }
-        return Err(process_cleanup_error());
+        return Err(temp_cleanup_error());
     }
 
     let result = (|| {
         loop {
+            budget.check()?;
             let entry = unsafe { libc::readdir(stream) };
             if entry.is_null() {
                 break;
@@ -683,10 +1336,7 @@ fn repair_owned_directory_entries(
             if name.to_bytes() == b"." || name.to_bytes() == b".." {
                 continue;
             }
-            let Some(next_remaining) = remaining_entries.checked_sub(1) else {
-                return Err(process_cleanup_error());
-            };
-            *remaining_entries = next_remaining;
+            budget.consume_entry()?;
 
             let mut captured = std::mem::MaybeUninit::<libc::stat>::uninit();
             if unsafe {
@@ -698,25 +1348,33 @@ fn repair_owned_directory_entries(
                 )
             } != 0
             {
-                return Err(process_cleanup_error());
+                return Err(temp_cleanup_error());
             }
             let captured = unsafe { captured.assume_init() };
+            if captured.st_uid != unsafe { libc::geteuid() } {
+                return Err(temp_cleanup_error());
+            }
             if captured.st_mode & libc::S_IFMT != libc::S_IFDIR {
+                budget.check()?;
+                if unsafe { libc::unlinkat(directory_fd, name.as_ptr(), 0) } != 0 {
+                    return Err(temp_cleanup_error());
+                }
                 continue;
             }
-            if captured.st_uid != unsafe { libc::geteuid() }
-                || unsafe {
-                    libc::fchmodat(
-                        directory_fd,
-                        name.as_ptr(),
-                        0o700,
-                        libc::AT_SYMLINK_NOFOLLOW,
-                    )
-                } != 0
+            budget.check()?;
+            if unsafe {
+                libc::fchmodat(
+                    directory_fd,
+                    name.as_ptr(),
+                    0o700,
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            } != 0
             {
-                return Err(process_cleanup_error());
+                return Err(temp_cleanup_error());
             }
 
+            budget.check()?;
             let child_fd = unsafe {
                 libc::openat(
                     directory_fd,
@@ -725,12 +1383,12 @@ fn repair_owned_directory_entries(
                 )
             };
             if child_fd < 0 {
-                return Err(process_cleanup_error());
+                return Err(temp_cleanup_error());
             }
             let child = unsafe { File::from_raw_fd(child_fd) };
             let mut opened = std::mem::MaybeUninit::<libc::stat>::uninit();
             if unsafe { libc::fstat(child.as_raw_fd(), opened.as_mut_ptr()) } != 0 {
-                return Err(process_cleanup_error());
+                return Err(temp_cleanup_error());
             }
             let opened = unsafe { opened.assume_init() };
             if opened.st_dev != captured.st_dev
@@ -739,9 +1397,31 @@ fn repair_owned_directory_entries(
                 || opened.st_mode & libc::S_IFMT != libc::S_IFDIR
                 || unsafe { libc::fchmod(child.as_raw_fd(), 0o700) } != 0
             {
-                return Err(process_cleanup_error());
+                return Err(temp_cleanup_error());
             }
-            repair_owned_directory_entries(child.as_raw_fd(), depth + 1, remaining_entries)?;
+            remove_owned_directory_entries(child.as_raw_fd(), depth + 1, budget)?;
+            budget.check()?;
+            let mut current = std::mem::MaybeUninit::<libc::stat>::uninit();
+            if unsafe {
+                libc::fstatat(
+                    directory_fd,
+                    name.as_ptr(),
+                    current.as_mut_ptr(),
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            } != 0
+            {
+                return Err(temp_cleanup_error());
+            }
+            let current = unsafe { current.assume_init() };
+            if current.st_dev != opened.st_dev
+                || current.st_ino != opened.st_ino
+                || current.st_uid != opened.st_uid
+                || current.st_mode & libc::S_IFMT != libc::S_IFDIR
+                || unsafe { libc::unlinkat(directory_fd, name.as_ptr(), libc::AT_REMOVEDIR) } != 0
+            {
+                return Err(temp_cleanup_error());
+            }
         }
         Ok(())
     })();
@@ -772,17 +1452,34 @@ impl OwnedDirectory {
     }
 }
 
-fn create_owned_directory(path: &Path) -> Result<OwnedDirectory, LocalAgentError> {
-    let mut builder = fs::DirBuilder::new();
+fn create_owned_directory_at(
+    parent: &File,
+    name: &OsStr,
+    path: &Path,
+) -> Result<OwnedDirectory, LocalAgentError> {
     #[cfg(unix)]
-    builder.mode(0o700);
-    builder.create(path).map_err(|_| {
-        LocalAgentError::run(
-            "local_agent_setup_failed",
-            "The local agent could not be prepared.",
-        )
-    })?;
-    let handle = open_owned_directory(path)?;
+    {
+        let name =
+            CString::new(name.as_bytes()).map_err(|_| identity_error(FileRole::OwnedDirectory))?;
+        if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) } != 0 {
+            return Err(LocalAgentError::run(
+                "local_agent_setup_failed",
+                "The local agent could not be prepared.",
+            ));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+        let mut builder = fs::DirBuilder::new();
+        builder.create(path).map_err(|_| {
+            LocalAgentError::run(
+                "local_agent_setup_failed",
+                "The local agent could not be prepared.",
+            )
+        })?;
+    }
+    let handle = open_owned_directory_at(parent, name)?;
     let identity = FileIdentity::from_handle_and_path(&handle, path, FileRole::OwnedDirectory)?;
     Ok(OwnedDirectory {
         path: path.to_path_buf(),
@@ -828,19 +1525,24 @@ impl RetainedSourceFile {
 
 fn copy_auth_file(
     source: Option<PathBuf>,
+    workspace: &OwnedTempCapability,
     destination: &Path,
+    destination_parent: &OwnedDirectory,
     cancellation: &CancellationToken,
     deadline: StdInstant,
 ) -> Result<Option<(RetainedSourceFile, OwnedFile)>, LocalAgentError> {
     let Some(source) = source else {
         return Ok(None);
     };
+    workspace.verify_path_identity()?;
     match fs::symlink_metadata(&source) {
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(invalid_environment_error()),
         Ok(_) => {}
     }
+    workspace.verify_path_identity()?;
     ensure_process_active(cancellation, deadline)?;
+    workspace.verify_path_identity()?;
     let mut source_handle =
         open_no_follow(&source, false).map_err(|_| invalid_environment_error())?;
     let source_identity =
@@ -877,32 +1579,13 @@ fn copy_auth_file(
     source_identity
         .verify_handle_and_path(&source_handle, &source, FileRole::OwnedFile)
         .map_err(|_| invalid_environment_error())?;
+    workspace.verify_path_identity()?;
     ensure_process_active(cancellation, deadline)?;
     let source_sha256 = <[u8; 32]>::from(Sha256::digest(&bytes));
-
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create_new(true);
-    #[cfg(unix)]
-    options
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    let mut handle = options.open(destination).map_err(|_| {
-        LocalAgentError::run(
-            "local_agent_setup_failed",
-            "The local agent could not be prepared.",
-        )
-    })?;
-    handle
-        .write_all(&bytes)
-        .and_then(|()| handle.sync_all())
-        .map_err(|_| {
-            LocalAgentError::run(
-                "local_agent_setup_failed",
-                "The local agent could not be prepared.",
-            )
-        })?;
+    let destination_result = workspace.create_private_file(destination, destination_parent, &bytes);
     bytes.fill(0);
-    let identity = FileIdentity::from_handle_and_path(&handle, destination, FileRole::OwnedFile)?;
+    let destination = destination_result?;
+    workspace.verify_path_identity()?;
     ensure_process_active(cancellation, deadline)?;
     Ok(Some((
         RetainedSourceFile {
@@ -911,13 +1594,7 @@ fn copy_auth_file(
             identity: source_identity,
             content_sha256: source_sha256,
         },
-        OwnedFile {
-            path: destination.to_path_buf(),
-            handle,
-            identity,
-            is_result: false,
-            mutable_private: true,
-        },
+        destination,
     )))
 }
 
@@ -1084,6 +1761,7 @@ impl FileIdentity {
         Ok(())
     }
 
+    #[cfg(not(unix))]
     fn verify_owned_directory_for_deletion(
         &self,
         handle: &File,
@@ -1108,6 +1786,72 @@ impl FileIdentity {
             || self.device != handle_metadata.dev()
             || self.inode != handle_metadata.ino()
             || self.owner != handle_metadata.uid()
+        {
+            return Err(identity_error(FileRole::OwnedDirectory));
+        }
+        Ok(())
+    }
+
+    fn verify_owned_directory_at(
+        &self,
+        parent: &File,
+        name: &OsStr,
+        handle: &File,
+    ) -> Result<(), LocalAgentError> {
+        #[cfg(unix)]
+        {
+            if Path::new(name).components().count() != 1 {
+                return Err(identity_error(FileRole::OwnedDirectory));
+            }
+            let name = CString::new(name.as_bytes())
+                .map_err(|_| identity_error(FileRole::OwnedDirectory))?;
+            let mut captured = std::mem::MaybeUninit::<libc::stat>::uninit();
+            if unsafe {
+                libc::fstatat(
+                    parent.as_raw_fd(),
+                    name.as_ptr(),
+                    captured.as_mut_ptr(),
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            } != 0
+            {
+                return Err(identity_error(FileRole::OwnedDirectory));
+            }
+            let captured = unsafe { captured.assume_init() };
+            let metadata = handle
+                .metadata()
+                .map_err(|_| identity_error(FileRole::OwnedDirectory))?;
+            if captured.st_mode & libc::S_IFMT != libc::S_IFDIR
+                || self.device != captured.st_dev as u64
+                || self.inode != captured.st_ino
+                || self.owner != captured.st_uid
+                || self.device != metadata.dev()
+                || self.inode != metadata.ino()
+                || self.owner != metadata.uid()
+                || !metadata.is_dir()
+            {
+                return Err(identity_error(FileRole::OwnedDirectory));
+            }
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (parent, name);
+            self.verify_owned_directory_for_deletion(handle, &self.canonical_path)
+        }
+    }
+
+    fn verify_owned_directory_handle(&self, handle: &File) -> Result<(), LocalAgentError> {
+        let metadata = handle
+            .metadata()
+            .map_err(|_| identity_error(FileRole::OwnedDirectory))?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(identity_error(FileRole::OwnedDirectory));
+        }
+        #[cfg(unix)]
+        if self.device != metadata.dev()
+            || self.inode != metadata.ino()
+            || self.owner != metadata.uid()
         {
             return Err(identity_error(FileRole::OwnedDirectory));
         }
@@ -1207,6 +1951,124 @@ fn open_owned_directory(path: &Path) -> Result<File, LocalAgentError> {
     })
 }
 
+fn open_owned_directory_at(parent: &File, name: &OsStr) -> Result<File, LocalAgentError> {
+    #[cfg(unix)]
+    {
+        let name =
+            CString::new(name.as_bytes()).map_err(|_| identity_error(FileRole::OwnedDirectory))?;
+        let fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(identity_error(FileRole::OwnedDirectory));
+        }
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (parent, name);
+        Err(identity_error(FileRole::OwnedDirectory))
+    }
+}
+
+fn create_owned_file_at(parent: &File, name: &OsStr) -> Result<File, LocalAgentError> {
+    #[cfg(unix)]
+    {
+        let name =
+            CString::new(name.as_bytes()).map_err(|_| identity_error(FileRole::OwnedFile))?;
+        let fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600,
+            )
+        };
+        if fd < 0 {
+            return Err(identity_error(FileRole::OwnedFile));
+        }
+        let file = unsafe { File::from_raw_fd(fd) };
+        if unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0 {
+            return Err(identity_error(FileRole::OwnedFile));
+        }
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (parent, name);
+        Err(identity_error(FileRole::OwnedFile))
+    }
+}
+
+fn verify_root_entries_exact<'a>(
+    root: &File,
+    files: impl IntoIterator<Item = &'a Path>,
+    directories: impl IntoIterator<Item = &'a Path>,
+) -> Result<(), LocalAgentError> {
+    let expected = files
+        .into_iter()
+        .chain(directories)
+        .map(|path| {
+            path.file_name()
+                .map(OsStr::to_owned)
+                .ok_or_else(|| identity_error(FileRole::OwnedDirectory))
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    #[cfg(unix)]
+    {
+        let duplicate = unsafe { libc::fcntl(root.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
+        if duplicate < 0 {
+            return Err(identity_error(FileRole::OwnedDirectory));
+        }
+        if unsafe { libc::lseek(duplicate, 0, libc::SEEK_SET) } < 0 {
+            unsafe {
+                libc::close(duplicate);
+            }
+            return Err(identity_error(FileRole::OwnedDirectory));
+        }
+        let stream = unsafe { libc::fdopendir(duplicate) };
+        if stream.is_null() {
+            unsafe {
+                libc::close(duplicate);
+            }
+            return Err(identity_error(FileRole::OwnedDirectory));
+        }
+        let result = {
+            let mut actual = BTreeSet::new();
+            loop {
+                let entry = unsafe { libc::readdir(stream) };
+                if entry.is_null() {
+                    break;
+                }
+                let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+                if name.to_bytes() == b"." || name.to_bytes() == b".." {
+                    continue;
+                }
+                actual.insert(OsStr::from_bytes(name.to_bytes()).to_owned());
+            }
+            (actual == expected).then_some(()).ok_or_else(|| {
+                LocalAgentError::run(
+                    "invalid_temp_directory",
+                    "The local agent temporary directory is invalid.",
+                )
+            })
+        };
+        unsafe {
+            libc::closedir(stream);
+        }
+        result
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (root, expected);
+        Err(identity_error(FileRole::OwnedDirectory))
+    }
+}
+
 pub(super) fn controlled_environment(
     inherited: BTreeMap<OsString, OsString>,
     overrides: &[(OsString, OsString)],
@@ -1246,7 +2108,7 @@ pub(super) fn controlled_environment(
 fn controlled_environment_for_agent(
     inherited: BTreeMap<OsString, OsString>,
     overrides: &[(OsString, OsString)],
-    cwd: &Path,
+    _cwd: &Path,
     agent_kind: LocalAgentKind,
     proof_environment_path: &OsStr,
 ) -> Result<BTreeMap<OsString, OsString>, LocalAgentError> {
@@ -1272,8 +2134,7 @@ fn controlled_environment_for_agent(
         OsString::from("PATH"),
         normalized_safe_path(proof_environment_path)?,
     );
-    environment.insert(OsString::from("TMPDIR"), cwd.as_os_str().to_owned());
-    environment.insert(OsString::from("PWD"), cwd.as_os_str().to_owned());
+    environment.insert(OsString::from("TMPDIR"), OsString::from("."));
     for (name, value) in overrides {
         if !valid_environment_name(name) || protected_final_environment_name(name) {
             return Err(invalid_environment_error());
@@ -1333,10 +2194,28 @@ fn controlled_environment_for_agent(
             OsString::from("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),
             OsString::from("1"),
         );
+        for (name, directory) in [
+            ("HOME", CLAUDE_HOME_DIRECTORY),
+            ("CLAUDE_CONFIG_DIR", CLAUDE_CONFIG_DIRECTORY),
+            ("XDG_CONFIG_HOME", CLAUDE_XDG_CONFIG_DIRECTORY),
+            ("XDG_CACHE_HOME", CLAUDE_CACHE_DIRECTORY),
+            ("XDG_DATA_HOME", CLAUDE_DATA_DIRECTORY),
+            ("XDG_STATE_HOME", CLAUDE_STATE_DIRECTORY),
+        ] {
+            environment.insert(OsString::from(name), OsString::from(directory));
+        }
+        for name in [
+            "CLAUDE_CODE_SAFE_MODE",
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+            "CLAUDE_CODE_DISABLE_CLAUDE_MDS",
+            "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS",
+        ] {
+            environment.insert(OsString::from(name), OsString::from("1"));
+        }
     } else if agent_kind == LocalAgentKind::Codex {
         environment.insert(
             OsString::from("CODEX_HOME"),
-            cwd.join(CODEX_HOME_DIRECTORY).into_os_string(),
+            OsString::from(CODEX_HOME_DIRECTORY),
         );
     } else if agent_kind == LocalAgentKind::Opencode {
         for (name, directory) in [
@@ -1345,7 +2224,7 @@ fn controlled_environment_for_agent(
             ("XDG_DATA_HOME", OPENCODE_DATA_DIRECTORY),
             ("XDG_STATE_HOME", OPENCODE_STATE_DIRECTORY),
         ] {
-            environment.insert(OsString::from(name), cwd.join(directory).into_os_string());
+            environment.insert(OsString::from(name), OsString::from(directory));
         }
         environment.insert(
             OsString::from("OPENCODE_DISABLE_CLAUDE_CODE"),
@@ -1505,9 +2384,12 @@ pub(super) async fn run_process(
     cancellation: CancellationToken,
     deadline: StdInstant,
 ) -> Result<ProcessOutput, LocalAgentError> {
-    let result = run_process_inner(&mut owned, cancellation, deadline).await;
+    owned.cleanup_cancellation = cancellation.clone();
+    owned.cleanup_deadline = deadline;
+    let process_deadline = process_execution_deadline(deadline);
+    let result = run_process_inner(&mut owned, cancellation, process_deadline).await;
     match result {
-        Err(error) => match owned.close_temp_dir() {
+        Err(error) => match owned.close_temp_dir().await {
             Ok(()) => Err(error),
             Err(cleanup_error) => Err(cleanup_error),
         },
@@ -1515,9 +2397,24 @@ pub(super) async fn run_process(
             output.temp_dir = owned.temp_dir.take();
             output.temp_identity = Some(owned.temp_identity.clone());
             output.temp_handle = owned.temp_handle.take();
+            output.temp_parent_handle = owned.temp_parent_handle.take();
+            output.temp_name = Some(owned.temp_name.clone());
+            output.cleanup_activity = owned.cleanup_activity.take();
+            output.cleanup_deadline = deadline;
+            #[cfg(test)]
+            {
+                output.cleanup_interlock = owned.cleanup_interlock.take();
+            }
             Ok(output)
         }
     }
+}
+
+fn process_execution_deadline(deadline: StdInstant) -> StdInstant {
+    let remaining = deadline.saturating_duration_since(StdInstant::now());
+    let maximum_cleanup_reserve = PROCESS_CLEANUP_TIMEOUT + Duration::from_millis(250);
+    let cleanup_reserve = (remaining - remaining / 4).min(maximum_cleanup_reserve);
+    deadline.checked_sub(cleanup_reserve).unwrap_or(deadline)
 }
 
 async fn run_process_inner(
@@ -1540,32 +2437,63 @@ async fn run_process_inner(
         owned.executable_proof.environment_path(),
     )?;
     ensure_process_active(&cancellation, absolute_deadline)?;
+    #[cfg(test)]
+    if let Some(interlock) = &owned.spawn_interlock {
+        interlock.before_spawn.wait();
+        interlock.replacement_ready.wait();
+    }
+    #[cfg(test)]
+    if let Some(interlock) = &owned.workspace_spawn_interlock {
+        interlock.before_spawn.wait();
+        interlock.replacement_ready.wait();
+    }
+    #[cfg(unix)]
+    let child_workspace = duplicate_owned_root_fd(
+        owned.temp_handle.as_ref().ok_or_else(temp_cleanup_error)?,
+        &owned.temp_identity,
+    )?;
+    #[cfg(unix)]
+    let child_workspace_fd = child_workspace.as_raw_fd();
     let mut command = Command::new(&owned.invocation.executable);
     command
         .args(&owned.invocation.args)
-        .current_dir(&owned.invocation.cwd)
         .env_clear()
         .envs(environment)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    #[cfg(not(unix))]
+    command.current_dir(&owned.invocation.cwd);
     #[cfg(unix)]
     {
         command.as_std_mut().process_group(0);
         unsafe {
             command
                 .as_std_mut()
-                .pre_exec(configure_child_file_size_limit);
+                .pre_exec(move || configure_child_process(child_workspace_fd));
         }
     }
 
-    let mut child = command.spawn().map_err(|_| {
+    let spawned = command.spawn();
+    #[cfg(unix)]
+    drop(child_workspace);
+    let mut child = spawned.map_err(|_| {
         LocalAgentError::run(
             "local_agent_spawn_failed",
             "The local agent could not be started.",
         )
     })?;
+    #[cfg(test)]
+    if let Some(interlock) = &owned.spawn_interlock {
+        interlock.spawn_returned.wait();
+        interlock.original_restored.wait();
+    }
+    #[cfg(test)]
+    if let Some(interlock) = &owned.workspace_spawn_interlock {
+        interlock.spawn_returned.wait();
+        interlock.child_ready.wait();
+    }
     let process_group_id = child_process_group_id(&child)?;
     let mut process_group = match RegisteredProcessGroup::register(process_group_id) {
         Ok(process_group) => process_group,
@@ -1575,6 +2503,11 @@ async fn run_process_inner(
             return Err(cancelled_error());
         }
     };
+    if let Err(error) = owned.verify_before_stdin(&cancellation, absolute_deadline) {
+        let cleanup = terminate_and_reap(&mut child, &mut process_group).await;
+        cleanup?;
+        return Err(error);
+    }
     if let Err(error) = verify_executable_proof(
         &owned.executable_proof,
         &owned.invocation.executable,
@@ -1733,6 +2666,13 @@ async fn run_process_inner(
         temp_dir: None,
         temp_identity: None,
         temp_handle: None,
+        temp_parent_handle: None,
+        temp_name: None,
+        cleanup_activity: None,
+        cleanup_cancellation: cancellation.clone(),
+        cleanup_deadline: absolute_deadline,
+        #[cfg(test)]
+        cleanup_interlock: None,
     })
 }
 
@@ -1756,6 +2696,44 @@ async fn write_stdin(
         return Err(io_error());
     }
     Ok(StdinWriteOutcome::Complete)
+}
+
+#[cfg(unix)]
+fn duplicate_owned_root_fd(root: &File, identity: &FileIdentity) -> Result<File, LocalAgentError> {
+    identity.verify_owned_directory_handle(root)?;
+    let root_fd = root.as_raw_fd();
+    if root_fd < 3 {
+        return Err(identity_error(FileRole::OwnedDirectory));
+    }
+    let duplicate = unsafe { libc::fcntl(root_fd, libc::F_DUPFD, 3) };
+    if duplicate < 3 {
+        if duplicate >= 0 {
+            unsafe {
+                libc::close(duplicate);
+            }
+        }
+        return Err(identity_error(FileRole::OwnedDirectory));
+    }
+    let duplicate = unsafe { File::from_raw_fd(duplicate) };
+    identity.verify_owned_directory_handle(&duplicate)?;
+    Ok(duplicate)
+}
+
+#[cfg(unix)]
+fn configure_child_process(root_fd: i32) -> std::io::Result<()> {
+    configure_child_file_size_limit()?;
+    if root_fd < 3 {
+        return Err(std::io::Error::from_raw_os_error(libc::EBADF));
+    }
+    if unsafe { libc::fchdir(root_fd) } == 0 {
+        if unsafe { libc::close(root_fd) } == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 #[cfg(unix)]
@@ -1867,21 +2845,93 @@ pub(super) struct RegisteredProcessGroup {
 }
 
 pub(super) struct ProcessActivityGuard {
+    #[cfg(unix)]
+    registry: Arc<Mutex<ProcessGroupRegistry>>,
     active: bool,
+}
+
+struct CleanupActivityGuard {
+    #[cfg(unix)]
+    registry: Arc<Mutex<ProcessGroupRegistry>>,
+    active: bool,
+    cleanup_started: bool,
+    succeeded: bool,
 }
 
 impl ProcessActivityGuard {
     pub(super) fn begin() -> Option<Self> {
         #[cfg(unix)]
         {
-            let mut registry = live_process_groups()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            registry.begin_operation().then_some(Self { active: true })
+            Self::begin_with_registry(Arc::clone(live_process_groups()))
         }
         #[cfg(not(unix))]
         {
             Some(Self { active: true })
+        }
+    }
+
+    #[cfg(unix)]
+    fn begin_with_registry(registry: Arc<Mutex<ProcessGroupRegistry>>) -> Option<Self> {
+        let admitted = registry
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .begin_provider_operation();
+        admitted.then(|| Self {
+            registry,
+            active: true,
+        })
+    }
+}
+
+impl CleanupActivityGuard {
+    fn reserve() -> Option<Self> {
+        #[cfg(unix)]
+        {
+            Self::reserve_with_registry(Arc::clone(live_process_groups()))
+        }
+        #[cfg(not(unix))]
+        {
+            Some(Self {
+                active: true,
+                cleanup_started: false,
+                succeeded: false,
+            })
+        }
+    }
+
+    #[cfg(unix)]
+    fn reserve_with_registry(registry: Arc<Mutex<ProcessGroupRegistry>>) -> Option<Self> {
+        let admitted = registry
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .reserve_cleanup_activity();
+        admitted.then(|| Self {
+            registry,
+            active: true,
+            cleanup_started: false,
+            succeeded: false,
+        })
+    }
+
+    fn mark_started(&mut self) {
+        self.cleanup_started = true;
+    }
+
+    fn mark_succeeded(&mut self) {
+        self.succeeded = true;
+    }
+
+    fn shutdown_started(&self) -> bool {
+        #[cfg(unix)]
+        {
+            self.registry
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .shutting_down
+        }
+        #[cfg(not(unix))]
+        {
+            false
         }
     }
 }
@@ -1890,10 +2940,23 @@ impl Drop for ProcessActivityGuard {
     fn drop(&mut self) {
         #[cfg(unix)]
         if self.active {
-            live_process_groups()
+            self.registry
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .finish_operation();
+                .finish_provider_operation();
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for CleanupActivityGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if self.active {
+            self.registry
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .finish_cleanup_activity(!self.cleanup_started || self.succeeded);
             self.active = false;
         }
     }
@@ -2049,8 +3112,8 @@ impl Drop for RegisteredProcessGroup {
 }
 
 #[cfg(unix)]
-fn live_process_groups() -> &'static Mutex<ProcessGroupRegistry> {
-    LIVE_PROCESS_GROUPS.get_or_init(|| Mutex::new(ProcessGroupRegistry::default()))
+fn live_process_groups() -> &'static Arc<Mutex<ProcessGroupRegistry>> {
+    LIVE_PROCESS_GROUPS.get_or_init(|| Arc::new(Mutex::new(ProcessGroupRegistry::default())))
 }
 
 #[cfg(unix)]
@@ -2263,18 +3326,29 @@ pub(super) fn begin_process_shutdown() {
 }
 
 pub(super) async fn wait_for_process_groups_idle(timeout: Duration) -> bool {
+    #[cfg(unix)]
+    return wait_for_registry_idle(Arc::clone(live_process_groups()), timeout).await;
+    #[cfg(not(unix))]
+    {
+        let _ = timeout;
+        true
+    }
+}
+
+#[cfg(unix)]
+async fn wait_for_registry_idle(
+    registry: Arc<Mutex<ProcessGroupRegistry>>,
+    timeout: Duration,
+) -> bool {
     let deadline = TokioInstant::now() + timeout;
     loop {
-        #[cfg(unix)]
-        if live_process_groups()
+        if registry
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .is_idle()
         {
             return true;
         }
-        #[cfg(not(unix))]
-        return true;
 
         let now = TokioInstant::now();
         if now >= deadline {
@@ -2423,7 +3497,9 @@ mod tests {
         env,
         ffi::{OsStr, OsString},
         fs,
+        io::Write,
         path::{Path, PathBuf},
+        sync::{Arc, Mutex},
         time::{Duration, Instant as StdInstant},
     };
 
@@ -2445,12 +3521,16 @@ mod tests {
     };
     #[cfg(unix)]
     use super::{
-        ProcessGroupRegistry, RegisteredProcessGroup, process_group_is_registered,
-        terminate_and_reap, wait_for_group_exit,
+        ProcessActivityGuard, ProcessGroupRegistry, RegisteredProcessGroup,
+        process_group_is_registered, terminate_and_reap, wait_for_group_exit,
+        wait_for_registry_idle,
     };
     use crate::local_agents::{
-        LocalAgentKind, adapters::AdapterInvocation, discovery::ExecutableProof,
+        LocalAgentKind, LocalAgentRunRequest, LocalAgentTargetKind, ResolvedAgent,
+        adapters::{AdapterInvocation, build_invocation},
+        discovery::ExecutableProof,
     };
+    use markdowner_core::ai_document::ByteRange;
 
     #[cfg(unix)]
     fn fake_executable(script: &str) -> (TempDir, PathBuf) {
@@ -2478,9 +3558,34 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    fn local_agent_request(agent: LocalAgentKind, request_id: &str) -> LocalAgentRunRequest {
+        let source = "# private captured source\n".to_string();
+        LocalAgentRunRequest {
+            request_id: request_id.to_string(),
+            document_id: "document-1".to_string(),
+            agent,
+            target: LocalAgentTargetKind::Selection,
+            selection: Some(ByteRange {
+                start: 0,
+                end: source.len(),
+            }),
+            cursor: None,
+            source,
+            instruction: "private instruction".to_string(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_private_file(path: &Path, contents: &[u8]) {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true).mode(0o600);
+        options.open(path).unwrap().write_all(contents).unwrap();
+    }
+
     fn prepare_owned(
         invocation: AdapterInvocation,
-        temp_dir: TempDir,
+        temp_dir: super::OwnedTempCapability,
     ) -> Result<OwnedProcessInvocation, crate::local_agents::LocalAgentError> {
         let proof = ExecutableProof::capture(&invocation.executable).unwrap();
         OwnedProcessInvocation::prepare(
@@ -2495,7 +3600,7 @@ mod tests {
 
     fn prepare_owned_for_kind_with_environment(
         invocation: AdapterInvocation,
-        temp_dir: TempDir,
+        temp_dir: super::OwnedTempCapability,
         agent_kind: LocalAgentKind,
         inherited_environment: BTreeMap<OsString, OsString>,
     ) -> Result<OwnedProcessInvocation, crate::local_agents::LocalAgentError> {
@@ -2595,6 +3700,36 @@ mod tests {
     }
 
     #[cfg(unix)]
+    async fn wait_for_temp_path_removal(path: &Path) {
+        let deadline = StdInstant::now() + super::PROCESS_CLEANUP_TIMEOUT;
+        while path.exists() {
+            assert!(
+                StdInstant::now() < deadline,
+                "owned temporary directory cleanup exceeded its bound"
+            );
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_empty_directory(path: &Path) {
+        let deadline = StdInstant::now() + super::PROCESS_CLEANUP_TIMEOUT;
+        loop {
+            if fs::read_dir(path)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(true)
+            {
+                return;
+            }
+            assert!(
+                StdInstant::now() < deadline,
+                "temporary directory was not emptied before cleanup deadline"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
     async fn successful_process_keeps_its_owned_temp_dir_until_result_validation_finishes() {
         let (executable_dir, owned_path, prepared) = prepared("#!/bin/sh\nprintf 'valid result'");
@@ -2609,7 +3744,7 @@ mod tests {
         assert!(output.result_file.is_none());
         assert!(output.stderr_tail.is_empty());
         assert!(owned_path.exists());
-        output.close_temp_dir().unwrap();
+        output.close_temp_dir().await.unwrap();
         assert!(!owned_path.exists());
         assert_eq!(fs::read(sibling).unwrap(), b"outside");
     }
@@ -2626,7 +3761,7 @@ mod tests {
 
         assert_eq!(output.stdout, b"valid");
         assert!(owned_path.join("nested").is_dir());
-        output.close_temp_dir().unwrap();
+        output.close_temp_dir().await.unwrap();
         assert!(!owned_path.exists());
     }
 
@@ -2659,7 +3794,7 @@ mod tests {
         let mut output = run_process(prepared, CancellationToken::new(), Duration::from_secs(1))
             .await
             .unwrap();
-        let close_result = output.close_temp_dir();
+        let close_result = output.close_temp_dir().await;
         let root_was_removed = !owned_path.exists();
         if !root_was_removed {
             fs::set_permissions(owned_path.join("nested"), fs::Permissions::from_mode(0o700))
@@ -2690,6 +3825,7 @@ mod tests {
             .await
             .unwrap();
         drop(output);
+        wait_for_temp_path_removal(&owned_path).await;
         let root_was_removed = !owned_path.exists();
         if !root_was_removed {
             fs::set_permissions(owned_path.join("nested"), fs::Permissions::from_mode(0o700))
@@ -2701,74 +3837,259 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn readable_tree_deeper_than_repair_budget_is_removed_without_repair() {
-        let directory = create_owned_temp_dir().unwrap();
-        let owned_path = directory.path().to_path_buf();
-        let mut handle = Some(super::open_owned_directory(&owned_path).unwrap());
-        let identity = super::FileIdentity::from_handle_and_path(
-            handle.as_ref().unwrap(),
-            &owned_path,
-            super::FileRole::OwnedDirectory,
-        )
-        .unwrap();
+    #[tokio::test]
+    async fn cleanup_never_removes_a_root_substituted_after_identity_validation() {
+        let outside = tempdir().unwrap();
+        let outside_sentinel = outside.path().join("outside-sentinel");
+        fs::write(&outside_sentinel, b"outside").unwrap();
+        let (_executable_dir, owned_path, prepared) = prepared("#!/bin/sh\nprintf valid");
+        fs::write(owned_path.join("original-sentinel"), b"original").unwrap();
+        let moved_original = owned_path.with_file_name(format!(
+            "{}-moved",
+            owned_path.file_name().unwrap().to_string_lossy()
+        ));
+        let replacement_sentinel = owned_path.join("replacement-sentinel");
+        let interlock = super::TestCleanupInterlock {
+            before_removal: std::sync::Arc::new(std::sync::Barrier::new(2)),
+            replacement_ready: std::sync::Arc::new(std::sync::Barrier::new(2)),
+        };
+
+        let mut output = run_process(prepared, CancellationToken::new(), Duration::from_secs(1))
+            .await
+            .unwrap();
+        output.cleanup_interlock = Some(interlock.clone());
+        let swap_thread = std::thread::spawn({
+            let owned_path = owned_path.clone();
+            let moved_original = moved_original.clone();
+            let replacement_sentinel = replacement_sentinel.clone();
+            let outside = outside.path().to_path_buf();
+            move || {
+                interlock.before_removal.wait();
+                fs::rename(&owned_path, &moved_original).unwrap();
+                fs::create_dir(&owned_path).unwrap();
+                fs::write(&replacement_sentinel, b"replacement").unwrap();
+                std::os::unix::fs::symlink(outside, owned_path.join("outside-link")).unwrap();
+                interlock.replacement_ready.wait();
+            }
+        });
+
+        let error = output.close_temp_dir().await.unwrap_err();
+        swap_thread.join().unwrap();
+
+        assert_eq!(error.code, "invalid_temp_directory");
+        assert_eq!(fs::read(&replacement_sentinel).unwrap(), b"replacement");
+        assert_eq!(
+            fs::read(moved_original.join("original-sentinel")).unwrap(),
+            b"original"
+        );
+        assert_eq!(fs::read(&outside_sentinel).unwrap(), b"outside");
+        drop(output);
+        fs::remove_dir_all(&owned_path).unwrap();
+        fs::remove_dir_all(&moved_original).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancellation_during_fake_process_cleanup_is_bounded_and_retains_the_root() {
+        let (_executable_dir, owned_path, prepared) =
+            prepared("#!/bin/sh\nprintf private > retained-file\nprintf valid");
+        let cancellation = CancellationToken::new();
+        let mut output = run_process(prepared, cancellation.clone(), Duration::from_secs(30))
+            .await
+            .unwrap();
+        let interlock = super::TestCleanupInterlock {
+            before_removal: std::sync::Arc::new(std::sync::Barrier::new(2)),
+            replacement_ready: std::sync::Arc::new(std::sync::Barrier::new(2)),
+        };
+        output.cleanup_interlock = Some(interlock.clone());
+        let cancel_thread = std::thread::spawn({
+            let cancellation = cancellation.clone();
+            move || {
+                interlock.before_removal.wait();
+                cancellation.cancel();
+                interlock.replacement_ready.wait();
+            }
+        });
+
+        let error = output.close_temp_dir().await.unwrap_err();
+        cancel_thread.join().unwrap();
+
+        assert_eq!(error.code, "local_agent_cleanup_failed");
+        assert!(!format!("{error:?}").contains("private"));
+        assert_eq!(
+            fs::read(owned_path.join("retained-file")).unwrap(),
+            b"private"
+        );
+        fs::remove_dir_all(&owned_path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_latch_allows_only_preowned_cleanup_and_barrier_waits_for_it() {
+        let registry = Arc::new(Mutex::new(ProcessGroupRegistry::default()));
+        let (_executable_dir, owned_path, mut prepared) =
+            prepared("#!/bin/sh\nprintf private > retained-file\nprintf valid");
+        prepared.replace_cleanup_registry_for_test(Arc::clone(&registry));
+        assert_eq!(registry.lock().unwrap().active_cleanup_operations, 1);
+        let cancellation = CancellationToken::new();
+        let mut output = run_process(prepared, cancellation.clone(), Duration::from_secs(30))
+            .await
+            .unwrap();
+        assert_eq!(registry.lock().unwrap().active_cleanup_operations, 1);
+        let interlock = super::TestCleanupInterlock {
+            before_removal: Arc::new(std::sync::Barrier::new(2)),
+            replacement_ready: Arc::new(std::sync::Barrier::new(2)),
+        };
+        output.cleanup_interlock = Some(interlock.clone());
+
+        // Model an already-cancelling run whose app-exit latch is established
+        // before the owned output transitions into cleanup.
+        cancellation.cancel();
+        registry.lock().unwrap().begin_shutdown();
+        assert!(ProcessActivityGuard::begin_with_registry(Arc::clone(&registry)).is_none());
+        assert!(
+            super::CleanupActivityGuard::reserve_with_registry(Arc::clone(&registry)).is_none()
+        );
+
+        let cleanup = tokio::spawn(async move {
+            let result = output.close_temp_dir().await;
+            (output, result)
+        });
+        tokio::task::yield_now().await;
+        interlock.before_removal.wait();
+        assert_eq!(registry.lock().unwrap().active_cleanup_operations, 1);
+        assert!(!wait_for_registry_idle(Arc::clone(&registry), Duration::ZERO).await);
+        interlock.replacement_ready.wait();
+
+        let (_output, result) = cleanup.await.unwrap();
+        assert!(result.is_ok());
+        assert!(!owned_path.exists());
+        assert!(wait_for_registry_idle(Arc::clone(&registry), Duration::from_secs(1)).await);
+        let registry = registry.lock().unwrap();
+        assert_eq!(registry.active_cleanup_operations, 0);
+        assert_eq!(registry.cleanup_failures, 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_cleanup_failure_retains_private_root_and_releases_tracking() {
+        let registry = Arc::new(Mutex::new(ProcessGroupRegistry::default()));
+        let (_executable_dir, owned_path, mut prepared) =
+            prepared("#!/bin/sh\nprintf private-content > retained-file\nprintf valid");
+        prepared.replace_cleanup_registry_for_test(Arc::clone(&registry));
+        let cancellation = CancellationToken::new();
+        let mut output = run_process(prepared, cancellation.clone(), Duration::from_secs(30))
+            .await
+            .unwrap();
         let mut nested = owned_path.clone();
         for depth in 0..=super::MAX_TEMP_CLEANUP_DEPTH {
             nested.push(format!("level-{depth}"));
             fs::create_dir(&nested).unwrap();
         }
-        fs::write(nested.join("sentinel"), b"readable").unwrap();
-        let mut directory = Some(directory);
+        fs::write(nested.join("private-sentinel"), b"private-content").unwrap();
 
-        let close_result = super::close_temp_dir(&mut directory, Some(&identity), &mut handle);
-        let root_was_removed = !owned_path.exists();
-        if !root_was_removed {
-            fs::remove_dir_all(&owned_path).unwrap();
-        }
+        cancellation.cancel();
+        registry.lock().unwrap().begin_shutdown();
+        let error = output.close_temp_dir().await.unwrap_err();
 
-        assert!(close_result.is_ok());
-        assert!(root_was_removed);
+        assert_eq!(error.code, "local_agent_cleanup_failed");
+        assert_eq!(
+            error.message,
+            "The local agent temporary directory could not be removed."
+        );
+        let debug = format!("{error:?}");
+        assert!(!debug.contains("private-content"));
+        assert!(!debug.contains(&owned_path.to_string_lossy().to_string()));
+        assert!(owned_path.exists());
+        assert!(wait_for_registry_idle(Arc::clone(&registry), Duration::from_secs(1)).await);
+        let registry_guard = registry.lock().unwrap();
+        assert_eq!(registry_guard.active_cleanup_operations, 0);
+        assert_eq!(registry_guard.cleanup_failures, 1);
+        drop(registry_guard);
+        fs::remove_dir_all(&owned_path).unwrap();
     }
 
     #[cfg(unix)]
-    #[test]
-    fn readable_tree_larger_than_repair_entry_budget_is_removed_without_repair() {
-        let directory = create_owned_temp_dir().unwrap();
-        let owned_path = directory.path().to_path_buf();
-        let mut handle = Some(super::open_owned_directory(&owned_path).unwrap());
-        let identity = super::FileIdentity::from_handle_and_path(
-            handle.as_ref().unwrap(),
-            &owned_path,
-            super::FileRole::OwnedDirectory,
-        )
-        .unwrap();
-        for index in 0..=super::MAX_TEMP_CLEANUP_ENTRIES {
-            fs::write(owned_path.join(format!("entry-{index}")), b"").unwrap();
-        }
-        let mut directory = Some(directory);
+    #[tokio::test]
+    async fn nearly_expired_cleanup_deadline_returns_before_the_blocking_worker() {
+        let (_executable_dir, owned_path, prepared) =
+            prepared("#!/bin/sh\nprintf private > retained-file\nprintf valid");
+        let mut output = run_process(prepared, CancellationToken::new(), Duration::from_secs(30))
+            .await
+            .unwrap();
+        let interlock = super::TestCleanupInterlock {
+            before_removal: std::sync::Arc::new(std::sync::Barrier::new(2)),
+            replacement_ready: std::sync::Arc::new(std::sync::Barrier::new(2)),
+        };
+        output.cleanup_interlock = Some(interlock.clone());
+        output.cleanup_deadline = StdInstant::now() + Duration::from_millis(20);
+        let release_thread = std::thread::spawn(move || {
+            interlock.before_removal.wait();
+            std::thread::sleep(Duration::from_millis(150));
+            interlock.replacement_ready.wait();
+        });
+        let started = StdInstant::now();
 
-        let close_result = super::close_temp_dir(&mut directory, Some(&identity), &mut handle);
-        let root_was_removed = !owned_path.exists();
-        if !root_was_removed {
-            fs::remove_dir_all(&owned_path).unwrap();
-        }
+        let error = output.close_temp_dir().await.unwrap_err();
+        let elapsed_before_worker_release = started.elapsed();
+        release_thread.join().unwrap();
 
-        assert!(close_result.is_ok());
-        assert!(root_was_removed);
+        assert_eq!(error.code, "local_agent_cleanup_failed");
+        assert!(elapsed_before_worker_release < Duration::from_millis(100));
+        assert!(!format!("{error:?}").contains("private"));
+        assert_eq!(
+            fs::read(owned_path.join("retained-file")).unwrap(),
+            b"private"
+        );
+        fs::remove_dir_all(&owned_path).unwrap();
     }
 
     #[cfg(unix)]
-    #[test]
-    fn inaccessible_tree_beyond_repair_budget_fails_closed_and_is_retained() {
-        let directory = create_owned_temp_dir().unwrap();
-        let owned_path = directory.path().to_path_buf();
-        let mut handle = Some(super::open_owned_directory(&owned_path).unwrap());
-        let identity = super::FileIdentity::from_handle_and_path(
-            handle.as_ref().unwrap(),
-            &owned_path,
-            super::FileRole::OwnedDirectory,
-        )
-        .unwrap();
+    #[tokio::test]
+    async fn fake_process_readable_tree_over_depth_cap_is_retained_with_cleanup_error() {
+        let script = format!(
+            "#!/bin/sh\npath=\"$PWD\"\ni=0\nwhile [ \"$i\" -le {} ]; do path=\"$path/level-$i\"; /bin/mkdir \"$path\" || exit 90; i=$((i + 1)); done\nprintf private > \"$path/sentinel\"\nprintf valid",
+            super::MAX_TEMP_CLEANUP_DEPTH
+        );
+        let (_executable_dir, owned_path, prepared) = prepared(&script);
+        let mut output = run_process(prepared, CancellationToken::new(), Duration::from_secs(30))
+            .await
+            .unwrap();
+
+        let error = output.close_temp_dir().await.unwrap_err();
+
+        assert_eq!(error.code, "local_agent_cleanup_failed");
+        assert!(!format!("{error:?}").contains("private"));
+        assert!(owned_path.exists());
+        fs::remove_dir_all(&owned_path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fake_process_readable_tree_over_entry_cap_is_retained_with_cleanup_error() {
+        let script = format!(
+            "#!/bin/sh\ni=0\nwhile [ \"$i\" -le {} ]; do : > \"entry-$i\"; i=$((i + 1)); done\nprintf valid",
+            super::MAX_TEMP_CLEANUP_ENTRIES
+        );
+        let (_executable_dir, owned_path, prepared) = prepared(&script);
+        let mut output = run_process(prepared, CancellationToken::new(), Duration::from_secs(30))
+            .await
+            .unwrap();
+
+        let error = output.close_temp_dir().await.unwrap_err();
+
+        assert_eq!(error.code, "local_agent_cleanup_failed");
+        assert!(!format!("{error:?}").contains("private"));
+        assert!(owned_path.exists());
+        fs::remove_dir_all(&owned_path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn inaccessible_tree_beyond_repair_budget_fails_closed_and_is_retained() {
+        let mut capability = create_owned_temp_dir().unwrap();
+        let owned_path = capability.path().to_path_buf();
+        let identity = capability.identity.clone();
         let mut nested = owned_path.clone();
         for depth in 0..=super::MAX_TEMP_CLEANUP_DEPTH {
             nested.push(format!("level-{depth}"));
@@ -2776,10 +4097,28 @@ mod tests {
         }
         fs::write(nested.join("sentinel"), b"private").unwrap();
         fs::set_permissions(&nested, fs::Permissions::from_mode(0o000)).unwrap();
-        let mut directory = Some(directory);
+        let mut directory = capability.temp_dir.take();
+        let mut handle = capability.root.take();
+        let mut parent_handle = capability.parent.take();
+        let root_name = capability.root_name.clone();
+        let mut cleanup_activity = capability.cleanup_activity.take();
 
-        let error =
-            super::close_temp_dir(&mut directory, Some(&identity), &mut handle).unwrap_err();
+        let error = super::close_temp_dir(
+            super::TempCleanupSlot {
+                temp_dir: &mut directory,
+                identity: Some(&identity),
+                root: &mut handle,
+                parent: &mut parent_handle,
+                root_name: Some(&root_name),
+                activity: &mut cleanup_activity,
+                clear_detached_contents: false,
+            },
+            &CancellationToken::new(),
+            StdInstant::now() + Duration::from_secs(1),
+            None,
+        )
+        .await
+        .unwrap_err();
 
         assert_eq!(error.code, "local_agent_cleanup_failed");
         assert!(owned_path.exists());
@@ -2905,9 +4244,10 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert_eq!(error.code, "local_agent_timeout");
+        assert_eq!(error.code, "local_agent_cleanup_failed");
         assert!(!marker.exists());
-        assert!(!owned_path.exists());
+        assert!(owned_path.exists());
+        fs::remove_dir_all(&owned_path).unwrap();
         assert!(executable_dir.path().exists());
     }
 
@@ -2976,13 +4316,9 @@ mod tests {
     async fn timeout_kills_the_group_reaps_the_leader_and_cleans_temp() {
         let (_executable_dir, owned_path, prepared) = prepared("#!/bin/sh\n/bin/sleep 30");
 
-        let error = run_process(
-            prepared,
-            CancellationToken::new(),
-            Duration::from_millis(50),
-        )
-        .await
-        .unwrap_err();
+        let error = run_process(prepared, CancellationToken::new(), Duration::from_secs(1))
+            .await
+            .unwrap_err();
 
         assert_eq!(error.code, "local_agent_timeout");
         assert!(!owned_path.exists());
@@ -3066,17 +4402,22 @@ mod tests {
     fn shutdown_latch_rejects_late_registration_without_global_state() {
         let mut registry = ProcessGroupRegistry::default();
         assert!(registry.register(41_001));
-        assert!(registry.begin_operation());
+        assert!(registry.begin_provider_operation());
+        assert!(registry.reserve_cleanup_activity());
         assert!(!registry.is_idle());
 
         let active_at_shutdown = registry.begin_shutdown();
 
         assert_eq!(active_at_shutdown, vec![41_001]);
         assert!(!registry.register(41_002));
-        assert!(!registry.begin_operation());
+        assert!(!registry.begin_provider_operation());
+        assert!(!registry.reserve_cleanup_activity());
         assert_eq!(registry.snapshot(), vec![41_001]);
         registry.unregister(41_001);
-        registry.finish_operation();
+        registry.finish_provider_operation();
+        assert!(!registry.is_idle());
+        registry.finish_cleanup_activity(false);
+        assert_eq!(registry.cleanup_failures, 1);
         registry.begin_rejected_cleanup();
         assert!(!registry.is_idle());
         registry.finish_rejected_cleanup();
@@ -3203,7 +4544,7 @@ mod tests {
         assert_eq!(output.stdout, b"complete");
         assert!(!process_exists(child_pid));
         assert!(owned_path.exists());
-        output.close_temp_dir().unwrap();
+        output.close_temp_dir().await.unwrap();
         assert!(!owned_path.exists());
         assert!(executable_dir.path().exists());
     }
@@ -3274,13 +4615,11 @@ mod tests {
         let (executable_dir, executable) = fake_executable(
             "#!/bin/sh\n/bin/cat >/dev/null\nprintf '%s' \"$$\" > \"$FAKE_AGENT_PID_FILE\"\n/bin/rm -f \"$RESULT_FILE\"\n/bin/ln -s \"$OUTSIDE_FILE\" \"$RESULT_FILE\"\n/bin/sleep 30",
         );
-        let owned_temp = create_owned_temp_dir().unwrap();
+        let mut owned_temp = create_owned_temp_dir().unwrap();
         let owned_path = owned_temp.path().to_path_buf();
-        let result_file = owned_path.join("result.json");
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        options.mode(0o600);
-        options.open(&result_file).unwrap();
+        let result_file = owned_temp
+            .write_adapter_file("result.json", &[], true)
+            .unwrap();
         let prepared = prepare_owned(
             invocation(
                 executable,
@@ -3418,12 +4757,11 @@ mod tests {
             MAX_PROCESS_OUTPUT_BYTES + 1
         );
         let (executable_dir, executable) = fake_executable(&script);
-        let owned_temp = create_owned_temp_dir().unwrap();
+        let mut owned_temp = create_owned_temp_dir().unwrap();
         let owned_path = owned_temp.path().to_path_buf();
-        let result_file = owned_path.join("result.json");
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true).mode(0o600);
-        options.open(&result_file).unwrap();
+        let result_file = owned_temp
+            .write_adapter_file("result.json", &[], true)
+            .unwrap();
         let prepared = prepare_owned(
             invocation(
                 executable,
@@ -3464,13 +4802,12 @@ mod tests {
         let (executable_dir, executable) = fake_executable(
             "#!/bin/sh\n/bin/cat >/dev/null\nprintf result > \"$RESULT_FILE\"\n/bin/ln \"$RESULT_FILE\" \"$RESULT_LINK\"",
         );
-        let owned_temp = create_owned_temp_dir().unwrap();
+        let mut owned_temp = create_owned_temp_dir().unwrap();
         let owned_path = owned_temp.path().to_path_buf();
-        let result_file = owned_path.join("result.json");
+        let result_file = owned_temp
+            .write_adapter_file("result.json", &[], true)
+            .unwrap();
         let result_link = owned_path.join("result-link.json");
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true).mode(0o600);
-        options.open(&result_file).unwrap();
         let prepared = prepare_owned(
             invocation(
                 executable,
@@ -3543,6 +4880,7 @@ mod tests {
         assert!(!process_exists(child_pid));
         assert!(!process_exists(leader_pid));
         assert!(!process_group_is_registered(leader_pid));
+        wait_for_temp_path_removal(&owned_path).await;
         assert!(!owned_path.exists());
         assert!(executable_dir.path().exists());
     }
@@ -3573,8 +4911,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn preparation_rejects_a_proof_captured_from_another_executable() {
+    #[tokio::test]
+    async fn preparation_rejects_a_proof_captured_from_another_executable() {
         let (_proof_directory, proof_executable) = fake_executable("#!/bin/sh\nprintf proof");
         let proof = ExecutableProof::capture(&proof_executable).unwrap();
         let (_invocation_directory, invocation_executable) =
@@ -3593,6 +4931,7 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.code, "invalid_executable");
+        wait_for_temp_path_removal(&owned_path).await;
         assert!(!owned_path.exists());
     }
 
@@ -3637,6 +4976,227 @@ mod tests {
         assert_eq!(error.code, "invalid_executable");
         assert!(!marker.exists());
         assert!(!owned_path.exists());
+        assert!(executable_dir.path().exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn temp_root_swapped_before_preparation_never_uses_attacker_settings_or_starts() {
+        let marker_dir = tempdir().unwrap();
+        let started = marker_dir.path().join("provider-started");
+        let disclosed_stdin = marker_dir.path().join("disclosed-stdin");
+        let outside_sentinel = marker_dir.path().join("outside-sentinel");
+        fs::write(&outside_sentinel, b"outside-safe").unwrap();
+        let (executable_dir, executable) = fake_executable(
+            "#!/bin/sh\n/usr/bin/touch \"$PROVIDER_STARTED\"\n/bin/cat > \"$DISCLOSED_STDIN\"",
+        );
+        let resolved = ResolvedAgent {
+            kind: LocalAgentKind::Claude,
+            path: executable.clone(),
+            path_label: "fake/claude".to_string(),
+        };
+        let source = "# private captured source\n".to_string();
+        let request = LocalAgentRunRequest {
+            request_id: "root-swap-before-prepare".to_string(),
+            document_id: "document-1".to_string(),
+            agent: LocalAgentKind::Claude,
+            target: LocalAgentTargetKind::Selection,
+            selection: Some(ByteRange {
+                start: 0,
+                end: source.len(),
+            }),
+            cursor: None,
+            source,
+            instruction: "private instruction".to_string(),
+        };
+        let registry = Arc::new(Mutex::new(ProcessGroupRegistry::default()));
+        let mut owned_temp = create_owned_temp_dir().unwrap();
+        owned_temp.replace_cleanup_registry_for_test(Arc::clone(&registry));
+        let owned_path = owned_temp.path().to_path_buf();
+        let detached_path = owned_path.with_extension("detached-original");
+        let mut invocation = build_invocation(&resolved, &request, &mut owned_temp).unwrap();
+        invocation.env.extend([
+            (
+                OsString::from("PROVIDER_STARTED"),
+                started.as_os_str().to_owned(),
+            ),
+            (
+                OsString::from("DISCLOSED_STDIN"),
+                disclosed_stdin.as_os_str().to_owned(),
+            ),
+        ]);
+        fs::rename(&owned_path, &detached_path).unwrap();
+        fs::create_dir(&owned_path).unwrap();
+        fs::set_permissions(&owned_path, fs::Permissions::from_mode(0o700)).unwrap();
+        let attacker_settings = owned_path.join("claude-settings.json");
+        let mut settings_options = fs::OpenOptions::new();
+        settings_options.write(true).create_new(true).mode(0o600);
+        settings_options
+            .open(&attacker_settings)
+            .unwrap()
+            .write_all(br#"{"hooks":{"SessionStart":[{"command":"attacker"}]}}"#)
+            .unwrap();
+
+        let prepared = prepare_owned(invocation, owned_temp);
+        let rejected_before_spawn = prepared.is_err();
+        if let Ok(prepared) = prepared
+            && let Ok(mut output) =
+                run_process(prepared, CancellationToken::new(), Duration::from_secs(1)).await
+        {
+            let _ = output.close_temp_dir().await;
+        }
+        wait_for_empty_directory(&detached_path).await;
+        let original_content_free = fs::read_dir(&detached_path)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(true);
+        let replacement_survived = owned_path.exists();
+        let attacker_settings_survived = attacker_settings.exists();
+        let outside_survived = fs::read(&outside_sentinel).unwrap() == b"outside-safe";
+        let provider_never_started = !started.exists() && !disclosed_stdin.exists();
+
+        assert!(rejected_before_spawn);
+        assert!(provider_never_started);
+        assert!(replacement_survived);
+        assert!(attacker_settings_survived);
+        assert!(outside_survived);
+        assert!(original_content_free);
+        assert!(wait_for_registry_idle(Arc::clone(&registry), Duration::from_secs(1)).await);
+        let registry = registry.lock().unwrap();
+        assert_eq!(registry.active_cleanup_operations, 0);
+        assert_eq!(registry.cleanup_failures, 1);
+        drop(registry);
+        if owned_path.exists() {
+            fs::remove_dir_all(&owned_path).unwrap();
+        }
+        if detached_path.exists() {
+            fs::remove_dir_all(&detached_path).unwrap();
+        }
+        assert!(executable_dir.path().exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn temp_root_swapped_before_invocation_build_never_uses_replacement_or_leaks_cleanup_activity()
+     {
+        let marker_dir = tempdir().unwrap();
+        let provider_started = marker_dir.path().join("provider-started");
+        let disclosed_stdin = marker_dir.path().join("disclosed-stdin");
+        let outside_sentinel = marker_dir.path().join("outside-sentinel");
+        fs::write(&outside_sentinel, b"outside-safe").unwrap();
+        let (executable_dir, executable) = fake_executable(
+            "#!/bin/sh\n/usr/bin/touch \"$PROVIDER_STARTED\"\n/bin/cat > \"$DISCLOSED_STDIN\"",
+        );
+        let resolved = ResolvedAgent {
+            kind: LocalAgentKind::Claude,
+            path: executable,
+            path_label: "fake/claude".to_string(),
+        };
+        let registry = Arc::new(Mutex::new(ProcessGroupRegistry::default()));
+        let mut capability = create_owned_temp_dir().unwrap();
+        capability.replace_cleanup_registry_for_test(Arc::clone(&registry));
+        let owned_path = capability.path().to_path_buf();
+        let detached_path = owned_path.with_extension("detached-original");
+        fs::rename(&owned_path, &detached_path).unwrap();
+        fs::create_dir(&owned_path).unwrap();
+        fs::set_permissions(&owned_path, fs::Permissions::from_mode(0o700)).unwrap();
+        let attacker_settings = owned_path.join("claude-settings.json");
+        let attacker_contents = br#"{"hooks":{"SessionStart":[{"command":"attacker"}]}}"#;
+        write_private_file(&attacker_settings, attacker_contents);
+
+        let result = build_invocation(
+            &resolved,
+            &local_agent_request(LocalAgentKind::Claude, "root-swap-before-build"),
+            &mut capability,
+        );
+        drop(capability);
+        wait_for_empty_directory(&detached_path).await;
+
+        assert_eq!(result.unwrap_err().code, "invalid_adapter_request");
+        assert_eq!(fs::read(&attacker_settings).unwrap(), attacker_contents);
+        assert_eq!(fs::read(&outside_sentinel).unwrap(), b"outside-safe");
+        assert!(!provider_started.exists());
+        assert!(!disclosed_stdin.exists());
+        assert!(wait_for_registry_idle(Arc::clone(&registry), Duration::from_secs(1)).await);
+        let registry = registry.lock().unwrap();
+        assert_eq!(registry.active_cleanup_operations, 0);
+        assert_eq!(registry.cleanup_failures, 1);
+        drop(registry);
+        fs::remove_dir_all(&owned_path).unwrap();
+        fs::remove_dir_all(&detached_path).unwrap();
+        assert!(executable_dir.path().exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn temp_root_swapped_while_writing_adapter_files_never_selects_replacement_files() {
+        let marker_dir = tempdir().unwrap();
+        let provider_started = marker_dir.path().join("provider-started");
+        let disclosed_stdin = marker_dir.path().join("disclosed-stdin");
+        let outside_sentinel = marker_dir.path().join("outside-sentinel");
+        fs::write(&outside_sentinel, b"outside-safe").unwrap();
+        let (executable_dir, executable) = fake_executable(
+            "#!/bin/sh\n/usr/bin/touch \"$PROVIDER_STARTED\"\n/bin/cat > \"$DISCLOSED_STDIN\"",
+        );
+
+        for (agent, first_file) in [
+            (LocalAgentKind::Claude, "claude-settings.json"),
+            (LocalAgentKind::Codex, "local-agent-output-schema.json"),
+        ] {
+            let registry = Arc::new(Mutex::new(ProcessGroupRegistry::default()));
+            let mut capability = create_owned_temp_dir().unwrap();
+            capability.replace_cleanup_registry_for_test(Arc::clone(&registry));
+            let owned_path = capability.path().to_path_buf();
+            let detached_path = owned_path.with_extension(format!("{first_file}.detached"));
+            let interlock = super::TestSetupInterlock {
+                before_create: Arc::new(std::sync::Barrier::new(2)),
+                replacement_ready: Arc::new(std::sync::Barrier::new(2)),
+            };
+            capability.setup_interlock = Some(interlock.clone());
+            let attacker_contents = format!("attacker-{first_file}").into_bytes();
+            let attacker_contents_for_thread = attacker_contents.clone();
+            let worker = std::thread::spawn({
+                let owned_path = owned_path.clone();
+                let detached_path = detached_path.clone();
+                let first_file = first_file.to_string();
+                move || {
+                    interlock.before_create.wait();
+                    fs::rename(&owned_path, &detached_path).unwrap();
+                    fs::create_dir(&owned_path).unwrap();
+                    fs::set_permissions(&owned_path, fs::Permissions::from_mode(0o700)).unwrap();
+                    write_private_file(&owned_path.join(first_file), &attacker_contents_for_thread);
+                    interlock.replacement_ready.wait();
+                }
+            });
+            let resolved = ResolvedAgent {
+                kind: agent,
+                path: executable.clone(),
+                path_label: format!("fake/{}", agent.executable_basename()),
+            };
+            let result = build_invocation(
+                &resolved,
+                &local_agent_request(agent, &format!("root-swap-while-writing-{first_file}")),
+                &mut capability,
+            );
+            worker.join().unwrap();
+            drop(capability);
+            wait_for_empty_directory(&detached_path).await;
+
+            assert_eq!(result.unwrap_err().code, "adapter_setup_failed");
+            assert_eq!(
+                fs::read(owned_path.join(first_file)).unwrap(),
+                attacker_contents
+            );
+            assert_eq!(fs::read(&outside_sentinel).unwrap(), b"outside-safe");
+            assert!(!provider_started.exists());
+            assert!(!disclosed_stdin.exists());
+            assert!(wait_for_registry_idle(Arc::clone(&registry), Duration::from_secs(1)).await);
+            let registry = registry.lock().unwrap();
+            assert_eq!(registry.active_cleanup_operations, 0);
+            assert_eq!(registry.cleanup_failures, 1);
+            drop(registry);
+            fs::remove_dir_all(&owned_path).unwrap();
+            fs::remove_dir_all(&detached_path).unwrap();
+        }
         assert!(executable_dir.path().exists());
     }
 
@@ -3789,7 +5349,7 @@ mod tests {
         assert!(codex.contains_key(OsStr::new("CODEX_API_KEY")));
         assert_eq!(
             codex.get(OsStr::new("CODEX_HOME")),
-            Some(&cwd.join("codex-home").into_os_string())
+            Some(&OsString::from("codex-home"))
         );
         assert!(!codex.contains_key(OsStr::new("ANTHROPIC_API_KEY")));
         assert!(!codex.contains_key(OsStr::new("OPENAI_API_KEY")));
@@ -3801,8 +5361,15 @@ mod tests {
         assert!(!opencode.contains_key(OsStr::new("CODEX_API_KEY")));
         assert_eq!(
             opencode.get(OsStr::new("XDG_DATA_HOME")),
-            Some(&cwd.join("opencode-data").into_os_string())
+            Some(&OsString::from("opencode-data"))
         );
+        for environment in [&claude, &codex, &opencode] {
+            assert_eq!(
+                environment.get(OsStr::new("TMPDIR")),
+                Some(&OsString::from("."))
+            );
+            assert!(!environment.contains_key(OsStr::new("PWD")));
+        }
     }
 
     #[test]
@@ -3819,6 +5386,85 @@ mod tests {
 
         assert_eq!(error.code, "invalid_environment");
         assert!(!format!("{error:?}").contains(secret));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn claude_run_uses_only_private_home_and_config_roots() {
+        let hostile_home = tempdir().unwrap();
+        let hostile_claude = hostile_home.path().join(".claude");
+        fs::create_dir(&hostile_claude).unwrap();
+        fs::write(hostile_claude.join("CLAUDE.md"), b"hostile instructions").unwrap();
+        fs::write(
+            hostile_claude.join("settings.json"),
+            b"{\"hooks\":{\"PreToolUse\":[{\"command\":\"steal\"}]}}",
+        )
+        .unwrap();
+        fs::create_dir(hostile_claude.join("plugins")).unwrap();
+        fs::write(hostile_claude.join("plugins/hostile"), b"plugin").unwrap();
+        let snapshot_dir = tempdir().unwrap();
+        let snapshot = snapshot_dir.path().join("environment");
+        let (executable_dir, executable) = fake_executable(
+            "#!/bin/sh\n\
+             [ \"$HOME\" = claude-home ] || exit 10\n\
+             [ \"$CLAUDE_CONFIG_DIR\" = claude-config ] || exit 11\n\
+             [ \"$XDG_CONFIG_HOME\" = claude-xdg-config ] || exit 12\n\
+             [ \"$XDG_CACHE_HOME\" = claude-cache ] || exit 13\n\
+             [ \"$XDG_DATA_HOME\" = claude-data ] || exit 14\n\
+             [ \"$XDG_STATE_HOME\" = claude-state ] || exit 15\n\
+             [ \"$CLAUDE_CODE_SAFE_MODE\" = 1 ] || exit 16\n\
+             [ \"$CLAUDE_CODE_DISABLE_AUTO_MEMORY\" = 1 ] || exit 17\n\
+             [ \"$CLAUDE_CODE_DISABLE_CLAUDE_MDS\" = 1 ] || exit 18\n\
+             [ \"$CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS\" = 1 ] || exit 19\n\
+             [ ! -e \"$HOME/.claude/CLAUDE.md\" ] || exit 20\n\
+             [ ! -e \"$CLAUDE_CONFIG_DIR/settings.json\" ] || exit 21\n\
+             /usr/bin/printf '%s\\n%s\\n' \"$HOME\" \"$CLAUDE_CONFIG_DIR\" > \"$SNAPSHOT\"\n\
+             /bin/cat >/dev/null\n\
+             printf valid",
+        );
+        let owned_temp = create_owned_temp_dir().unwrap();
+        let owned_path = owned_temp.path().to_path_buf();
+        let prepared = prepare_owned_for_kind_with_environment(
+            invocation(
+                executable,
+                &owned_path,
+                vec![
+                    (OsString::from("SNAPSHOT"), snapshot.as_os_str().to_owned()),
+                    (OsString::from("CLAUDE_CODE_SAFE_MODE"), OsString::from("1")),
+                    (
+                        OsString::from("CLAUDE_CODE_DISABLE_AUTO_MEMORY"),
+                        OsString::from("1"),
+                    ),
+                    (
+                        OsString::from("CLAUDE_CODE_DISABLE_CLAUDE_MDS"),
+                        OsString::from("1"),
+                    ),
+                    (
+                        OsString::from("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"),
+                        OsString::from("1"),
+                    ),
+                ],
+                None,
+            ),
+            owned_temp,
+            LocalAgentKind::Claude,
+            BTreeMap::from([(
+                OsString::from("HOME"),
+                hostile_home.path().as_os_str().to_owned(),
+            )]),
+        )
+        .unwrap();
+
+        let mut output = run_process(prepared, CancellationToken::new(), Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        assert_eq!(output.stdout, b"valid");
+        let captured = fs::read_to_string(&snapshot).unwrap();
+        assert!(!captured.contains(hostile_home.path().to_str().unwrap()));
+        output.close_temp_dir().await.unwrap();
+        assert!(!owned_path.exists());
+        assert!(executable_dir.path().exists());
     }
 
     #[test]
@@ -4008,10 +5654,10 @@ mod tests {
         let (executable_dir, executable) = fake_executable(
             "#!/bin/sh\n\
              /bin/cat >/dev/null\n\
-             [ \"$XDG_CONFIG_HOME\" = \"$PWD/opencode-config\" ] || exit 11\n\
-             [ \"$XDG_CACHE_HOME\" = \"$PWD/opencode-cache\" ] || exit 12\n\
-             [ \"$XDG_DATA_HOME\" = \"$PWD/opencode-data\" ] || exit 13\n\
-             [ \"$XDG_STATE_HOME\" = \"$PWD/opencode-state\" ] || exit 14\n\
+             [ \"$XDG_CONFIG_HOME\" = opencode-config ] || exit 11\n\
+             [ \"$XDG_CACHE_HOME\" = opencode-cache ] || exit 12\n\
+             [ \"$XDG_DATA_HOME\" = opencode-data ] || exit 13\n\
+             [ \"$XDG_STATE_HOME\" = opencode-state ] || exit 14\n\
              [ \"$OPENCODE_DISABLE_CLAUDE_CODE\" = 1 ] || exit 15\n\
              [ \"$OPENCODE_DISABLE_DEFAULT_PLUGINS\" = true ] || exit 16\n\
              [ -f \"$XDG_DATA_HOME/opencode/auth.json\" ] || exit 17\n\
@@ -4065,14 +5711,391 @@ mod tests {
 
         assert_eq!(output.stdout, b"isolated");
         assert_eq!(fs::read(&source_auth).unwrap(), secret);
-        output.close_temp_dir().unwrap();
+        output.close_temp_dir().await.unwrap();
         assert!(!owned_path.exists());
         assert!(executable_dir.path().exists());
     }
 
     #[cfg(unix)]
-    #[test]
-    fn opencode_rejects_symlinked_auth_without_reading_or_modifying_its_target() {
+    #[tokio::test]
+    async fn workspace_path_swap_at_spawn_keeps_every_agent_on_the_retained_root_and_withholds_stdin()
+     {
+        let marker_dir = tempdir().unwrap();
+
+        for agent in [
+            LocalAgentKind::Claude,
+            LocalAgentKind::Codex,
+            LocalAgentKind::Opencode,
+        ] {
+            let snapshot = marker_dir
+                .path()
+                .join(format!("{}-snapshot", agent.executable_basename()));
+            let disclosed_stdin = marker_dir
+                .path()
+                .join(format!("{}-stdin", agent.executable_basename()));
+            let child_ready = marker_dir
+                .path()
+                .join(format!("{}-ready", agent.executable_basename()));
+            let script = match agent {
+                LocalAgentKind::Claude => {
+                    "#!/bin/sh\n\
+                     settings=\n\
+                     while [ \"$#\" -gt 0 ]; do\n\
+                       case \"$1\" in\n\
+                         --settings) settings=$2; shift 2 ;;\n\
+                         *) shift ;;\n\
+                       esac\n\
+                     done\n\
+                     {\n\
+                       printf 'cwd='; /bin/pwd\n\
+                       printf '\\nroot='; /bin/cat workspace-marker\n\
+                       printf '\\nsettings_arg=%s\\nsettings=' \"$settings\"; /bin/cat \"$settings\"\n\
+                       printf '\\nhome='; /bin/cat \"$HOME/workspace-marker\"\n\
+                       printf '\\nconfig='; /bin/cat \"$CLAUDE_CONFIG_DIR/workspace-marker\"\n\
+                       printf '\\nxdg_config='; /bin/cat \"$XDG_CONFIG_HOME/workspace-marker\"\n\
+                       printf '\\ncache='; /bin/cat \"$XDG_CACHE_HOME/workspace-marker\"\n\
+                       printf '\\ndata='; /bin/cat \"$XDG_DATA_HOME/workspace-marker\"\n\
+                       printf '\\nstate='; /bin/cat \"$XDG_STATE_HOME/workspace-marker\"\n\
+                     } > \"$SNAPSHOT\"\n\
+                     /usr/bin/touch \"$CHILD_READY\"\n\
+                     input=$(/bin/cat)\n\
+                     if [ -n \"$input\" ]; then printf '%s' \"$input\" > \"$DISCLOSED_STDIN\"; fi\n\
+                     printf valid"
+                }
+                LocalAgentKind::Codex => {
+                    "#!/bin/sh\n\
+                     schema= result=\n\
+                     while [ \"$#\" -gt 0 ]; do\n\
+                       case \"$1\" in\n\
+                         --output-schema) schema=$2; shift 2 ;;\n\
+                         --output-last-message) result=$2; shift 2 ;;\n\
+                         *) shift ;;\n\
+                       esac\n\
+                     done\n\
+                     {\n\
+                       printf 'cwd='; /bin/pwd\n\
+                       printf '\\nroot='; /bin/cat workspace-marker\n\
+                       printf '\\nschema_arg=%s\\nschema=' \"$schema\"; /bin/cat \"$schema\"\n\
+                       printf '\\nresult_arg=%s\\ncodex=' \"$result\"; /bin/cat \"$CODEX_HOME/workspace-marker\"\n\
+                     } > \"$SNAPSHOT\"\n\
+                     printf child-result > \"$result\"\n\
+                     /usr/bin/touch \"$CHILD_READY\"\n\
+                     input=$(/bin/cat)\n\
+                     if [ -n \"$input\" ]; then printf '%s' \"$input\" > \"$DISCLOSED_STDIN\"; fi\n\
+                     printf valid"
+                }
+                LocalAgentKind::Opencode => {
+                    "#!/bin/sh\n\
+                     directory=\n\
+                     while [ \"$#\" -gt 0 ]; do\n\
+                       case \"$1\" in\n\
+                         --dir) directory=$2; shift 2 ;;\n\
+                         *) shift ;;\n\
+                       esac\n\
+                     done\n\
+                     {\n\
+                       printf 'cwd='; /bin/pwd\n\
+                       printf '\\nroot='; /bin/cat workspace-marker\n\
+                       printf '\\ndir_arg=%s\\nconfig=' \"$directory\"; /bin/cat \"$XDG_CONFIG_HOME/workspace-marker\"\n\
+                       printf '\\ncache='; /bin/cat \"$XDG_CACHE_HOME/workspace-marker\"\n\
+                       printf '\\ndata='; /bin/cat \"$XDG_DATA_HOME/workspace-marker\"\n\
+                       printf '\\nstate='; /bin/cat \"$XDG_STATE_HOME/workspace-marker\"\n\
+                       printf '\\nauth_parent='; /bin/cat \"$XDG_DATA_HOME/opencode/workspace-marker\"\n\
+                     } > \"$SNAPSHOT\"\n\
+                     /usr/bin/touch \"$CHILD_READY\"\n\
+                     input=$(/bin/cat)\n\
+                     if [ -n \"$input\" ]; then printf '%s' \"$input\" > \"$DISCLOSED_STDIN\"; fi\n\
+                     printf valid"
+                }
+            };
+            let (executable_dir, executable) = fake_executable(script);
+            let resolved = ResolvedAgent {
+                kind: agent,
+                path: executable,
+                path_label: format!("fake/{}", agent.executable_basename()),
+            };
+            let registry = Arc::new(Mutex::new(ProcessGroupRegistry::default()));
+            let mut capability = create_owned_temp_dir().unwrap();
+            capability.replace_cleanup_registry_for_test(Arc::clone(&registry));
+            let owned_path = capability.path().to_path_buf();
+            let detached_path =
+                owned_path.with_extension(format!("{}-detached", agent.executable_basename()));
+            let mut invocation = build_invocation(
+                &resolved,
+                &local_agent_request(agent, "workspace-path-swap-at-spawn"),
+                &mut capability,
+            )
+            .unwrap();
+            invocation.env.extend([
+                (OsString::from("SNAPSHOT"), snapshot.as_os_str().to_owned()),
+                (
+                    OsString::from("CHILD_READY"),
+                    child_ready.as_os_str().to_owned(),
+                ),
+                (
+                    OsString::from("DISCLOSED_STDIN"),
+                    disclosed_stdin.as_os_str().to_owned(),
+                ),
+            ]);
+            let original_directories: &[&str] = match agent {
+                LocalAgentKind::Claude => &[
+                    "claude-home",
+                    "claude-config",
+                    "claude-xdg-config",
+                    "claude-cache",
+                    "claude-data",
+                    "claude-state",
+                ],
+                LocalAgentKind::Codex => &["codex-home"],
+                LocalAgentKind::Opencode => &[
+                    "opencode-config",
+                    "opencode-cache",
+                    "opencode-data",
+                    "opencode-state",
+                    "opencode-data/opencode",
+                ],
+            };
+            let mut prepared = prepare_owned_for_kind_with_environment(
+                invocation,
+                capability,
+                agent,
+                BTreeMap::new(),
+            )
+            .unwrap();
+            prepared.replace_cleanup_registry_for_test(Arc::clone(&registry));
+            fs::write(owned_path.join("workspace-marker"), b"original").unwrap();
+            for directory in original_directories {
+                fs::write(
+                    owned_path.join(directory).join("workspace-marker"),
+                    b"original",
+                )
+                .unwrap();
+            }
+            let interlock = super::TestWorkspaceSpawnInterlock {
+                before_spawn: Arc::new(std::sync::Barrier::new(2)),
+                replacement_ready: Arc::new(std::sync::Barrier::new(2)),
+                spawn_returned: Arc::new(std::sync::Barrier::new(2)),
+                child_ready: Arc::new(std::sync::Barrier::new(2)),
+            };
+            prepared.workspace_spawn_interlock = Some(interlock.clone());
+            let swap_thread = std::thread::spawn({
+                let owned_path = owned_path.clone();
+                let detached_path = detached_path.clone();
+                let child_ready = child_ready.clone();
+                let original_directories = original_directories.to_vec();
+                move || {
+                    interlock.before_spawn.wait();
+                    fs::rename(&owned_path, &detached_path).unwrap();
+                    fs::create_dir(&owned_path).unwrap();
+                    fs::set_permissions(&owned_path, fs::Permissions::from_mode(0o700)).unwrap();
+                    fs::write(owned_path.join("workspace-marker"), b"alternate").unwrap();
+                    for directory in original_directories {
+                        let path = owned_path.join(directory);
+                        fs::create_dir_all(&path).unwrap();
+                        fs::write(path.join("workspace-marker"), b"alternate").unwrap();
+                    }
+                    match agent {
+                        LocalAgentKind::Claude => write_private_file(
+                            &owned_path.join("claude-settings.json"),
+                            b"alternate-settings",
+                        ),
+                        LocalAgentKind::Codex => {
+                            write_private_file(
+                                &owned_path.join("local-agent-output-schema.json"),
+                                b"alternate-schema",
+                            );
+                            write_private_file(
+                                &owned_path.join("local-agent-result.json"),
+                                b"alternate-result",
+                            );
+                        }
+                        LocalAgentKind::Opencode => {}
+                    }
+                    interlock.replacement_ready.wait();
+                    interlock.spawn_returned.wait();
+                    let deadline = StdInstant::now() + Duration::from_secs(1);
+                    while !child_ready.exists() {
+                        assert!(
+                            StdInstant::now() < deadline,
+                            "fake child did not prove its workspace before stdin release"
+                        );
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    interlock.child_ready.wait();
+                }
+            });
+
+            let error = run_process(prepared, CancellationToken::new(), Duration::from_secs(2))
+                .await
+                .unwrap_err();
+            swap_thread.join().unwrap();
+
+            let snapshot_contents = fs::read_to_string(&snapshot).unwrap();
+            assert!(
+                snapshot_contents.contains(&format!("cwd={}", detached_path.display())),
+                "{snapshot_contents}"
+            );
+            assert!(
+                snapshot_contents.contains("root=original"),
+                "{snapshot_contents}"
+            );
+            assert!(!snapshot_contents.contains("alternate"));
+            match agent {
+                LocalAgentKind::Claude => {
+                    assert!(snapshot_contents.contains("settings_arg=claude-settings.json"));
+                    assert!(snapshot_contents.contains("home=original"));
+                    assert!(snapshot_contents.contains("config=original"));
+                    assert!(snapshot_contents.contains("xdg_config=original"));
+                    assert!(snapshot_contents.contains("cache=original"));
+                    assert!(snapshot_contents.contains("data=original"));
+                    assert!(snapshot_contents.contains("state=original"));
+                    assert_eq!(
+                        fs::read(owned_path.join("claude-settings.json")).unwrap(),
+                        b"alternate-settings"
+                    );
+                }
+                LocalAgentKind::Codex => {
+                    assert!(
+                        snapshot_contents.contains("schema_arg=local-agent-output-schema.json")
+                    );
+                    assert!(snapshot_contents.contains("result_arg=local-agent-result.json"));
+                    assert!(snapshot_contents.contains("codex=original"));
+                    assert_eq!(
+                        fs::read(detached_path.join("local-agent-result.json")).unwrap(),
+                        b"child-result"
+                    );
+                    assert_eq!(
+                        fs::read(owned_path.join("local-agent-output-schema.json")).unwrap(),
+                        b"alternate-schema"
+                    );
+                    assert_eq!(
+                        fs::read(owned_path.join("local-agent-result.json")).unwrap(),
+                        b"alternate-result"
+                    );
+                }
+                LocalAgentKind::Opencode => {
+                    assert!(snapshot_contents.contains("dir_arg=."));
+                    assert!(snapshot_contents.contains("config=original"));
+                    assert!(snapshot_contents.contains("cache=original"));
+                    assert!(snapshot_contents.contains("data=original"));
+                    assert!(snapshot_contents.contains("state=original"));
+                    assert!(snapshot_contents.contains("auth_parent=original"));
+                    assert_eq!(
+                        fs::read(owned_path.join("opencode-data/opencode/workspace-marker"))
+                            .unwrap(),
+                        b"alternate"
+                    );
+                }
+            }
+            assert_eq!(error.code, "invalid_temp_directory");
+            assert!(!disclosed_stdin.exists());
+            assert_eq!(
+                fs::read(owned_path.join("workspace-marker")).unwrap(),
+                b"alternate"
+            );
+            assert!(detached_path.is_dir());
+            assert_eq!(
+                fs::read(detached_path.join("workspace-marker")).unwrap(),
+                b"original"
+            );
+            assert!(wait_for_registry_idle(Arc::clone(&registry), Duration::from_secs(1)).await);
+            let registry = registry.lock().unwrap();
+            assert_eq!(registry.active_cleanup_operations, 0);
+            assert_eq!(registry.cleanup_failures, 1);
+            drop(registry);
+            fs::remove_dir_all(&owned_path).unwrap();
+            fs::remove_dir_all(&detached_path).unwrap();
+            assert!(executable_dir.path().exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn executable_path_swap_is_killed_before_private_stdin_is_released() {
+        let marker_dir = tempdir().unwrap();
+        let replacement_started = marker_dir.path().join("replacement-started");
+        let disclosed_stdin = marker_dir.path().join("disclosed-stdin");
+        let (executable_dir, executable) =
+            fake_executable("#!/bin/sh\n/bin/cat >/dev/null\nprintf original");
+        let replacement = executable_dir.path().join("replacement");
+        fs::write(
+            &replacement,
+            b"#!/bin/sh\n/usr/bin/touch \"$REPLACEMENT_STARTED\"\nsecret=$(/bin/cat)\nif [ -n \"$secret\" ]; then /usr/bin/printf %s \"$secret\" > \"$DISCLOSED_STDIN\"; fi\nprintf replacement",
+        )
+        .unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o700)).unwrap();
+        let original_backup = executable_dir.path().join("original-backup");
+
+        let owned_temp = create_owned_temp_dir().unwrap();
+        let owned_path = owned_temp.path().to_path_buf();
+        let mut prepared = prepare_owned(
+            invocation(
+                executable.clone(),
+                &owned_path,
+                vec![
+                    (
+                        OsString::from("REPLACEMENT_STARTED"),
+                        replacement_started.as_os_str().to_owned(),
+                    ),
+                    (
+                        OsString::from("DISCLOSED_STDIN"),
+                        disclosed_stdin.as_os_str().to_owned(),
+                    ),
+                ],
+                None,
+            ),
+            owned_temp,
+        )
+        .unwrap();
+        let interlock = super::TestSpawnInterlock {
+            before_spawn: std::sync::Arc::new(std::sync::Barrier::new(2)),
+            replacement_ready: std::sync::Arc::new(std::sync::Barrier::new(2)),
+            spawn_returned: std::sync::Arc::new(std::sync::Barrier::new(2)),
+            original_restored: std::sync::Arc::new(std::sync::Barrier::new(2)),
+        };
+        prepared.spawn_interlock = Some(interlock.clone());
+        let replacement_observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let swap_thread = std::thread::spawn({
+            let executable = executable.clone();
+            let replacement = replacement.clone();
+            let original_backup = original_backup.clone();
+            let replacement_started = replacement_started.clone();
+            let replacement_observed = replacement_observed.clone();
+            move || {
+                interlock.before_spawn.wait();
+                fs::rename(&executable, &original_backup).unwrap();
+                fs::rename(&replacement, &executable).unwrap();
+                interlock.replacement_ready.wait();
+                interlock.spawn_returned.wait();
+                let observation_deadline = StdInstant::now() + Duration::from_secs(1);
+                while StdInstant::now() < observation_deadline {
+                    if replacement_started.exists() {
+                        replacement_observed.store(true, std::sync::atomic::Ordering::SeqCst);
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                fs::rename(&executable, &replacement).unwrap();
+                fs::rename(&original_backup, &executable).unwrap();
+                interlock.original_restored.wait();
+            }
+        });
+
+        let error = run_process(prepared, CancellationToken::new(), Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        swap_thread.join().unwrap();
+
+        assert_eq!(error.code, "invalid_executable");
+        assert!(replacement_started.exists());
+        assert!(replacement_observed.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!disclosed_stdin.exists());
+        assert!(!owned_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn opencode_rejects_symlinked_auth_without_reading_or_modifying_its_target() {
         let home = tempdir().unwrap();
         let outside = tempdir().unwrap();
         let source_directory = home.path().join(".local/share/opencode");
@@ -4094,13 +6117,14 @@ mod tests {
 
         assert_eq!(error.code, "invalid_environment");
         assert_eq!(fs::read(outside_auth).unwrap(), b"outside-private-auth");
+        wait_for_temp_path_removal(&owned_path).await;
         assert!(!owned_path.exists());
         assert!(!format!("{error:?}").contains("outside-private-auth"));
     }
 
     #[cfg(unix)]
-    #[test]
-    fn opencode_copies_auth_from_validated_custom_xdg_data_home_without_forwarding_it() {
+    #[tokio::test]
+    async fn opencode_copies_auth_from_validated_custom_xdg_data_home_without_forwarding_it() {
         let home = tempdir().unwrap();
         let custom_data = tempdir().unwrap();
         let custom_auth_directory = custom_data.path().join("opencode");
@@ -4134,13 +6158,14 @@ mod tests {
         );
         assert!(!format!("{prepared:?}").contains("custom-xdg-auth"));
         drop(prepared);
+        wait_for_temp_path_removal(&owned_path).await;
         assert!(!owned_path.exists());
         assert_eq!(fs::read(custom_auth).unwrap(), secret);
     }
 
     #[cfg(unix)]
-    #[test]
-    fn opencode_rejects_oversized_auth_without_retaining_private_copies() {
+    #[tokio::test]
+    async fn opencode_rejects_oversized_auth_without_retaining_private_copies() {
         let home = tempdir().unwrap();
         let source_directory = home.path().join(".local/share/opencode");
         fs::create_dir_all(&source_directory).unwrap();
@@ -4165,6 +6190,7 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.code, "invalid_environment");
+        wait_for_temp_path_removal(&owned_path).await;
         assert!(!owned_path.exists());
     }
 
@@ -4185,7 +6211,7 @@ mod tests {
         let (executable_dir, executable) = fake_executable(
             "#!/bin/sh\n\
              /bin/cat >/dev/null\n\
-             [ \"$CODEX_HOME\" = \"$PWD/codex-home\" ] || exit 21\n\
+             [ \"$CODEX_HOME\" = codex-home ] || exit 21\n\
              [ -f \"$CODEX_HOME/auth.json\" ] || exit 22\n\
              [ ! -e \"$CODEX_HOME/AGENTS.md\" ] || exit 23\n\
              printf isolated",
@@ -4225,14 +6251,14 @@ mod tests {
             fs::read(&source_agents).unwrap(),
             b"global rules must not be copied"
         );
-        output.close_temp_dir().unwrap();
+        output.close_temp_dir().await.unwrap();
         assert!(!owned_path.exists());
         assert!(executable_dir.path().exists());
     }
 
     #[cfg(unix)]
-    #[test]
-    fn codex_rejects_symlinked_auth_without_reading_its_target() {
+    #[tokio::test]
+    async fn codex_rejects_symlinked_auth_without_reading_its_target() {
         let home = tempdir().unwrap();
         let outside = tempdir().unwrap();
         let source_directory = home.path().join(".codex");
@@ -4257,12 +6283,13 @@ mod tests {
             fs::read(outside_auth).unwrap(),
             br#"{"token":"outside-private-auth"}"#
         );
+        wait_for_temp_path_removal(&owned_path).await;
         assert!(!owned_path.exists());
     }
 
     #[cfg(unix)]
-    #[test]
-    fn malformed_or_oversized_codex_auth_fails_closed_without_private_copies() {
+    #[tokio::test]
+    async fn malformed_or_oversized_codex_auth_fails_closed_without_private_copies() {
         for bytes in [
             b"[] trailing".to_vec(),
             vec![b'x'; super::MAX_AGENT_AUTH_BYTES + 1],
@@ -4292,6 +6319,7 @@ mod tests {
             .unwrap_err();
 
             assert_eq!(error.code, "invalid_environment");
+            wait_for_temp_path_removal(&owned_path).await;
             assert!(!owned_path.exists());
             assert!(!format!("{error:?}").contains("trailing"));
         }
