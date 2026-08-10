@@ -1738,7 +1738,7 @@ describe('App recent documents', () => {
       await screen.findByRole('dialog', { name: /run a local agent/i }),
     ).toBeVisible();
     expect(screen.getByLabelText('Local agent')).toHaveValue('@');
-    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+    expect(screen.getByRole('combobox', { name: 'Result destination' })).toHaveValue(
       'selection',
     );
   });
@@ -1779,7 +1779,7 @@ describe('App recent documents', () => {
     expect(
       await screen.findByRole('dialog', { name: /run a local agent/i }),
     ).toBeVisible();
-    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+    expect(screen.getByRole('combobox', { name: 'Result destination' })).toHaveValue(
       'insert',
     );
   });
@@ -1864,7 +1864,7 @@ describe('App recent documents', () => {
     expect(
       await screen.findByRole('dialog', { name: /run a local agent/i }),
     ).toBeVisible();
-    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+    expect(screen.getByRole('combobox', { name: 'Result destination' })).toHaveValue(
       'insert',
     );
   });
@@ -1902,7 +1902,7 @@ describe('App recent documents', () => {
     fireEvent.change(screen.getByLabelText('Instruction'), {
       target: { value: 'Keep this stale instruction' },
     });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Apply result to' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: 'Result destination' }), {
       target: { value: 'document' },
     });
     expect(screen.getByText('@codex')).toBeVisible();
@@ -1920,7 +1920,7 @@ describe('App recent documents', () => {
     expect(await screen.findByLabelText('Local agent')).toHaveValue('@');
     expect(screen.getByRole('listbox', { name: 'Local agent suggestions' })).toBeVisible();
     expect(screen.getByLabelText('Instruction')).toHaveValue('');
-    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+    expect(screen.getByRole('combobox', { name: 'Result destination' })).toHaveValue(
       'insert',
     );
     expect(screen.queryByRole('button', { name: 'Remove @codex' })).toBeNull();
@@ -1962,7 +1962,7 @@ describe('App recent documents', () => {
     expect(
       await screen.findByRole('dialog', { name: /run a local agent/i }),
     ).toBeVisible();
-    expect(screen.getByRole('combobox', { name: 'Apply result to' })).toHaveValue(
+    expect(screen.getByRole('combobox', { name: 'Result destination' })).toHaveValue(
       'selection',
     );
   });
@@ -2534,13 +2534,23 @@ describe('App recent documents', () => {
     fireEvent.change(screen.getByLabelText('Instruction'), {
       target: { value: 'Rewrite the whole document' },
     });
-    fireEvent.change(screen.getByLabelText('Apply result to'), {
+    const initialTarget = screen.getByRole('combobox', {
+      name: 'Result destination',
+    });
+    expect(
+      within(initialTarget).getByRole('option', {
+        name: 'Insert at captured cursor in local-document.md',
+      }),
+    ).toBeInTheDocument();
+    fireEvent.change(initialTarget, {
       target: { value: 'document' },
     });
     fireEvent.click(
       screen.getByRole('switch', { name: 'Allow local agent processing' }),
     );
-    const run = screen.getByRole('button', { name: 'Run @claude' });
+    const run = screen.getByRole('button', {
+      name: 'Generate document proposal',
+    });
     await waitFor(() => expect(run).toBeEnabled());
     fireEvent.click(run);
 
@@ -2562,7 +2572,19 @@ describe('App recent documents', () => {
       'Rewrite the whole document',
     );
     expect(screen.getByLabelText('Instruction')).toHaveFocus();
-    expect(screen.getByLabelText('Apply result to')).toHaveValue('document');
+    const rerunTarget = screen.getByRole('combobox', {
+      name: 'Result destination',
+    });
+    expect(rerunTarget).toHaveValue('document');
+    expect(within(rerunTarget).getAllByRole('option')).toHaveLength(1);
+    expect(
+      within(rerunTarget).getByRole('option', {
+        name: 'Full-document proposal for local-document.md',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Generate document proposal' }),
+    ).toBeEnabled();
     expect(aiRunMock).not.toHaveBeenCalled();
     expect(aiRenderSelectedOperationsMock).not.toHaveBeenCalled();
     expect(aiDiscardResultMock).not.toHaveBeenCalled();

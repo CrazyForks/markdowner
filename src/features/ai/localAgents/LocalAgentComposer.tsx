@@ -36,6 +36,7 @@ export interface LocalAgentComposerServices {
 
 export interface LocalAgentComposerProps {
   snapshot: LocalAgentTargetSnapshot;
+  documentLabel: string;
   disclosureAccepted: boolean;
   preferredAgent?: LocalAgentKind | null;
   initialInstruction?: string;
@@ -58,6 +59,7 @@ const DEFAULT_SERVICES: LocalAgentComposerServices = {
 
 export function LocalAgentComposer({
   snapshot,
+  documentLabel,
   disclosureAccepted,
   preferredAgent = null,
   initialInstruction = "",
@@ -196,6 +198,13 @@ export function LocalAgentComposer({
     ? (statuses.find((status) => status.kind === selectedAgent) ?? null)
     : null;
   const trimmedInstruction = instruction.trim();
+  const resolvedDocumentLabel = documentLabel.trim() || "Untitled";
+  const targetDescription =
+    target === "document"
+      ? `The full-document proposal for ${resolvedDocumentLabel} opens in Review and remains unapplied until you choose Apply.`
+      : snapshot.kind === "selection"
+        ? `Replaces the selected text in ${resolvedDocumentLabel} only if the captured target is unchanged. The edit is applied automatically and can be undone.`
+        : `Inserts at the captured cursor in ${resolvedDocumentLabel} only if the captured target is unchanged. The edit is applied automatically and can be undone.`;
   const canRun = Boolean(
     selectedAgent &&
       selectedStatus?.compatible &&
@@ -397,7 +406,7 @@ export function LocalAgentComposer({
             Run a local agent
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Your document is not changed until you apply a completed result.
+            Review the captured destination before starting the local executable.
           </p>
         </div>
         <Button
@@ -530,10 +539,10 @@ export function LocalAgentComposer({
         </div>
 
         <div className="grid gap-1.5">
-          <Label htmlFor="local-agent-target">Apply result to</Label>
+          <Label htmlFor="local-agent-target">Result destination</Label>
           <select
             id="local-agent-target"
-            aria-label="Apply result to"
+            aria-describedby="local-agent-target-description"
             value={target}
             disabled={Boolean(runningRequestId)}
             onChange={(event) =>
@@ -541,19 +550,36 @@ export function LocalAgentComposer({
             }
             className="h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <option value={snapshot.kind}>
-              {snapshot.kind === "selection"
-                ? "Selected text"
-                : "Cursor position"}
+            {snapshot.kind !== "document" ? (
+              <option value={snapshot.kind}>
+                {snapshot.kind === "selection"
+                  ? `Replace selected text in ${resolvedDocumentLabel}`
+                  : `Insert at captured cursor in ${resolvedDocumentLabel}`}
+              </option>
+            ) : null}
+            <option value="document">
+              Full-document proposal for {resolvedDocumentLabel}
             </option>
-            <option value="document">Entire document</option>
           </select>
+          <p
+            id="local-agent-target-description"
+            className="text-xs text-muted-foreground"
+          >
+            {targetDescription}
+          </p>
         </div>
 
         <div className="space-y-1 text-xs leading-relaxed text-muted-foreground">
           <p>
-            An embedded run sends the current document snapshot without its
-            file path. Tools are disabled and Markdowner alone applies results.
+            An embedded run sends the current {resolvedDocumentLabel} snapshot
+            without its file path. Tools are disabled.
+          </p>
+          <p>
+            {target === "document"
+              ? "Markdowner opens the full-document result in Review and leaves it unapplied until you choose Apply."
+              : snapshot.kind === "selection"
+                ? "If the captured target is unchanged when the run finishes, Markdowner applies the replacement automatically as an undoable edit. Otherwise it opens in Review."
+                : "If the captured target is unchanged when the run finishes, Markdowner inserts the result automatically as an undoable edit. Otherwise it opens in Review."}
           </p>
           <p>
             The local executable may contact its configured provider and
@@ -600,7 +626,9 @@ export function LocalAgentComposer({
               disabled={!canRun}
               onClick={() => void handleRun()}
             >
-              Run {selectedAgent ? `@${selectedAgent}` : "local agent"}
+              {target === "document"
+                ? "Generate document proposal"
+                : `Run ${selectedAgent ? `@${selectedAgent}` : "local agent"}`}
             </Button>
           )}
         </div>

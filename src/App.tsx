@@ -611,11 +611,13 @@ export default function App() {
     useState('');
   const [localAgentInitialTarget, setLocalAgentInitialTarget] =
     useState<LocalAgentTargetKind | null>(null);
+  const [localAgentDocumentLabel, setLocalAgentDocumentLabel] = useState('');
   const localAgentCaptureModeRef = useRef<EditorMode | null>(null);
   const pendingLocalAgentRerunRef = useRef<{
     sourceDocumentId: string;
     snapshot: LocalAgentTargetSnapshot;
     request: LocalAgentRunRequest;
+    documentLabel: string;
   } | null>(null);
   const openLocalAgentComposerRef = useRef<
     (selection: { from: number; to: number }) => void
@@ -3718,6 +3720,7 @@ export default function App() {
       setLocalAgentPreferredAgent(pendingRerun.request.agent);
       setLocalAgentInitialInstruction(pendingRerun.request.instruction);
       setLocalAgentInitialTarget(pendingRerun.request.target);
+      setLocalAgentDocumentLabel(pendingRerun.documentLabel);
       localAgentCaptureModeRef.current = currentMode;
       setLocalAgentComposerSessionId((sessionId) => sessionId + 1);
       setLocalAgentComposerOpen(true);
@@ -3732,6 +3735,7 @@ export default function App() {
     setLocalAgentPreferredAgent(null);
     setLocalAgentInitialInstruction('');
     setLocalAgentInitialTarget(null);
+    setLocalAgentDocumentLabel('');
     localAgentCaptureModeRef.current = null;
   }, [activeTabId, currentMode]);
 
@@ -3741,6 +3745,7 @@ export default function App() {
       preferredAgent: LocalAgentKind | null = null,
       initialInstruction = '',
       initialTarget: LocalAgentTargetKind = captured.kind,
+      documentLabel?: string,
     ) => {
       setAiSelectionSnapshot(null);
       setAiSelectionPromptOpen(false);
@@ -3749,6 +3754,14 @@ export default function App() {
       setLocalAgentPreferredAgent(preferredAgent);
       setLocalAgentInitialInstruction(initialInstruction);
       setLocalAgentInitialTarget(initialTarget);
+      setLocalAgentDocumentLabel(
+        documentLabel ??
+          tabsRef.current.find(
+            (tab) => tab.id === captured.documentId && tab.kind === 'document',
+          )?.name ??
+          snapshotRef.current.activeDocumentName ??
+          'Untitled',
+      );
       localAgentCaptureModeRef.current = currentModeRef.current;
       setLocalAgentComposerSessionId((sessionId) => sessionId + 1);
       setLocalAgentComposerOpen(true);
@@ -3761,6 +3774,7 @@ export default function App() {
     setLocalAgentPreferredAgent(null);
     setLocalAgentInitialInstruction('');
     setLocalAgentInitialTarget(null);
+    setLocalAgentDocumentLabel('');
     localAgentCaptureModeRef.current = null;
     focusActiveEditor();
   });
@@ -3848,6 +3862,7 @@ export default function App() {
     setLocalAgentPreferredAgent(null);
     setLocalAgentInitialInstruction('');
     setLocalAgentInitialTarget(null);
+    setLocalAgentDocumentLabel('');
     localAgentCaptureModeRef.current = null;
     startTransition(() => {
       setTabs(nextTabs);
@@ -3939,6 +3954,7 @@ export default function App() {
         setLocalAgentPreferredAgent(null);
         setLocalAgentInitialInstruction('');
         setLocalAgentInitialTarget(null);
+        setLocalAgentDocumentLabel('');
         localAgentCaptureModeRef.current = null;
         announceShell(
           captured.kind === 'selection'
@@ -3961,7 +3977,7 @@ export default function App() {
           captured,
           request,
           result,
-          capturedDocumentTab?.name ?? 'Untitled',
+          localAgentDocumentLabel || capturedDocumentTab?.name || 'Untitled',
         );
         activateLocalAgentReview(review);
         announceShell(
@@ -6058,6 +6074,7 @@ export default function App() {
           sourceDocumentId: sourceTab.id,
           snapshot: review.localAgentContext.snapshot,
           request: review.localAgentContext.request,
+          documentLabel: review.sourceDocumentName,
         };
       }
       await switchToTab(sourceTab.id);
@@ -7467,6 +7484,7 @@ export default function App() {
         <LocalAgentComposer
           key={localAgentComposerSessionId}
           snapshot={localAgentSnapshot}
+          documentLabel={localAgentDocumentLabel || 'Untitled'}
           disclosureAccepted={settings.localAgentDisclosureAccepted}
           preferredAgent={localAgentPreferredAgent}
           initialInstruction={localAgentInitialInstruction}

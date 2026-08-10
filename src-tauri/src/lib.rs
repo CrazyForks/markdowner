@@ -2381,8 +2381,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, fs, path::Path};
     use std::sync::{Arc, Barrier};
+    use std::{collections::HashMap, fs, path::Path};
 
     use base64::Engine as _;
     use markdowner_core::{ThemeKind, storage::DraftBackupEntry};

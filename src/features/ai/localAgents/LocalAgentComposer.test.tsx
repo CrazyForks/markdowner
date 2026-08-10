@@ -88,6 +88,14 @@ const insertSnapshot: LocalAgentTargetSnapshot = {
   selectedText: "",
 };
 
+const documentSnapshot: LocalAgentTargetSnapshot = {
+  ...selectionSnapshot,
+  kind: "document",
+  characterRange: null,
+  byteRange: null,
+  selectedText: "",
+};
+
 function resultFor(request: LocalAgentRunRequest): LocalAgentRunResult {
   return {
     schemaVersion: 1,
@@ -111,6 +119,7 @@ function renderComposer(
   };
   const props = {
     snapshot: selectionSnapshot,
+    documentLabel: "meeting-notes.md",
     disclosureAccepted: true,
     preferredAgent: "codex" as const,
     onDisclosureAcceptedChange: vi.fn(),
@@ -147,6 +156,71 @@ async function waitForStatuses() {
 }
 
 describe("LocalAgentComposer", () => {
+  it("labels and describes each accessible result destination without duplicating a document target", () => {
+    renderComposer();
+
+    const selectionTarget = screen.getByRole("combobox", {
+      name: "Result destination",
+    });
+    expect(selectionTarget).toHaveAccessibleDescription(
+      "Replaces the selected text in meeting-notes.md only if the captured target is unchanged. The edit is applied automatically and can be undone.",
+    );
+    expect(
+      within(selectionTarget).getByRole("option", {
+        name: "Replace selected text in meeting-notes.md",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(selectionTarget).getByRole("option", {
+        name: "Full-document proposal for meeting-notes.md",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run @codex" })).toBeInTheDocument();
+
+    fireEvent.change(selectionTarget, { target: { value: "document" } });
+    expect(selectionTarget).toHaveAccessibleDescription(
+      "The full-document proposal for meeting-notes.md opens in Review and remains unapplied until you choose Apply.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Generate document proposal" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /opens the full-document result in Review and leaves it unapplied until you choose Apply/i,
+      ),
+    ).toBeInTheDocument();
+
+    cleanup();
+    renderComposer({ snapshot: insertSnapshot });
+    const insertTarget = screen.getByRole("combobox", {
+      name: "Result destination",
+    });
+    expect(insertTarget).toHaveAccessibleDescription(
+      "Inserts at the captured cursor in meeting-notes.md only if the captured target is unchanged. The edit is applied automatically and can be undone.",
+    );
+    expect(
+      within(insertTarget).getByRole("option", {
+        name: "Insert at captured cursor in meeting-notes.md",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/inserts the result automatically as an undoable edit/i),
+    ).toBeInTheDocument();
+
+    cleanup();
+    renderComposer({ snapshot: documentSnapshot, initialTarget: "document" });
+    const documentTarget = screen.getByRole("combobox", {
+      name: "Result destination",
+    });
+    expect(within(documentTarget).getAllByRole("option")).toHaveLength(1);
+    expect(documentTarget).toHaveValue("document");
+    expect(
+      within(documentTarget).getByRole("option", {
+        name: "Full-document proposal for meeting-notes.md",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("restores an explicit rerun instruction and target without changing fresh defaults", () => {
     renderComposer({
       snapshot: selectionSnapshot,
@@ -160,12 +234,12 @@ describe("LocalAgentComposer", () => {
       "Keep the same prompt",
     );
     expect(screen.getByLabelText("Instruction")).toHaveFocus();
-    expect(screen.getByLabelText("Apply result to")).toHaveValue("document");
+    expect(screen.getByLabelText("Result destination")).toHaveValue("document");
 
     cleanup();
     renderComposer({ snapshot: selectionSnapshot });
     expect(screen.getByLabelText("Instruction")).toHaveValue("");
-    expect(screen.getByLabelText("Apply result to")).toHaveValue("selection");
+    expect(screen.getByLabelText("Result destination")).toHaveValue("selection");
   });
 
   it("shows the fixed mention completion, keyboard selection, and incompatible status reason", async () => {
@@ -269,14 +343,14 @@ describe("LocalAgentComposer", () => {
     fireEvent.change(screen.getByLabelText("Instruction"), {
       target: { value: "Turn this into a checklist" },
     });
-    fireEvent.change(screen.getByLabelText("Apply result to"), {
+    fireEvent.change(screen.getByLabelText("Result destination"), {
       target: { value: "document" },
     });
     await chooseAgent("@claude");
     expect(screen.getByLabelText("Instruction")).toHaveValue(
       "Turn this into a checklist",
     );
-    expect(screen.getByLabelText("Apply result to")).toHaveValue("document");
+    expect(screen.getByLabelText("Result destination")).toHaveValue("document");
   });
 
   it("uses selection and insert defaults, and builds an exact immutable run request only on Run", async () => {
@@ -334,10 +408,12 @@ describe("LocalAgentComposer", () => {
     fireEvent.change(screen.getByLabelText("Instruction"), {
       target: { value: "Summarize it" },
     });
-    fireEvent.change(screen.getByLabelText("Apply result to"), {
+    fireEvent.change(screen.getByLabelText("Result destination"), {
       target: { value: "document" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Run @codex" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate document proposal" }),
+    );
     await waitFor(() => expect(documentRun).toHaveBeenCalledTimes(1));
     expect(documentRun.mock.calls[0][0]).toMatchObject({
       documentId: "doc-1",
@@ -379,7 +455,7 @@ describe("LocalAgentComposer", () => {
     const { rerender, props } = renderComposer({ disclosureAccepted: false });
     await waitForStatuses();
     expect(
-      screen.getByText(/sends the current document snapshot without its file path/i),
+      screen.getByText(/sends the current meeting-notes\.md snapshot without its file path/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/may contact its configured provider and consume/i),
@@ -388,7 +464,10 @@ describe("LocalAgentComposer", () => {
       screen.getByText(/Markdowner does not store agent credentials or estimate provider cost/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/tools are disabled and Markdowner alone applies results/i),
+      screen.getByText(/tools are disabled/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/applies the replacement automatically as an undoable edit/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/OpenCode may retain local session metadata/i),
