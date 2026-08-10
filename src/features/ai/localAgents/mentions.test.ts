@@ -27,6 +27,8 @@ function viewAt(
     parent?: string;
     ancestors?: string[];
     marks?: string[];
+    parentOffset?: number;
+    composing?: boolean;
     selection?: {
       from: number;
       to: number;
@@ -43,9 +45,10 @@ function viewAt(
     depth: ancestors.length - 1,
     node: (depth: number) => ({ type: { name: ancestors[depth] ?? "doc" } }),
     marks: () => (options.marks ?? []).map((name) => ({ type: { name } })),
-    parentOffset: position - 1,
+    parentOffset: options.parentOffset ?? position - 1,
   };
   return {
+    composing: options.composing ?? false,
     state: {
       doc: {
         textBetween: (from: number, to: number) => text.slice(from - 1, to - 1),
@@ -57,6 +60,7 @@ function viewAt(
           empty: true,
         }),
         $from,
+        $to: $from,
       },
     },
   } as unknown as Parameters<typeof isEligibleLocalAgentMentionKey>[0];
@@ -93,6 +97,23 @@ describe("local agent mentions", () => {
       from: 7,
       to: 7,
     });
+    expect(
+      isEligibleLocalAgentMentionKey(
+        viewAt("second block", 12, { parentOffset: 0 }),
+        key(),
+      ),
+    ).toEqual({ from: 12, to: 12 });
+  });
+
+  it("captures an ordinary same-block text selection at a safe boundary", () => {
+    expect(
+      isEligibleLocalAgentMentionKey(
+        viewAt(" hello", 2, {
+          selection: { from: 2, to: 7, empty: false },
+        }),
+        key(),
+      ),
+    ).toEqual({ from: 2, to: 7 });
   });
 
   it("rejects a collapsed paragraph selection inside a real table cell", () => {
@@ -147,10 +168,6 @@ describe("local agent mentions", () => {
       viewAt("", 1, { parent: "image", ancestors: ["image", "doc"] }),
     ],
     [
-      "a text range",
-      viewAt("hello", 2, { selection: { from: 1, to: 2, empty: false } }),
-    ],
-    [
       "a multi-cell table selection",
       viewAt("", 1, {
         selection: {
@@ -173,5 +190,14 @@ describe("local agent mentions", () => {
     key({ altKey: true }),
   ])("rejects composing and unsafe keyboard events", (event) => {
     expect(isEligibleLocalAgentMentionKey(viewAt("", 1), event)).toBeNull();
+  });
+
+  it("rejects @ while the ProseMirror view is composing", () => {
+    expect(
+      isEligibleLocalAgentMentionKey(
+        viewAt("", 1, { composing: true }),
+        key({ isComposing: false }),
+      ),
+    ).toBeNull();
   });
 });

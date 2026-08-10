@@ -776,19 +776,22 @@ function setEligibleLocalAgentMentionSelection(
     isTextblock: name === parentName,
   }));
   const parent = nodes[nodes.length - 1];
+  const resolvedPosition = {
+    parent,
+    parentOffset: position,
+    depth: nodes.length - 1,
+    node: (depth: number) => nodes[depth],
+    marks: () =>
+      overrides.inlineCode ? [{ type: { name: 'code' } }] : [],
+  };
   editor.state.selection = {
     from: position,
     to: position,
     anchor: position,
     head: position,
     empty: overrides.empty ?? true,
-    $from: {
-      parent,
-      depth: nodes.length - 1,
-      node: (depth: number) => nodes[depth],
-      marks: () =>
-        overrides.inlineCode ? [{ type: { name: 'code' } }] : [],
-    },
+    $from: resolvedPosition,
+    $to: resolvedPosition,
   };
   editor.view.state = editor.state;
 }

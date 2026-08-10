@@ -550,12 +550,28 @@ export function LocalAgentComposer({
           </select>
         </div>
 
+        <div className="space-y-1 text-xs leading-relaxed text-muted-foreground">
+          <p>
+            An embedded run sends the current document snapshot without its
+            file path. Tools are disabled and Markdowner alone applies results.
+          </p>
+          <p>
+            The local executable may contact its configured provider and
+            consume a subscription, credits, or API quota. Markdowner does not
+            store agent credentials or estimate provider cost.
+          </p>
+          <p>
+            OpenCode may retain local session metadata according to its
+            installation and provider configuration.
+          </p>
+        </div>
+
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
           <Label
             htmlFor="local-agent-disclosure"
             className="text-xs font-normal text-muted-foreground"
           >
-            Allow this local agent to process the selected content.
+            Allow this local agent to process the current document snapshot.
           </Label>
           <Switch
             id="local-agent-disclosure"

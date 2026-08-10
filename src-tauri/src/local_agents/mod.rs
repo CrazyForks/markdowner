@@ -591,7 +591,12 @@ impl LocalAgentState {
             let Some(run) = active.get_mut(window_label) else {
                 return false;
             };
-            if run.request_id != request_id || run.phase != ActiveRunPhase::Running {
+            if run.request_id != request_id
+                || !matches!(
+                    run.phase,
+                    ActiveRunPhase::Running | ActiveRunPhase::PostProcessing
+                )
+            {
                 return false;
             }
             run.phase = ActiveRunPhase::Cancelling;
@@ -609,7 +614,10 @@ impl LocalAgentState {
             let Some(run) = active.get_mut(window_label) else {
                 return false;
             };
-            if run.phase != ActiveRunPhase::Running {
+            if !matches!(
+                run.phase,
+                ActiveRunPhase::Running | ActiveRunPhase::PostProcessing
+            ) {
                 return false;
             }
             run.phase = ActiveRunPhase::Cancelling;
@@ -1271,8 +1279,10 @@ async fn run_registered_local_agent(
         let payload =
             parse_adapter_result(request.agent, &output.stdout, output.result_file.as_deref())
                 .map_err(|_| invalid_agent_result())?;
+        ensure_not_cancelled(cancellation)?;
         ensure_before_deadline(deadline)?;
         let result = validate_agent_payload(request, payload);
+        ensure_not_cancelled(cancellation)?;
         ensure_before_deadline(deadline)?;
         result
     })();
@@ -1704,7 +1714,7 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_wins_before_post_processing_or_is_rejected_after_it_starts() {
+    fn cancellation_wins_before_and_during_post_processing() {
         let cancelled_state = LocalAgentState::default();
         let cancelled = cancelled_state.begin("main", "cancel-first").unwrap();
         assert!(cancelled_state.cancel("main", "cancel-first"));
@@ -1727,9 +1737,10 @@ mod tests {
             "validate-first",
             validating.generation(),
         ));
-        assert!(!validating_state.cancel("main", "validate-first"));
+        assert!(validating_state.cancel("main", "validate-first"));
+        assert!(validating.cancellation_token().is_cancelled());
         assert!(
-            validating_state
+            !validating_state
                 .enter_terminal("main", "validate-first", validating.generation())
                 .unwrap()
                 .outcome_won()

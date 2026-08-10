@@ -378,6 +378,21 @@ describe("LocalAgentComposer", () => {
   it("requires disclosure, compatibility, prompt, and an idle request before it can run", async () => {
     const { rerender, props } = renderComposer({ disclosureAccepted: false });
     await waitForStatuses();
+    expect(
+      screen.getByText(/sends the current document snapshot without its file path/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/may contact its configured provider and consume/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Markdowner does not store agent credentials or estimate provider cost/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/tools are disabled and Markdowner alone applies results/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/OpenCode may retain local session metadata/i),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run @codex" })).toBeDisabled();
     fireEvent.click(
       screen.getByRole("switch", { name: "Allow local agent processing" }),

@@ -153,6 +153,9 @@ describe('LocalAgentSettings', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Allow local agent processing' }));
     expect(onDisclosureAcceptedChange).toHaveBeenCalledWith(true);
     expect(screen.getByText(/may contact its configured provider and consume quota/i)).toBeInTheDocument();
+    expect(screen.getByText(/sends the current document snapshot without its file path/i)).toBeInTheDocument();
+    expect(screen.getByText(/Markdowner does not store agent credentials or estimate provider cost/i)).toBeInTheDocument();
+    expect(screen.getByText(/tools are disabled and Markdowner alone applies results/i)).toBeInTheDocument();
     expect(screen.getByText(/OpenCode may retain local session metadata/i)).toBeInTheDocument();
   });
 

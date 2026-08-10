@@ -149,6 +149,11 @@ export function LocalAgentSettings({
           The local executable may contact its configured provider and consume quota under that
           provider&apos;s account and policies.
         </p>
+        <p>
+          An embedded run sends the current document snapshot without its file path. Tools are
+          disabled and Markdowner alone applies results.
+        </p>
+        <p>Markdowner does not store agent credentials or estimate provider cost.</p>
         <p>OpenCode may retain local session metadata according to its installation settings.</p>
       </div>
 
