@@ -480,12 +480,13 @@ describe("LocalAgentComposer", () => {
     await act(async () => pending.resolve(resultFor(run.mock.calls[0][0])));
   });
 
-  it("keeps a confirmed cancellation active until the run settles and ignores late callbacks", async () => {
+  it("clears a failed cancellation error while a retry waits for run settlement", async () => {
     const pending = deferred<LocalAgentRunResult>();
+    const retryCancel = deferred<boolean>();
     const cancel = vi
       .fn()
       .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+      .mockReturnValueOnce(retryCancel.promise);
     let onEvent: ((event: LocalAgentStreamEvent) => void) | undefined;
     const run = vi
       .fn()
@@ -522,6 +523,7 @@ describe("LocalAgentComposer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel local agent" }));
     await waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
     expect(screen.getByText("Cancelling local agent…")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(
       screen.getByRole("button", { name: "Close local agent" }),
     ).toBeDisabled();
@@ -530,6 +532,15 @@ describe("LocalAgentComposer", () => {
     ).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Run @codex" })).toBeNull();
     expect(run).toHaveBeenCalledTimes(1);
+
+    await act(async () => retryCancel.resolve(true));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Close local agent" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Cancel local agent" }),
+    ).toBeDisabled();
 
     onEvent?.({
       type: "failed",

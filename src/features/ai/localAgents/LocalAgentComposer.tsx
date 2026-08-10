@@ -335,6 +335,9 @@ export function LocalAgentComposer({
     };
     cancelAttemptRef.current = attempt;
     setCancellingRequestId(requestId);
+    if (error === "Could not cancel local agent.") {
+      setError("");
+    }
     setLifecycleStatus("Cancelling local agent…");
     try {
       const cancelled = await (activeCancelRef.current ?? services.cancel)(
