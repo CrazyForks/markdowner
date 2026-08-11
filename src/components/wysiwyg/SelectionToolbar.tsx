@@ -49,6 +49,7 @@ export function SelectionToolbar({
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState<Position>({ top: 0, left: 0 });
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const aiSelectionRef = useRef<{ from: number; to: number } | null>(null);
 
   const computePosition = useCallback((): Position | null => {
     if (!editor) return null;
@@ -91,11 +92,17 @@ export function SelectionToolbar({
 
     if (!Number.isFinite(top) || !Number.isFinite(left)) return null;
 
+    aiSelectionRef.current = { from, to };
+
     return {
       top: top - TOOLBAR_OFFSET_PX,
       left,
     };
   }, [editor]);
+
+  useEffect(() => {
+    aiSelectionRef.current = null;
+  }, [editor, enabled]);
 
   // Track active selection. We listen to both ProseMirror updates and native
   // selectionchange to catch mouse-drag releases that don't always emit a
@@ -256,9 +263,8 @@ export function SelectionToolbar({
             label="AI actions"
             active={false}
             onClick={() => {
-              if (!editor) return;
-              const { from, to } = editor.state.selection;
-              if (from !== to) onAiSelection({ from, to });
+              const selection = aiSelectionRef.current;
+              if (selection) onAiSelection(selection);
             }}
           >
             <Sparkles className="size-4" />

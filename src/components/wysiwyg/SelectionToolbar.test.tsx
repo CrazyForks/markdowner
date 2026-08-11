@@ -6,6 +6,8 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import { Editor } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { subscribeEditorEvent } from '@/lib/editorEvents';
@@ -137,6 +139,39 @@ describe('SelectionToolbar', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'AI actions' }));
 
     expect(onAiSelection).toHaveBeenCalledWith({ from: 2, to: 6 });
+  });
+
+  it('retains the exact Tiptap range when the live selection collapses before click', async () => {
+    const editor = new Editor({
+      element: document.createElement('div'),
+      extensions: [StarterKit],
+      content: '<p>alpha beta</p>',
+    });
+    vi.spyOn(editor.view, 'coordsAtPos').mockReturnValue({
+      top: 80,
+      bottom: 100,
+      left: 40,
+      right: 60,
+    });
+    vi.spyOn(editor.view, 'hasFocus').mockReturnValue(true);
+    const onAiSelection = vi.fn();
+
+    render(
+      <SelectionToolbar editor={editor} onAiSelection={onAiSelection} />,
+    );
+    act(() => {
+      editor.commands.setTextSelection({ from: 2, to: 6 });
+    });
+
+    const button = await screen.findByRole('button', { name: 'AI actions' });
+    fireEvent.mouseDown(button);
+    act(() => {
+      editor.commands.setTextSelection(6);
+    });
+    fireEvent.click(button);
+
+    expect(onAiSelection).toHaveBeenCalledWith({ from: 2, to: 6 });
+    editor.destroy();
   });
 
   it('requests explicit link editing without applying a placeholder mark', async () => {

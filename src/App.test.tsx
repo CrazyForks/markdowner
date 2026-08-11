@@ -1743,6 +1743,41 @@ describe('App recent documents', () => {
     );
   });
 
+  it('announces when a WYSIWYG AI selection cannot be captured', async () => {
+    const source = 'alpha beta';
+    const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);
+    tiptapMockState.editor = editor;
+    bootstrapMock.mockResolvedValue(
+      baseSnapshot({
+        activeDocumentName: 'selection.md',
+        activeDocumentPath: '/tmp/project/selection.md',
+        activeDocumentSource: source,
+        mode: 'Wysiwyg',
+      }),
+    );
+
+    const { default: App } = await import('./App');
+    render(<App />);
+
+    await screen.findByTestId('mock-tiptap-editor');
+    await waitFor(() => {
+      expect(editor.on).toHaveBeenCalledWith('selectionUpdate', expect.any(Function));
+    });
+    act(() => {
+      editor.commands.setTextSelection({ from: 99, to: 100 });
+      editor.emit('selectionUpdate');
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'AI actions' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('shell-live-region')).toHaveTextContent(
+        'The selected text could not be captured. Select it again and retry.',
+      );
+    });
+    expect(screen.queryByTestId('ai-selection-popover')).toBeNull();
+  });
+
   it('opens a local agent mention at an eligible WYSIWYG caret without inserting @', async () => {
     const source = 'hello ';
     const editor = createMockTiptapEditor(source, [{ text: source, from: 0 }]);

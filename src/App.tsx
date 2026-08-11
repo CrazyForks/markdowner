@@ -4038,6 +4038,9 @@ export default function App() {
           tab.id === activeTabIdRef.current && tab.kind === 'document',
       );
       if (!editor || !activeDocumentTab || selection.from === selection.to) {
+        announceShell(
+          'The selected text could not be captured. Select it again and retry.',
+        );
         return;
       }
       const source = flushWysiwygDraftNow() ?? localDraftRef.current;
@@ -4049,7 +4052,12 @@ export default function App() {
         proseMirrorTo: selection.to,
         documentId: activeDocumentTab.id,
       });
-      if (!captured) return;
+      if (!captured) {
+        announceShell(
+          'The selected text could not be captured. Select it again and retry.',
+        );
+        return;
+      }
       setAiSelectionSnapshot(captured);
       setAiSelectionAnchor(null);
       setAiSelectionPromptOpen(true);

@@ -62,12 +62,14 @@ describe('AiSelectionPopover', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Prompt for selected text'), {
+    const prompt = screen.getByLabelText('Prompt for selected text');
+    expect(prompt).toHaveFocus();
+    fireEvent.change(prompt, {
       target: { value: 'Make this uppercase' },
     });
     const runButton = screen.getByRole('button', { name: 'Run on selection' });
     await waitFor(() => expect(runButton).toBeEnabled());
-    fireEvent.click(runButton);
+    fireEvent.keyDown(prompt, { key: 'Enter' });
 
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
     expect(run.mock.calls[0][0]).toMatchObject({
@@ -78,6 +80,74 @@ describe('AiSelectionPopover', () => {
       instruction: 'Make this uppercase',
     });
     expect(onResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Shift+Enter for multiline input and ignores IME Enter events', async () => {
+    const snapshot = captureSourceSelection('alpha beta', 6, 10, 'doc-1');
+    if (!snapshot) throw new Error('selection required');
+    const run = vi.fn(async (request) => ({
+      requestId: request.requestId,
+      documentId: request.documentId,
+      task: request.task,
+      model: request.model,
+      generationId: null,
+      result: null,
+      validationIssues: [],
+      rawDiagnostic: null,
+      usage: null,
+      retryAfterSeconds: null,
+    }));
+
+    render(
+      <AiSelectionPopover
+        snapshot={snapshot}
+        settings={{
+          ...DEFAULT_SETTINGS,
+          aiCloudDisclosureAccepted: true,
+        }}
+        onClose={vi.fn()}
+        onResult={vi.fn()}
+        services={{
+          keyStatus: vi.fn(async () => ({
+            configured: true,
+            maskedLabel: 'sk-or-…test',
+          })),
+          listModels: vi.fn(async () => [
+            {
+              id: DEFAULT_SETTINGS.aiCustomPromptModel,
+              name: 'Default model',
+              description: null,
+              contextLength: 131_072,
+              inputModalities: ['text'],
+              outputModalities: ['text'],
+              supportedParameters: ['structured_outputs'],
+              pricing: {
+                prompt: 0.0000001,
+                completion: 0.0000001,
+                updatedAt: '2026-07-31T00:00:00Z',
+              },
+            },
+          ]),
+          run,
+          cancel: vi.fn(async () => true),
+        }}
+      />,
+    );
+
+    const prompt = screen.getByLabelText('Prompt for selected text');
+    fireEvent.change(prompt, { target: { value: 'First line' } });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Run on selection' })).toBeEnabled();
+    });
+
+    expect(fireEvent.keyDown(prompt, { key: 'Enter', shiftKey: true })).toBe(true);
+    fireEvent.change(prompt, { target: { value: 'First line\nSecond line' } });
+    expect(prompt).toHaveValue('First line\nSecond line');
+    fireEvent.keyDown(prompt, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(prompt, { key: 'Enter', keyCode: 229 });
+    fireEvent.keyDown(prompt, { key: 'Process' });
+
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('closes with Escape before a request starts', async () => {

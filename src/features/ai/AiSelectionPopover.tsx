@@ -75,6 +75,10 @@ export function AiSelectionPopover({
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
+    promptRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     services
       .keyStatus()
@@ -243,6 +247,18 @@ export function AiSelectionPopover({
             onChange={(event) => {
               setPrompt(event.target.value);
               setActionId('custom');
+            }}
+            onKeyDown={(event) => {
+              if (
+                event.key !== 'Enter' ||
+                event.shiftKey ||
+                event.nativeEvent.isComposing ||
+                event.keyCode === 229
+              ) {
+                return;
+              }
+              event.preventDefault();
+              void handleRun();
             }}
             placeholder="Describe how to transform only this selection…"
             className="w-full resize-y rounded-md border border-input bg-background px-2 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
