@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { configDefaults } from 'vitest/config';
 
 const pkg = JSON.parse(
   readFileSync(path.resolve(__dirname, './package.json'), 'utf-8'),
@@ -28,5 +29,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    exclude: [...configDefaults.exclude, '.worktrees/**'],
   },
 });
