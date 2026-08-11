@@ -112,7 +112,7 @@ registry source.
 Run:
 
 ```bash
-pnpm exec vitest run --maxWorkers=1 \
+pnpm exec vitest run --maxWorkers=1 --exclude '.worktrees/**' \
   src/features/ai/model.test.ts \
   src/features/ai/OpenRouterSettings.test.tsx
 ```
