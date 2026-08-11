@@ -32,11 +32,11 @@ function model(overrides: Partial<AiModel>): AiModel {
 }
 
 describe('AI model policy', () => {
-  it('uses GLM by default and pins the curated popular model catalog', () => {
-    expect(DEFAULT_AI_MODEL).toBe('z-ai/glm-5.2');
+  it('uses Solar Pro 4 by default and pins the curated popular model catalog', () => {
+    expect(DEFAULT_AI_MODEL).toBe('upstage/solar-pro4');
     expect(PINNED_AI_MODELS).toEqual([
-      'z-ai/glm-5.2',
       'upstage/solar-pro4',
+      'z-ai/glm-5.2',
       'moonshotai/kimi-k3',
       'deepseek/deepseek-v4-flash-0731',
       'google/gemini-3.6-flash',

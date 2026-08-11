@@ -478,12 +478,13 @@ describe('inline style color settings', () => {
 });
 
 describe('AI settings', () => {
-  it('defaults every AI task to GLM with Korean translation and ZDR enabled', () => {
+  it('defaults every AI task to Solar Pro 4 with migration version 1', () => {
     expect(DEFAULT_SETTINGS).toMatchObject({
-      aiPrdModel: 'z-ai/glm-5.2',
-      aiSummaryModel: 'z-ai/glm-5.2',
-      aiTranslationModel: 'z-ai/glm-5.2',
-      aiCustomPromptModel: 'z-ai/glm-5.2',
+      aiModelDefaultsVersion: 1,
+      aiPrdModel: 'upstage/solar-pro4',
+      aiSummaryModel: 'upstage/solar-pro4',
+      aiTranslationModel: 'upstage/solar-pro4',
+      aiCustomPromptModel: 'upstage/solar-pro4',
       aiSummaryTargetLanguage: 'source',
       aiTranslationTargetLanguage: 'en',
       aiZdrOnly: true,
@@ -511,10 +512,11 @@ describe('AI settings', () => {
 
     await expect(loadSettings()).resolves.toMatchObject({
       autoSave: true,
-      aiPrdModel: 'z-ai/glm-5.2',
-      aiSummaryModel: 'z-ai/glm-5.2',
+      aiModelDefaultsVersion: 1,
+      aiPrdModel: 'upstage/solar-pro4',
+      aiSummaryModel: 'upstage/solar-pro4',
       aiTranslationModel: 'moonshotai/kimi-k3',
-      aiCustomPromptModel: 'z-ai/glm-5.2',
+      aiCustomPromptModel: 'upstage/solar-pro4',
       aiSummaryTargetLanguage: 'source',
       aiTranslationTargetLanguage: 'en',
       aiZdrOnly: true,
@@ -522,6 +524,77 @@ describe('AI settings', () => {
       aiDefaultScope: 'document',
       aiHistoryEnabled: true,
     });
+  });
+
+  it('migrates each legacy GLM task field independently and persists once', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return {
+          aiPrdModel: 'z-ai/glm-5.2',
+          aiSummaryModel: 'moonshotai/kimi-k3',
+          aiTranslationModel: 'z-ai/glm-5.2',
+          aiCustomPromptModel: 'vendor/custom',
+        };
+      }
+      return undefined;
+    });
+
+    await expect(loadSettings()).resolves.toMatchObject({
+      aiModelDefaultsVersion: 1,
+      aiPrdModel: 'upstage/solar-pro4',
+      aiSummaryModel: 'moonshotai/kimi-k3',
+      aiTranslationModel: 'upstage/solar-pro4',
+      aiCustomPromptModel: 'vendor/custom',
+    });
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(invokeMock).toHaveBeenLastCalledWith('save_settings', {
+      settings: expect.objectContaining({
+        aiModelDefaultsVersion: 1,
+        aiPrdModel: 'upstage/solar-pro4',
+        aiSummaryModel: 'moonshotai/kimi-k3',
+        aiTranslationModel: 'upstage/solar-pro4',
+        aiCustomPromptModel: 'vendor/custom',
+      }),
+    });
+  });
+
+  it('preserves an intentional current-version GLM choice without migration save', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      aiModelDefaultsVersion: 1,
+      aiPrdModel: 'z-ai/glm-5.2',
+    });
+
+    await expect(loadSettings()).resolves.toMatchObject({
+      aiModelDefaultsVersion: 1,
+      aiPrdModel: 'z-ai/glm-5.2',
+    });
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith('load_settings');
+  });
+
+  it('returns migrated settings when persisting the migration fails', async () => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_settings') {
+        return { aiPrdModel: 'z-ai/glm-5.2' };
+      }
+      throw new Error('disk unavailable');
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(loadSettings()).resolves.toMatchObject({
+      aiModelDefaultsVersion: 1,
+      aiPrdModel: 'upstage/solar-pro4',
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      'Failed to migrate AI model defaults:',
+      expect.any(Error),
+    );
+
+    consoleError.mockRestore();
   });
 
   it('keeps local-agent disclosure separate while migrating malformed persisted values', async () => {

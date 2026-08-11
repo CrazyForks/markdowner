@@ -124,6 +124,7 @@ export interface Settings extends InlineStyleColorSettings {
    * basename, anywhere in the tree). `.git` is always hidden regardless.
    */
   ignoreList: string[];
+  aiModelDefaultsVersion: number;
   aiPrdModel: string;
   aiSummaryModel: string;
   aiTranslationModel: string;
@@ -179,7 +180,15 @@ export interface CtrlGLauncherActionResult {
 }
 
 export const CLI_BINARY_INSTALL_PATH = '/usr/local/bin/mdner';
-export const DEFAULT_AI_MODEL = 'z-ai/glm-5.2';
+export const DEFAULT_AI_MODEL = 'upstage/solar-pro4';
+export const AI_MODEL_DEFAULTS_VERSION = 1;
+const LEGACY_DEFAULT_AI_MODEL = 'z-ai/glm-5.2';
+const AI_MODEL_SETTING_KEYS = [
+  'aiPrdModel',
+  'aiSummaryModel',
+  'aiTranslationModel',
+  'aiCustomPromptModel',
+] as const;
 
 export function defaultAiTranslationTargetLanguage(
   locale = typeof navigator === 'undefined' ? '' : navigator.language,
@@ -264,6 +273,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultAppPromptSeen: false,
   keybindingOverrides: {},
   ignoreList: [...DEFAULT_IGNORE_LIST],
+  aiModelDefaultsVersion: AI_MODEL_DEFAULTS_VERSION,
   aiPrdModel: DEFAULT_AI_MODEL,
   aiSummaryModel: DEFAULT_AI_MODEL,
   aiTranslationModel: DEFAULT_AI_MODEL,
@@ -426,8 +436,21 @@ export function resolveCodeBlockTheme(settings: Settings, themeKind: ThemeKind):
     : normalizedTheme;
 }
 
-function normalizeSettings(value: Partial<Settings> | null | undefined): Settings {
+function normalizeSettings(value: Partial<Settings> | null | undefined): {
+  settings: Settings;
+  migratedAiModelDefaults: boolean;
+} {
+  const rawAiModelDefaultsVersion = value?.aiModelDefaultsVersion;
+  const storedAiModelDefaultsVersion =
+    typeof rawAiModelDefaultsVersion === 'number' &&
+    Number.isInteger(rawAiModelDefaultsVersion) &&
+    rawAiModelDefaultsVersion >= 0
+      ? rawAiModelDefaultsVersion
+      : 0;
+  const migratedAiModelDefaults =
+    storedAiModelDefaultsVersion < AI_MODEL_DEFAULTS_VERSION;
   const merged = { ...DEFAULT_SETTINGS, ...(value ?? {}) };
+  merged.aiModelDefaultsVersion = storedAiModelDefaultsVersion;
   merged.editorFontSize = normalizeEditorFontSize(merged.editorFontSize);
   if (!Number.isFinite(merged.editorLineHeight) || merged.editorLineHeight <= 0) {
     merged.editorLineHeight = DEFAULT_SETTINGS.editorLineHeight;
@@ -551,12 +574,7 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
   if (typeof merged.defaultAppPromptSeen !== 'boolean') {
     merged.defaultAppPromptSeen = DEFAULT_SETTINGS.defaultAppPromptSeen;
   }
-  for (const key of [
-    'aiPrdModel',
-    'aiSummaryModel',
-    'aiTranslationModel',
-    'aiCustomPromptModel',
-  ] as const) {
+  for (const key of AI_MODEL_SETTING_KEYS) {
     const value = merged[key];
     if (
       typeof value !== 'string' ||
@@ -569,6 +587,14 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
     } else {
       merged[key] = value.trim();
     }
+  }
+  if (migratedAiModelDefaults) {
+    for (const key of AI_MODEL_SETTING_KEYS) {
+      if (merged[key] === LEGACY_DEFAULT_AI_MODEL) {
+        merged[key] = DEFAULT_AI_MODEL;
+      }
+    }
+    merged.aiModelDefaultsVersion = AI_MODEL_DEFAULTS_VERSION;
   }
   if (
     typeof merged.aiSummaryTargetLanguage !== 'string' ||
@@ -616,11 +642,14 @@ function normalizeSettings(value: Partial<Settings> | null | undefined): Setting
     paperHeightMm: merged.pdfPaperHeightMm,
   });
   return {
-    ...merged,
-    pdfPaperSize: paper.paperSize,
-    pdfPaperOrientation: paper.paperOrientation,
-    pdfPaperWidthMm: paper.paperWidthMm,
-    pdfPaperHeightMm: paper.paperHeightMm,
+    migratedAiModelDefaults,
+    settings: {
+      ...merged,
+      pdfPaperSize: paper.paperSize,
+      pdfPaperOrientation: paper.paperOrientation,
+      pdfPaperWidthMm: paper.paperWidthMm,
+      pdfPaperHeightMm: paper.paperHeightMm,
+    },
   };
 }
 
@@ -662,7 +691,15 @@ function normalizeKeybindingOverrides(value: unknown): Record<string, string> {
 export async function loadSettings(): Promise<Settings> {
   try {
     const result = await invoke<Partial<Settings> | null | undefined>('load_settings');
-    return normalizeSettings(result);
+    const normalized = normalizeSettings(result);
+    if (normalized.migratedAiModelDefaults) {
+      try {
+        await invoke('save_settings', { settings: normalized.settings });
+      } catch (error) {
+        console.error('Failed to migrate AI model defaults:', error);
+      }
+    }
+    return normalized.settings;
   } catch (error) {
     console.error('Failed to load settings:', error);
     return { ...DEFAULT_SETTINGS };
@@ -671,7 +708,7 @@ export async function loadSettings(): Promise<Settings> {
 
 export async function saveSettings(settings: Settings): Promise<void> {
   try {
-    await invoke('save_settings', { settings: normalizeSettings(settings) });
+    await invoke('save_settings', { settings: normalizeSettings(settings).settings });
   } catch (error) {
     console.error('Failed to save settings:', error);
   }

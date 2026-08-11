@@ -6,10 +6,10 @@ import { OpenRouterSettings } from './OpenRouterSettings';
 afterEach(() => cleanup());
 
 const defaultProps = {
-  prdModel: 'z-ai/glm-5.2',
-  summaryModel: 'z-ai/glm-5.2',
-  translationModel: 'z-ai/glm-5.2',
-  customPromptModel: 'z-ai/glm-5.2',
+  prdModel: 'upstage/solar-pro4',
+  summaryModel: 'upstage/solar-pro4',
+  translationModel: 'upstage/solar-pro4',
+  customPromptModel: 'upstage/solar-pro4',
   summaryTargetLanguage: 'source',
   translationTargetLanguage: 'ko',
   defaultScope: 'document' as const,
@@ -43,8 +43,8 @@ describe('OpenRouterSettings', () => {
     );
 
     const expectedModels = [
-      'z-ai/glm-5.2',
       'upstage/solar-pro4',
+      'z-ai/glm-5.2',
       'moonshotai/kimi-k3',
       'deepseek/deepseek-v4-flash-0731',
       'google/gemini-3.6-flash',
@@ -91,7 +91,7 @@ describe('OpenRouterSettings', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Summary default model')).toHaveValue('z-ai/glm-5.2');
+    expect(screen.getByLabelText('Summary default model')).toHaveValue('upstage/solar-pro4');
     expect(screen.getByLabelText('Summary language')).toHaveValue('source');
 
     fireEvent.change(screen.getByLabelText('Summary default model'), {

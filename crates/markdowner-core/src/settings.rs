@@ -4,7 +4,12 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::EditorMode;
 
-pub const DEFAULT_AI_MODEL: &str = "z-ai/glm-5.2";
+pub const DEFAULT_AI_MODEL: &str = "upstage/solar-pro4";
+pub const AI_MODEL_DEFAULTS_VERSION: u32 = 1;
+
+fn legacy_ai_model_defaults_version() -> u32 {
+    0
+}
 
 fn deserialize_bool_or_false<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
@@ -204,6 +209,8 @@ pub struct Settings {
     /// Folder names hidden from the workspace file tree (matched by exact
     /// basename, anywhere in the tree). `.git` is always hidden regardless.
     pub ignore_list: Vec<String>,
+    #[serde(default = "legacy_ai_model_defaults_version")]
+    pub ai_model_defaults_version: u32,
     #[serde(deserialize_with = "deserialize_ai_model")]
     pub ai_prd_model: String,
     #[serde(deserialize_with = "deserialize_ai_model")]
@@ -277,6 +284,7 @@ impl Default for Settings {
             default_app_prompt_seen: false,
             keybinding_overrides: BTreeMap::new(),
             ignore_list: crate::storage::default_ignore_list(),
+            ai_model_defaults_version: AI_MODEL_DEFAULTS_VERSION,
             ai_prd_model: DEFAULT_AI_MODEL.to_string(),
             ai_summary_model: DEFAULT_AI_MODEL.to_string(),
             ai_translation_model: DEFAULT_AI_MODEL.to_string(),
@@ -690,9 +698,10 @@ mod tests {
         }))
         .expect("settings parse");
 
-        assert_eq!(parsed.ai_prd_model, "z-ai/glm-5.2");
-        assert_eq!(parsed.ai_summary_model, "z-ai/glm-5.2");
-        assert_eq!(parsed.ai_translation_model, "z-ai/glm-5.2");
+        assert_eq!(parsed.ai_model_defaults_version, 0);
+        assert_eq!(parsed.ai_prd_model, "upstage/solar-pro4");
+        assert_eq!(parsed.ai_summary_model, "upstage/solar-pro4");
+        assert_eq!(parsed.ai_translation_model, "upstage/solar-pro4");
         assert_eq!(parsed.ai_custom_prompt_model, "vendor/model");
         assert_eq!(parsed.ai_summary_target_language, "source");
         assert_eq!(parsed.ai_translation_target_language, "en");
@@ -703,9 +712,10 @@ mod tests {
         assert!(parsed.auto_save);
 
         let serialized = serde_json::to_value(parsed).expect("settings serialize");
-        assert_eq!(serialized["aiPrdModel"], "z-ai/glm-5.2");
-        assert_eq!(serialized["aiSummaryModel"], "z-ai/glm-5.2");
-        assert_eq!(serialized["aiTranslationModel"], "z-ai/glm-5.2");
+        assert_eq!(serialized["aiModelDefaultsVersion"], 0);
+        assert_eq!(serialized["aiPrdModel"], "upstage/solar-pro4");
+        assert_eq!(serialized["aiSummaryModel"], "upstage/solar-pro4");
+        assert_eq!(serialized["aiTranslationModel"], "upstage/solar-pro4");
         assert_eq!(serialized["aiCustomPromptModel"], "vendor/model");
         assert_eq!(serialized["aiSummaryTargetLanguage"], "source");
         assert_eq!(serialized["aiTranslationTargetLanguage"], "en");
@@ -713,6 +723,24 @@ mod tests {
         assert_eq!(serialized["aiCloudDisclosureAccepted"], true);
         assert_eq!(serialized["aiDefaultScope"], "document");
         assert_eq!(serialized["aiHistoryEnabled"], true);
+    }
+
+    #[test]
+    fn new_ai_defaults_use_solar_while_legacy_version_is_zero() {
+        let defaults = Settings::default();
+        assert_eq!(defaults.ai_model_defaults_version, 1);
+        assert_eq!(defaults.ai_prd_model, "upstage/solar-pro4");
+        assert_eq!(defaults.ai_summary_model, "upstage/solar-pro4");
+        assert_eq!(defaults.ai_translation_model, "upstage/solar-pro4");
+        assert_eq!(defaults.ai_custom_prompt_model, "upstage/solar-pro4");
+
+        let legacy: Settings = serde_json::from_str(
+            r#"{"aiPrdModel":"z-ai/glm-5.2","aiCustomPromptModel":"vendor/custom"}"#,
+        )
+        .expect("legacy settings parse");
+        assert_eq!(legacy.ai_model_defaults_version, 0);
+        assert_eq!(legacy.ai_prd_model, "z-ai/glm-5.2");
+        assert_eq!(legacy.ai_custom_prompt_model, "vendor/custom");
     }
 
     #[test]
