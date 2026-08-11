@@ -42,12 +42,9 @@ describe('OpenRouterSettings', () => {
       />,
     );
 
-    const summaryModels = Array.from(
-      (screen.getByLabelText('Summary default model') as HTMLSelectElement).options,
-      (option) => option.value,
-    );
-    expect(summaryModels).toEqual([
+    const expectedModels = [
       'z-ai/glm-5.2',
+      'upstage/solar-pro4',
       'moonshotai/kimi-k3',
       'deepseek/deepseek-v4-flash-0731',
       'google/gemini-3.6-flash',
@@ -55,7 +52,20 @@ describe('OpenRouterSettings', () => {
       'anthropic/claude-sonnet-4.6',
       'openai/gpt-oss-120b',
       'x-ai/grok-4.5',
-    ]);
+    ];
+
+    for (const label of [
+      'PRD default model',
+      'Summary default model',
+      'Translation default model',
+      'Custom prompt default model',
+    ]) {
+      const values = Array.from(
+        (screen.getByLabelText(label) as HTMLSelectElement).options,
+        (option) => option.value,
+      );
+      expect(values).toEqual(expectedModels);
+    }
   });
 
   it('changes Summary defaults without changing Translation language', async () => {

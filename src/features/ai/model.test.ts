@@ -36,6 +36,7 @@ describe('AI model policy', () => {
     expect(DEFAULT_AI_MODEL).toBe('z-ai/glm-5.2');
     expect(PINNED_AI_MODELS).toEqual([
       'z-ai/glm-5.2',
+      'upstage/solar-pro4',
       'moonshotai/kimi-k3',
       'deepseek/deepseek-v4-flash-0731',
       'google/gemini-3.6-flash',
@@ -59,6 +60,13 @@ describe('AI model policy', () => {
     expect(options.slice(0, PINNED_AI_MODELS.length).map((entry) => entry.id)).toEqual(
       PINNED_AI_MODELS,
     );
+    expect(options.find((entry) => entry.id === 'upstage/solar-pro4')).toMatchObject({
+      name: 'Solar Pro 4',
+      contextLength: 524_288,
+      supportedParameters: ['response_format', 'structured_outputs'],
+      pinned: true,
+      enabled: true,
+    });
     expect(options.find((entry) => entry.id === 'openai/gpt-oss-120b')).toMatchObject({
       contextLength: 131_072,
       pinned: true,

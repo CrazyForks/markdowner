@@ -12,6 +12,11 @@ export type { AiModel, AiModelOption, AiScope, AiTask } from './types';
 export const DEFAULT_AI_MODEL = 'z-ai/glm-5.2';
 export const PINNED_AI_MODEL_CHOICES = [
   { id: DEFAULT_AI_MODEL, label: 'GLM 5.2', contextLength: 1_048_576 },
+  {
+    id: 'upstage/solar-pro4',
+    label: 'Solar Pro 4',
+    contextLength: 524_288,
+  },
   { id: 'moonshotai/kimi-k3', label: 'Kimi K3', contextLength: 1_048_576 },
   {
     id: 'deepseek/deepseek-v4-flash-0731',
